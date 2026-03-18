@@ -30,10 +30,6 @@ alembic==1.13.1
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 
-# --- Task Queue ---
-celery==5.4.0
-redis==5.0.4
-
 # --- HTTP (news filter, calendar) ---
 httpx==0.27.0
 

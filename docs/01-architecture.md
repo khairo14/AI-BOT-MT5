@@ -106,13 +106,13 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 | Reinforcement Learning | `stable-baselines3` or custom RL loop |
 | Signal Confidence Scoring | `scikit-learn` classifier |
 | Backend API | `FastAPI` + `WebSocket` |
-| Task Queue | `Celery` + `Redis` |
+| Task Queue | `asyncio` background tasks (built into FastAPI) |
 | Frontend | `Next.js` + TypeScript |
 | Charts | TradingView Lightweight Charts |
 | Real-time Feed | WebSocket (MT5 ticks → FastAPI → UI) |
 | Database | `PostgreSQL` |
 | Auth | JWT |
-| Deployment | Docker Compose |
+| Deployment | `start.ps1` / `stop.ps1` — Windows-native launcher |
 
 ---
 
@@ -146,7 +146,9 @@ AI-BOT-MT5/
 │   ├── rl_agent.py               # Reinforcement learning agent
 │   └── signal_scorer.py         # Confidence scoring per signal
 ├── api/
-│   ├── main.py                   # FastAPI entry point
+│   ├── main.py                   # FastAPI entry point + lifespan
+│   ├── signal_bus.py             # Singleton signal queue + auto/manual execution
+│   ├── runner_loop.py            # Background asyncio loop — runs strategies on schedule
 │   ├── routes/
 │   │   ├── account.py
 │   │   ├── trades.py
@@ -172,12 +174,13 @@ AI-BOT-MT5/
 │   └── AIBotScalper.mq5          # Expert Advisor for scalping execution
 ├── data/                         # Historical OHLCV, ML training sets
 ├── db/                           # PostgreSQL models + Alembic migrations
-├── workers/                      # Celery task workers
 ├── config/
 │   ├── symbols.json              # Symbol list per trading type
 │   ├── strategies.json           # Active strategy per mode/symbol
-│   └── risk.json                 # Risk parameters
-└── docker-compose.yml
+│   ├── risk.json                 # Risk parameters
+│   └── app.json                  # Execution mode per trading type (manual/auto)
+├── start.ps1                     # 1-click launcher: API + dashboard
+└── stop.ps1                      # Kills all processes
 ```
 
 ---
@@ -186,22 +189,22 @@ AI-BOT-MT5/
 
 | Phase | Deliverable | Status |
 |---|---|---|
-| 1 | MT5 connection, account info, OHLCV fetch, place/close orders | Not Started |
-| 2 | Strategy engine + 9 strategies (3 per type) + paper trading | Not Started |
-| 3 | FastAPI backend + WebSocket live price feed | Not Started |
-| 4 | Next.js dashboard — 3 separate trading dashboards + charts | Not Started |
-| 5 | Manual confirmation mode + in-app notification system | Not Started |
+| 1 | MT5 connection, account info, OHLCV fetch, place/close orders | ✅ Done (`44a1a04`) |
+| 2 | Strategy engine + 9 strategies (3 per type) + paper trading | ✅ Done (`1d3d63a`) |
+| 3 | FastAPI backend + WebSocket live price feed | ✅ Done (`44a1a04`) |
+| 4 | Next.js dashboard — 3 separate trading dashboards + charts | ✅ Done (`c152c0d`) |
+| 5 | Execution loop, signal bus, auto/manual mode toggle, browser notifications | ✅ Done (`2e18f82`) |
 | 6 | AI price prediction model + signal confidence scoring | Not Started |
 | 7 | Reinforcement learning agent training loop | Not Started |
 | 8 | Risk manager hardening + news filter + drawdown circuit breaker | Not Started |
 | 9 | Demo ↔ Live account switching + full paper trade sync | Not Started |
-| 10 | Docker deployment + monitoring | Not Started |
+| 10 | `start.ps1` / `stop.ps1` — 1-click Windows launcher (no Docker) | Not Started |
 
 ---
 
 ## Key Constraints
 
-- `MetaTrader5` Python library **only runs on Windows** — the engine must run on Windows (or a Windows VM/container for deployment)
+- `MetaTrader5` Python library **only runs on Windows** — the engine runs locally on Windows; no Docker, no VM required
 - MQL5 EA runs **inside the MT5 terminal** — MT5 must be open for scalping execution; Python strategies can run headlessly for day/swing trading
 - Paper trading uses the **XM Demo account** — trades appear on XM's servers as real demo trades
 - Weekend market gaps and session-open gaps are **real market events** — the chart will show them; they cannot and should not be removed
