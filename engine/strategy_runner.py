@@ -86,6 +86,7 @@ class StrategySignal:
     tp2_price: float | None
     lot_size: float
     comment: str
+    confidence: float = 0.0  # 0–1 score from AI scorer (Phase 6)
     indicators: dict[str, Any] = field(default_factory=dict)
     approved: bool = False  # set to True when user confirms (manual mode)
 
@@ -215,7 +216,7 @@ class StrategyRunner:
             tick_size=sym_info.get("trade_tick_size", 0.00001),
         )
 
-        return StrategySignal(
+        strat_sig = StrategySignal(
             trading_type=trading_type,
             symbol=symbol,
             strategy=strat_name,
@@ -228,6 +229,23 @@ class StrategyRunner:
             comment=sig.comment,
             indicators=result.indicators,
         )
+
+        # Phase 6: score signal confidence (safe — degrades to 0.5 if AI not ready)
+        try:
+            from ai.signal_scorer import scorer
+            primary_df = next(iter(tf_data.values()))
+            strat_sig.confidence = scorer.score(
+                symbol=symbol,
+                direction=sig.direction,
+                entry=sig.entry_price,
+                sl=sig.sl_price,
+                tp=sig.tp_price or sig.entry_price,
+                df=primary_df,
+            )
+        except Exception as _exc:
+            logger.debug(f"Signal scorer skipped for {symbol}: {_exc}")
+
+        return strat_sig
 
     def run_mode(self, trading_type: str) -> list[StrategySignal]:
         """Run all enabled symbols for a single trading type. Used by the runner loop."""
