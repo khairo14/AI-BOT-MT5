@@ -60,50 +60,79 @@ class RiskManager:
 
     def calculate_lot_size(
         self,
-        account_balance: float,
-        entry_price: float,
-        sl_price: float,
-        pip_value: float,    # value per pip per 1 standard lot in account currency
-        pip_size: float,     # e.g. 0.0001 for EURUSD, 0.01 for USDJPY
+        # ── MT5 symbol_info style (preferred) ───────────────────────────
+        balance: Optional[float] = None,
+        entry: Optional[float] = None,
+        sl: Optional[float] = None,
+        symbol: Optional[str] = None,
+        contract_size: float = 100_000,
+        tick_value: float = 1.0,    # account-currency value of 1 tick per 1 lot
+        tick_size: float = 0.00001, # minimum price movement
+        # ── legacy pip-based style (kept for back-compat) ────────────────
+        account_balance: Optional[float] = None,
+        entry_price: Optional[float] = None,
+        sl_price: Optional[float] = None,
+        pip_value: Optional[float] = None,
+        pip_size: Optional[float] = None,
+        # ── shared ───────────────────────────────────────────────────────
         risk_pct: Optional[float] = None,
         min_lot: float = 0.01,
         max_lot: float = 100.0,
         lot_step: float = 0.01,
     ) -> float:
         """
-        Calculate lot size so that the SL distance risks exactly `risk_pct`
-        of current account balance.
+        Calculate lot size so that the SL distance risks exactly ``risk_pct``
+        of the current account balance.
 
-        Formula:
-            risk_amount = balance × risk_pct / 100
-            sl_pips     = abs(entry - sl) / pip_size
-            lot_size    = risk_amount / (sl_pips × pip_value)
+        Accepts two calling conventions:
+            1. MT5 style: balance, entry, sl, tick_value, tick_size
+            2. Legacy:    account_balance, entry_price, sl_price, pip_value, pip_size
+
+        Formula (MT5 style):
+            risk_amount  = balance × risk_pct / 100
+            sl_ticks     = abs(entry - sl) / tick_size
+            lot          = risk_amount / (sl_ticks × tick_value)
         """
+        # Resolve params — MT5 style takes precedence
+        _balance = balance if balance is not None else account_balance
+        _entry   = entry   if entry   is not None else entry_price
+        _sl      = sl      if sl      is not None else sl_price
+
+        if _balance is None or _entry is None or _sl is None:
+            logger.error("calculate_lot_size: missing balance/entry/sl — using min_lot")
+            return min_lot
+
         risk_pct = risk_pct or self._config["risk_per_trade_pct"]
         max_risk_pct = self._config["max_risk_per_trade_pct"]
-
-        # Hard ceiling — never exceed max_risk_per_trade_pct
         risk_pct = min(risk_pct, max_risk_pct)
 
-        risk_amount = account_balance * (risk_pct / 100)
-        sl_pips = abs(entry_price - sl_price) / pip_size
+        risk_amount = _balance * (risk_pct / 100)
 
-        if sl_pips == 0:
+        # Determine value-per-tick
+        if pip_value is not None and pip_size is not None:
+            # Legacy path: treat pip as tick
+            _tick_size  = pip_size
+            _tick_value = pip_value
+        else:
+            _tick_size  = tick_size  if tick_size  > 0 else 0.00001
+            _tick_value = tick_value if tick_value > 0 else 1.0
+
+        sl_ticks = abs(_entry - _sl) / _tick_size
+
+        if sl_ticks == 0:
             logger.error("SL distance is zero — cannot calculate lot size")
             return min_lot
 
-        raw_lot = risk_amount / (sl_pips * pip_value)
+        raw_lot = risk_amount / (sl_ticks * _tick_value)
 
         # Round down to nearest lot_step (never round up — avoids over-risking)
         lot = math.floor(raw_lot / lot_step) * lot_step
         lot = round(lot, 8)
-
-        # Clamp to broker constraints
         lot = max(min_lot, min(lot, max_lot))
 
         logger.debug(
-            f"Lot size | Balance: {account_balance} | Risk: {risk_pct}% "
-            f"({risk_amount:.2f}) | SL pips: {sl_pips:.1f} | Lots: {lot}"
+            f"Lot size | Balance: {_balance} | Risk: {risk_pct}% "
+            f"({risk_amount:.2f}) | SL ticks: {sl_ticks:.1f} | Lots: {lot}"
         )
         return lot
 

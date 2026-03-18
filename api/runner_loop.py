@@ -30,6 +30,7 @@ INTERVALS: dict[str, int] = {
 }
 
 _runner_task: Optional[asyncio.Task] = None
+_risk_manager = None  # exposed so /risk/status can read live state
 
 
 async def _runner_loop(client, order_manager, risk_manager) -> None:
@@ -86,7 +87,8 @@ def _signal_to_dict(sig, mode: str) -> dict:
 
 def start_runner_loop(client, order_manager, risk_manager) -> None:
     """Start the background strategy runner (idempotent)."""
-    global _runner_task
+    global _runner_task, _risk_manager
+    _risk_manager = risk_manager
     if _runner_task is None or _runner_task.done():
         _runner_task = asyncio.create_task(
             _runner_loop(client, order_manager, risk_manager)

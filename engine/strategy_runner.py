@@ -19,8 +19,10 @@ import pandas as pd
 from loguru import logger
 
 from engine.mt5_client import MT5Client
+from engine.news_filter import news_filter
 from engine.order_manager import OrderManager, OrderRequest
 from engine.risk_manager import RiskManager
+from engine.session_filter import session_filter
 from engine.strategies.base_strategy import StrategyResult
 
 # ── strategy imports ──────────────────────────────────────────────────────────
@@ -198,8 +200,22 @@ class StrategyRunner:
             logger.debug(f"{strat_name}/{symbol}: R:R validation failed — signal skipped")
             return None
 
-        if not self.risk_manager.is_trading_allowed(trading_type):
-            logger.info(f"Trading halted for {trading_type} — signal skipped ({symbol})")
+        risk_allowed, risk_reason = self.risk_manager.is_trading_allowed(trading_type)
+        if not risk_allowed:
+            logger.info(f"Trading halted for {trading_type} — {risk_reason} ({symbol})")
+            return None
+
+        # News filter gate
+        news_blocked, news_reason = news_filter.is_blocked(symbol, trading_type)
+        if news_blocked:
+            logger.debug(f"News filter blocked {symbol}: {news_reason}")
+            return None
+
+        # Session filter gate
+        sym_category = session_filter.category_for(symbol)
+        sess_open, sess_reason = session_filter.is_open(symbol, sym_category)
+        if not sess_open:
+            logger.debug(f"Session filter blocked {symbol}: {sess_reason}")
             return None
 
         sym_info = self.client.get_symbol_info(symbol)

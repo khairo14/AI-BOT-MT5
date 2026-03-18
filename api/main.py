@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from api.routes import account, trades, signals, config, ai as ai_routes
+from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes
 from api.websocket.feed import router as ws_router
 from api.signal_bus import bus
 from api.runner_loop import start_runner_loop
@@ -73,11 +73,12 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-app.include_router(account.router,    prefix="/account",  tags=["Account"])
-app.include_router(trades.router,     prefix="/trades",   tags=["Trades"])
-app.include_router(signals.router,    prefix="/signals",  tags=["Signals"])
-app.include_router(config.router,     prefix="/config",   tags=["Config"])
-app.include_router(ai_routes.router,  prefix="/ai",       tags=["AI"])
+app.include_router(account.router,     prefix="/account",  tags=["Account"])
+app.include_router(trades.router,      prefix="/trades",   tags=["Trades"])
+app.include_router(signals.router,     prefix="/signals",  tags=["Signals"])
+app.include_router(config.router,      prefix="/config",   tags=["Config"])
+app.include_router(ai_routes.router,   prefix="/ai",       tags=["AI"])
+app.include_router(risk_routes.router, prefix="/risk",     tags=["Risk"])
 app.include_router(ws_router,         prefix="/ws",       tags=["WebSocket"])
 
 

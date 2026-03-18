@@ -26,7 +26,8 @@
     "pause_minutes_before": 30,
     "pause_minutes_after": 15,
     "impact_filter": "high",
-    "affect_modes": ["scalping", "day_trading"]
+    "affect_modes": ["scalping", "day_trading"],
+    "cache_minutes": 60
   },
 
   "session_filter": {
