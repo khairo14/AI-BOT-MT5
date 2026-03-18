@@ -1,6 +1,7 @@
 ﻿"use client";
 import { useBotStore } from "@/lib/store";
 import AccountSummary from "@/components/dashboard/AccountSummary";
+import AccountPanel from "@/components/account/AccountPanel";
 import PositionTable from "@/components/trading/PositionTable";
 import { fetchPositions } from "@/lib/api";
 import Link from "next/link";
@@ -45,6 +46,12 @@ export default function OverviewPage() {
           <button onClick={refresh} className="text-xs text-gray-500 hover:text-white transition-colors">Refresh</button>
         </div>
         <PositionTable positions={positions} onRefresh={refresh} />
+      </div>
+
+      {/* Phase 9: paper vs live journal */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Account Performance</h3>
+        <AccountPanel />
       </div>
     </div>
   );

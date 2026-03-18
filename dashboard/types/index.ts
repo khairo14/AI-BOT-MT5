@@ -102,3 +102,50 @@ export interface RiskConfig {
   daily_drawdown_limit_pct: number;
   weekly_drawdown_limit_pct: number;
 }
+
+// ── Trade Journal (Phase 9) ────────────────────────────────────────────────
+export type AccountMode = "paper" | "live";
+
+export interface JournalEntry {
+  ticket: number;
+  symbol: string;
+  direction: "buy" | "sell";
+  volume: number;
+  entry: number;
+  sl: number;
+  tp: number | null;
+  profit: number | null;
+  trading_type: TradingMode;
+  account_mode: AccountMode;
+  comment: string;
+  event: "open" | "close";
+  open_time: string;
+  close_time: string | null;
+  logged_at: string;
+}
+
+export interface JournalStats {
+  total: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_profit: number;
+}
+
+export interface JournalStatsResponse {
+  paper: JournalStats;
+  live: JournalStats;
+  all: JournalStats;
+}
+
+export interface SwitchModeResponse {
+  status: "switched" | "no_change";
+  mode: AccountMode;
+  account?: AccountInfo;
+}
+
+export interface SwitchModeError {
+  error: "open_positions";
+  message: string;
+  open_count: number;
+}

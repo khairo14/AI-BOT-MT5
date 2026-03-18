@@ -9,6 +9,9 @@ import type {
   RiskConfig,
   TradingMode,
   ExecutionMode,
+  JournalEntry,
+  JournalStatsResponse,
+  SwitchModeResponse,
 } from "@/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -19,8 +22,11 @@ export const api = axios.create({ baseURL: BASE, timeout: 10_000 });
 export const fetchAccount = (): Promise<AccountInfo> =>
   api.get("/account/").then((r) => r.data);
 
-export const switchMode = (mode: "paper" | "live") =>
-  api.post("/account/switch-mode", { mode }).then((r) => r.data);
+export const fetchAccountMode = (): Promise<{ mode: "paper" | "live" }> =>
+  api.get("/account/mode").then((r) => r.data);
+
+export const switchMode = (mode: "paper" | "live", force = false): Promise<SwitchModeResponse> =>
+  api.post("/account/switch-mode", { mode, force }).then((r) => r.data);
 
 export const fetchPrice = (symbol: string): Promise<{ bid: number; ask: number }> =>
   api.get(`/account/price/${symbol}`).then((r) => r.data);
@@ -83,3 +89,17 @@ export const setExecutionMode = (mode: TradingMode, execution: ExecutionMode) =>
 
 export const patchRiskConfig = (patch: Partial<RiskConfig>) =>
   api.patch("/config/risk", { data: patch }).then((r) => r.data);
+
+// ── Trade Journal (Phase 9) ------------------------------------------------
+export const fetchTradeJournal = (
+  account: "paper" | "live" | "all" = "all",
+  tradingType?: TradingMode,
+  limit = 50
+): Promise<{ entries: JournalEntry[]; count: number }> => {
+  const params = new URLSearchParams({ account, limit: String(limit) });
+  if (tradingType) params.set("trading_type", tradingType);
+  return api.get(`/trades/journal?${params.toString()}`).then((r) => r.data);
+};
+
+export const fetchJournalStats = (): Promise<JournalStatsResponse> =>
+  api.get("/trades/journal/stats").then((r) => r.data);

@@ -31,6 +31,21 @@ INTERVALS: dict[str, int] = {
 
 _runner_task: Optional[asyncio.Task] = None
 _risk_manager = None  # exposed so /risk/status can read live state
+_paused: bool = False  # set True during account mode switch
+
+
+def pause_runner() -> None:
+    """Signal the loop to skip iterations (used during account switching)."""
+    global _paused
+    _paused = True
+    logger.info("Strategy runner paused.")
+
+
+def resume_runner() -> None:
+    """Resume the runner after account switching."""
+    global _paused
+    _paused = False
+    logger.info("Strategy runner resumed.")
 
 
 async def _runner_loop(client, order_manager, risk_manager) -> None:
@@ -50,6 +65,9 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
 
     while True:
         await asyncio.sleep(5)  # base tick
+
+        if _paused:
+            continue
 
         for mode, interval in INTERVALS.items():
             counters[mode] += 5

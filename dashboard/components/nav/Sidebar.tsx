@@ -1,8 +1,10 @@
 "use client";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useBotStore } from "@/lib/store";
-import { switchMode, fetchAccount } from "@/lib/api";
+import TradeSwitchModal from "@/components/account/TradeSwitchModal";
+import type { AccountMode } from "@/types";
 
 const NAV = [
   { href: "/", label: "Overview", icon: "⊞" },
@@ -15,22 +17,19 @@ const NAV = [
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { account, setAccount, wsConnected, notifications } = useBotStore();
+  const { account, wsConnected, notifications } = useBotStore();
   const unreadCount = notifications.length;
 
-  const handleModeToggle = async () => {
+  const [switchTarget, setSwitchTarget] = useState<AccountMode | null>(null);
+
+  const handleModeToggle = () => {
     if (!account) return;
-    const next = account.mode === "paper" ? "live" : "paper";
-    const confirm = window.confirm(
-      `Switch to ${next.toUpperCase()} trading? This affects all order execution.`
-    );
-    if (!confirm) return;
-    await switchMode(next);
-    const fresh = await fetchAccount();
-    setAccount(fresh);
+    const next: AccountMode = account.mode === "paper" ? "live" : "paper";
+    setSwitchTarget(next);
   };
 
   return (
+    <>
     <aside className="w-56 min-h-screen bg-gray-950 border-r border-gray-800 flex flex-col">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-gray-800">
@@ -99,5 +98,14 @@ export default function Sidebar() {
         )}
       </div>
     </aside>
+
+    {/* Account switch confirmation modal */}
+    {switchTarget && (
+      <TradeSwitchModal
+        targetMode={switchTarget}
+        onClose={() => setSwitchTarget(null)}
+      />
+    )}
+  </>
   );
 }

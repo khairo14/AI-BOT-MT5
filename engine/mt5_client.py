@@ -14,6 +14,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from loguru import logger
 
+from engine.account_store import load_mode, save_mode
+
 load_dotenv()
 
 # ---------------------------------------------------------------------------
@@ -40,8 +42,13 @@ class MT5Client:
 
     def __init__(self):
         self._connected = False
-        self._trading_mode = os.getenv("TRADING_MODE", "paper").lower()
+        # account_store takes priority over env var so dashboard switches survive restarts
+        self._trading_mode = load_mode()
         self._credentials = self._load_credentials()
+
+    @property
+    def trading_mode(self) -> str:
+        return self._trading_mode
 
     # ------------------------------------------------------------------
     # Connection
@@ -108,9 +115,11 @@ class MT5Client:
             return False
         self.disconnect()
         self._trading_mode = mode
-        os.environ["TRADING_MODE"] = mode
         self._credentials = self._load_credentials()
-        return self.connect()
+        success = self.connect()
+        if success:
+            save_mode(mode)   # persist so restart resumes with this mode
+        return success
 
     # ------------------------------------------------------------------
     # Account Info

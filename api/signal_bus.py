@@ -131,6 +131,26 @@ class SignalBus:
                     f"Signal executed: {signal['symbol']} {signal['direction']} "
                     f"lot={req.volume} ticket={result.ticket}"
                 )
+                # Journal: record trade open
+                try:
+                    from engine.trade_journal import trade_journal
+                    from engine.account_store import current_mode
+                    trade_journal.log(
+                        ticket=result.ticket,
+                        symbol=signal["symbol"],
+                        direction=signal["direction"],
+                        volume=req.volume,
+                        entry=result.open_price or 0.0,
+                        sl=float(signal.get("sl") or 0),
+                        tp=float(signal["tp"]) if signal.get("tp") else None,
+                        profit=None,
+                        trading_type=signal.get("trading_mode", "day_trading"),
+                        account_mode=current_mode(),
+                        comment=signal.get("strategy", ""),
+                        event="open",
+                    )
+                except Exception:
+                    pass
                 # Phase 7: kick off outcome poller in background
                 asyncio.create_task(
                     _poll_outcome(
@@ -238,6 +258,28 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 duration_mins=round(dur_mins, 1),
             )
             memory.record(outcome)
+
+            # Journal: update with close data
+            try:
+                from engine.trade_journal import trade_journal
+                from engine.account_store import current_mode
+                trade_journal.log(
+                    ticket=ticket,
+                    symbol=signal["symbol"],
+                    direction=signal["direction"],
+                    volume=float(signal.get("lot_size", 0.01)),
+                    entry=entry_px,
+                    sl=sl,
+                    tp=tp if tp else None,
+                    profit=profit,
+                    trading_type=signal.get("trading_mode", "day_trading"),
+                    account_mode=current_mode(),
+                    comment=signal.get("strategy", ""),
+                    event="close",
+                    close_time=close_time,
+                )
+            except Exception:
+                pass
 
             trading_type = signal.get("trading_mode", "day_trading")
             stats = memory.stats(trading_type=trading_type)

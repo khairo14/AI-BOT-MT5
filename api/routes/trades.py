@@ -142,6 +142,27 @@ def place_order(
     if not result.success:
         raise HTTPException(status_code=500, detail=result.error)
 
+    # Journal: record manually placed trade
+    try:
+        from engine.trade_journal import trade_journal
+        from engine.account_store import current_mode
+        trade_journal.log(
+            ticket=result.ticket,
+            symbol=body.symbol,
+            direction=body.direction,
+            volume=lot,
+            entry=result.open_price or entry,
+            sl=body.sl,
+            tp=body.tp,
+            profit=None,
+            trading_type=body.trading_mode,
+            account_mode=current_mode(),
+            comment=body.comment,
+            event="open",
+        )
+    except Exception:
+        pass
+
     return {
         "ticket":     result.ticket,
         "open_price": result.open_price,
@@ -190,3 +211,52 @@ def modify_position(
     if not success:
         raise HTTPException(status_code=500, detail=f"Failed to modify ticket #{ticket}")
     return {"status": "modified", "ticket": ticket}
+
+
+# ---------------------------------------------------------------------------
+# Trade Journal (Phase 9)
+# ---------------------------------------------------------------------------
+
+@router.get("/journal")
+def get_journal(
+    account: str = Query("all",  description="paper | live | all"),
+    trading_type: Optional[str] = Query(None, description="scalping | day_trading | swing"),
+    event: Optional[str] = Query(None, description="open | close"),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """
+    Return bot trade journal entries (local JSONL store).
+    Supports filtering by account mode, trading type, and event type.
+    """
+    from engine.trade_journal import trade_journal
+
+    if account not in ("paper", "live", "all"):
+        raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
+
+    entries = trade_journal.get(account=account, trading_type=trading_type, event=event, limit=limit)
+    return {
+        "entries": entries,
+        "count":   len(entries),
+        "filter":  {"account": account, "trading_type": trading_type, "event": event},
+    }
+
+
+@router.get("/journal/stats")
+def get_journal_stats(
+    account: str = Query("all", description="paper | live | all"),
+):
+    """Return win/loss/profit summary from the trade journal."""
+    from engine.trade_journal import trade_journal
+
+    if account not in ("paper", "live", "all"):
+        raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
+
+    paper_stats = trade_journal.stats(account="paper")
+    live_stats  = trade_journal.stats(account="live")
+    all_stats   = trade_journal.stats(account="all")
+
+    return {
+        "paper": paper_stats,
+        "live":  live_stats,
+        "all":   all_stats,
+    }
