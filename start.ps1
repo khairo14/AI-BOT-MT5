@@ -48,6 +48,12 @@ function Write-Fail([string]$msg) {
     Write-Host "  [FAIL] $msg" -ForegroundColor Red
     exit 1
 }
+function Get-EnvValue([string]$Path, [string]$Key, [string]$Default) {
+    $raw   = Get-Content $Path -Raw
+    $match = [regex]::Match($raw, "(?m)^$Key\s*=\s*(.+)$")
+    if ($match.Success) { return $match.Groups[1].Value.Trim() }
+    return $Default
+}
 
 # ── banner ───────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -98,13 +104,9 @@ if (-not $mt5Proc) {
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 # ── load .env to read API port ────────────────────────────────────────────────
-$ApiHost = "127.0.0.1"
-$ApiPort = "8000"
-Get-Content $EnvFile | ForEach-Object {
-    if ($_ -match "^API_HOST\s*=\s*(.+)$") { $ApiHost = $Matches[1].Trim() }
-    if ($_ -match "^API_PORT\s*=\s*(.+)$") { $ApiPort = $Matches[1].Trim() }
-}
-$ApiUrl = "http://${ApiHost}:${ApiPort}"
+$ApiHost = Get-EnvValue $EnvFile 'API_HOST' '127.0.0.1'
+$ApiPort = Get-EnvValue $EnvFile 'API_PORT' '8000'
+$ApiUrl  = "http://$($ApiHost):$($ApiPort)"
 
 # ── start FastAPI backend ─────────────────────────────────────────────────────
 Write-Step "Starting FastAPI backend on $ApiUrl ..."
@@ -150,8 +152,10 @@ if (-not $ready) {
 # ── start Next.js dashboard ────────────────────────────────────────────────────
 Write-Step "Starting Next.js dashboard on http://localhost:3000 ..."
 
-# Resolve node.exe — prefer the one in PATH
-$nodePath = (Get-Command "node" -ErrorAction SilentlyContinue)?.Source
+# Resolve node.exe from PATH
+$nodeCmd  = Get-Command "node" -ErrorAction SilentlyContinue
+$nodePath = $null
+if ($nodeCmd) { $nodePath = $nodeCmd.Source }
 if (-not $nodePath) { Write-Fail "node.exe not found in PATH. Install Node.js 18+." }
 
 $dashLogOut = Join-Path $LogDir "dashboard_out.log"
