@@ -1,0 +1,9 @@
+# ============================================================
+# AI-BOT-MT5 — ML Dependencies (Phase 6+)
+# Install with: pip install -r requirements-ml.txt
+# These are large downloads (~2-3GB). Only needed from Phase 6.
+# ============================================================
+
+torch==2.3.0
+scikit-learn==1.4.2
+stable-baselines3==2.3.2

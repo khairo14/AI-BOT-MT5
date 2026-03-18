@@ -1,0 +1,43 @@
+{
+  "risk_per_trade_pct": 1.0,
+  "max_risk_per_trade_pct": 2.0,
+  "risk_reward_min": 1.5,
+  "sl_required": true,
+  "tp_required": false,
+  "position_sizing_method": "fixed_fractional",
+
+  "max_concurrent_trades": {
+    "scalping": 3,
+    "day_trading": 5,
+    "swing": 8,
+    "total": 12
+  },
+
+  "drawdown": {
+    "daily_limit_pct": 5.0,
+    "weekly_limit_pct": 10.0,
+    "max_consecutive_losses": 5,
+    "consecutive_loss_pause_hours": 4,
+    "action": "pause"
+  },
+
+  "news_filter": {
+    "enabled": true,
+    "pause_minutes_before": 30,
+    "pause_minutes_after": 15,
+    "impact_filter": "high",
+    "affect_modes": ["scalping", "day_trading"]
+  },
+
+  "session_filter": {
+    "enabled": true,
+    "enforce_for": ["forex", "stocks", "indices", "commodities"],
+    "sessions": {
+      "forex":       { "open": "07:00", "close": "21:00", "days": "mon-fri" },
+      "us_stocks":   { "open": "14:30", "close": "21:00", "days": "mon-fri" },
+      "eu_indices":  { "open": "08:00", "close": "16:30", "days": "mon-fri" },
+      "commodities": { "open": "01:00", "close": "22:00", "days": "mon-fri" },
+      "crypto":      { "open": "00:00", "close": "23:59", "days": "all" }
+    }
+  }
+}

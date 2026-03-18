@@ -1,0 +1,48 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# Node / Next.js
+node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/.env.local
+
+# Database
+*.sqlite3
+*.db
+
+# ML Models & Data
+ai/models/*.pt
+ai/models/*.pkl
+ai/models/*.h5
+data/raw/
+data/processed/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/

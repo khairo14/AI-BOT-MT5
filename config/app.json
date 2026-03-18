@@ -1,0 +1,36 @@
+{
+  "trading_mode": "paper",
+  "accounts": {
+    "paper": {
+      "login": 168442709,
+      "server": "XMGlobal-MT5 2",
+      "comment": "XM Demo Account"
+    },
+    "live": {
+      "login": 420033339,
+      "server": "XMGlobal-MT5 17",
+      "comment": "XM Live Account"
+    }
+  },
+  "execution_mode": {
+    "scalping": "manual",
+    "day_trading": "manual",
+    "swing": "manual"
+  },
+  "notifications": {
+    "signal_alert": true,
+    "trade_opened": true,
+    "trade_closed": true,
+    "sl_hit": true,
+    "tp_hit": true,
+    "drawdown_alert": true,
+    "circuit_breaker_triggered": true,
+    "news_pause": true
+  },
+  "ai": {
+    "price_prediction_enabled": false,
+    "confidence_filter_enabled": false,
+    "confidence_threshold": 60,
+    "rl_agent_enabled": false
+  }
+}

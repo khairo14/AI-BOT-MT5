@@ -1,0 +1,112 @@
+{
+  "scalping": {
+    "active_strategies": ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+    "symbol_strategy_override": {
+      "US100Cash": ["bb_squeeze", "vwap_reversion"],
+      "US30Cash":  ["bb_squeeze", "vwap_reversion"],
+      "USDCHF":    ["ema_scalp"]
+    },
+    "params": {
+      "ema_scalp": {
+        "ema_fast": 8,
+        "ema_slow": 21,
+        "ema_bias_period": 50,
+        "ema_bias_timeframe": "M5",
+        "rsi_period": 7,
+        "rsi_min": 40,
+        "rsi_max": 65,
+        "max_spread_pips": 1.5
+      },
+      "bb_squeeze": {
+        "bb_period": 20,
+        "bb_std": 2.0,
+        "roc_period": 5,
+        "min_squeeze_bars": 5
+      },
+      "vwap_reversion": {
+        "sigma_entry": 1.5,
+        "sigma_sl": 2.5,
+        "rsi_period": 14,
+        "stoch_k": 5,
+        "stoch_d": 3,
+        "stoch_smooth": 3
+      }
+    }
+  },
+  "day_trading": {
+    "active_strategies": ["macd_ema_trend", "sr_breakout", "rsi_divergence"],
+    "symbol_strategy_override": {
+      "BTCUSD":  ["sr_breakout"],
+      "ETHUSD":  ["sr_breakout"],
+      "TSLA.OQ": ["macd_ema_trend", "sr_breakout"],
+      "NVDA.OQ": ["macd_ema_trend", "sr_breakout"]
+    },
+    "params": {
+      "macd_ema_trend": {
+        "ema_fast": 20,
+        "ema_slow": 50,
+        "ema_bias": 200,
+        "macd_fast": 12,
+        "macd_slow": 26,
+        "macd_signal": 9,
+        "primary_timeframe": "H1",
+        "entry_timeframe": "M15"
+      },
+      "sr_breakout": {
+        "lookback_bars": 50,
+        "atr_period": 14,
+        "rsi_period": 14,
+        "retest_mode": true,
+        "primary_timeframe": "H1"
+      },
+      "rsi_divergence": {
+        "rsi_period": 14,
+        "ema_bias_period": 50,
+        "session_window_hours": 2,
+        "primary_timeframe": "H1",
+        "entry_timeframe": "M30"
+      }
+    }
+  },
+  "swing": {
+    "active_strategies": ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
+    "symbol_strategy_override": {
+      "BTCUSD":   ["fibonacci_rsi", "weekly_breakout"],
+      "ETHUSD":   ["fibonacci_rsi", "weekly_breakout"],
+      "NGASCash": ["weekly_breakout"],
+      "NFLX.OQ":  ["weekly_breakout"],
+      "AMD.OQ":   ["weekly_breakout"]
+    },
+    "params": {
+      "ema_trend_rider": {
+        "d1_ema_fast": 50,
+        "d1_ema_slow": 200,
+        "h4_ema_fast": 21,
+        "h4_ema_slow": 50,
+        "h4_adx_min": 25,
+        "h1_ema_entry": 21,
+        "primary_timeframe": "H4",
+        "entry_timeframe": "H1"
+      },
+      "fibonacci_rsi": {
+        "fib_levels": [0.382, 0.5, 0.618],
+        "golden_zone_min": 0.5,
+        "golden_zone_max": 0.618,
+        "rsi_period": 14,
+        "rsi_zone_min": 35,
+        "rsi_zone_max": 65,
+        "candle_confirm": true,
+        "primary_timeframe": "H4"
+      },
+      "weekly_breakout": {
+        "atr_period": 14,
+        "atr_multiplier": 0.5,
+        "macd_fast": 12,
+        "macd_slow": 26,
+        "macd_signal": 9,
+        "adx_min": 20,
+        "primary_timeframe": "D1"
+      }
+    }
+  }
+}
