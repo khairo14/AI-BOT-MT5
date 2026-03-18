@@ -131,6 +131,14 @@ class SignalBus:
                     f"Signal executed: {signal['symbol']} {signal['direction']} "
                     f"lot={req.volume} ticket={result.ticket}"
                 )
+                # Phase 7: kick off outcome poller in background
+                asyncio.create_task(
+                    _poll_outcome(
+                        ticket=result.ticket,
+                        signal=signal,
+                        client=self._client,
+                    )
+                )
                 return True
             else:
                 logger.warning(f"Signal execution failed: {signal['symbol']} {signal['direction']}")
@@ -148,6 +156,106 @@ class SignalBus:
             return cfg.get("execution_mode", {}).get(trading_type, "manual")
         except Exception:
             return "manual"
+
+
+# ── outcome poller ────────────────────────────────────────────────────────────
+
+async def _poll_outcome(ticket: int, signal: dict, client) -> None:
+    """
+    Poll MT5 every 30 s until the position is closed, then record
+    the outcome in TradeMemory and feed the result to the RL agent.
+
+    Stops polling after 7 days (swing trade max hold time).
+    """
+    import MetaTrader5 as mt5
+    from ai.trade_memory import memory, TradeOutcome
+    from ai.rl_agent import rl_manager
+
+    MAX_POLLS  = 7 * 24 * 120   # 7 days at 30 s intervals
+    open_time  = datetime.now(tz=ZoneInfo("UTC")).isoformat()
+
+    for _ in range(MAX_POLLS):
+        await asyncio.sleep(30)
+        try:
+            # Position still open?
+            positions = await asyncio.to_thread(mt5.positions_get, ticket=ticket)
+            if positions:
+                continue   # still open
+
+            # Look in history
+            deals = await asyncio.to_thread(
+                mt5.history_deals_get, 0, mt5.symbol_info_tick(signal["symbol"]).time + 86400 * 30  # type: ignore
+            )
+            if deals is None:
+                deals = []
+
+            closed = [d for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT]
+            if not closed:
+                continue
+
+            deal       = closed[-1]
+            close_time = datetime.utcfromtimestamp(deal.time).isoformat()
+            profit     = deal.profit
+            close_px   = deal.price
+            entry_px   = float(signal.get("fill_price") or signal.get("entry_price", 0))
+            pip_val    = 0.0001 if "JPY" not in signal["symbol"] else 0.01
+            direction  = signal["direction"].upper()
+            pips       = ((close_px - entry_px) if direction == "BUY" else (entry_px - close_px)) / pip_val
+
+            # Determine outcome type
+            sl = float(signal.get("sl", 0))
+            tp = float(signal.get("tp") or 0)
+            tol = pip_val * 3   # 3-pip tolerance
+            if tp and abs(close_px - tp) <= tol:
+                outcome_type = "tp_hit"
+            elif sl and abs(close_px - sl) <= tol:
+                outcome_type = "sl_hit"
+            else:
+                outcome_type = "manual_close"
+
+            open_dt  = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
+            close_dt = datetime.utcfromtimestamp(deal.time)
+            dur_mins = (close_dt - open_dt.replace(tzinfo=None)).total_seconds() / 60
+
+            outcome = TradeOutcome(
+                ticket=ticket,
+                symbol=signal["symbol"],
+                strategy=signal.get("strategy", "unknown"),
+                trading_type=signal.get("trading_mode", "day_trading"),
+                direction=direction,
+                confidence=float(signal.get("confidence") or 0.5),
+                entry_price=entry_px,
+                close_price=close_px,
+                sl_price=sl,
+                tp_price=tp,
+                volume=float(signal.get("lot_size", 0.01)),
+                profit=profit,
+                profit_pips=round(pips, 1),
+                profit_pct=0.0,   # balance not captured here — RL uses raw profit
+                outcome=outcome_type,
+                open_time=open_time,
+                close_time=close_time,
+                duration_mins=round(dur_mins, 1),
+            )
+            memory.record(outcome)
+
+            trading_type = signal.get("trading_mode", "day_trading")
+            stats = memory.stats(trading_type=trading_type)
+            rl_manager.on_trade_closed(
+                trading_type=trading_type,
+                profit_pct=profit,
+                win_rate=stats.get("win_rate", 0.5),
+                avg_conf=stats.get("avg_conf", 0.5),
+            )
+            logger.info(
+                f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "
+                f"profit={profit:+.2f} pips={pips:+.1f}"
+            )
+            return
+
+        except Exception as exc:
+            logger.warning(f"_poll_outcome error for #{ticket}: {exc}")
+            await asyncio.sleep(60)
 
 
 # Application-level singleton — import this everywhere

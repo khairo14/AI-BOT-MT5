@@ -241,7 +241,15 @@ class StrategyRunner:
                 sl=sig.sl_price,
                 tp=sig.tp_price or sig.entry_price,
                 df=primary_df,
+                trading_type=trading_type,
             )
+            # Phase 7: RL gate — suppress low-confidence signals dynamically
+            if not scorer.is_tradeable(strat_sig.confidence, trading_type):
+                logger.debug(
+                    f"RL gate blocked {strat_name}/{symbol}: "
+                    f"confidence={strat_sig.confidence:.2f}"
+                )
+                return None
         except Exception as _exc:
             logger.debug(f"Signal scorer skipped for {symbol}: {_exc}")
 

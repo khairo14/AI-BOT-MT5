@@ -1,15 +1,17 @@
 """
-Price Predictor — LSTM model per symbol.
+Price Predictor — LSTM model per symbol × trading type.
 
-Trains on OHLCV data (H1 by default) to predict whether the next bar's
-close will be higher than the current bar's close (probability 0–1).
+Trains on OHLCV data at the natural timeframe for each trading type:
+  scalping    → M5   (fast price action)
+  day_trading → H1   (intraday trend)
+  swing       → H4   (multi-day structure)
 
 Falls back gracefully to 0.5 if:
   - PyTorch is not installed (requirements-ml.txt not run)
-  - No model has been trained yet for a symbol
+  - No model has been trained yet for a symbol+type key
 
-Model files: ai/models/{symbol}_lstm.pt
-Scaler files: ai/models/{symbol}_scaler.pkl
+Model files:  ai/models/{symbol}_{trading_type}_lstm.pt
+Scaler files: ai/models/{symbol}_{trading_type}_scaler.pkl
 """
 
 from __future__ import annotations
@@ -24,8 +26,15 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
-MODELS_DIR   = Path(__file__).parent / "models"
+MODELS_DIR = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
+
+# Natural training timeframe per trading type
+TRADING_TYPE_TF: dict[str, str] = {
+    "scalping":    "M5",
+    "day_trading": "H1",
+    "swing":       "H4",
+}
 
 SEQUENCE_LEN = 60   # look-back window in bars
 HIDDEN_SIZE  = 64
@@ -124,35 +133,39 @@ class PricePredictor:
         return symbol in self._models
 
     def status(self) -> dict:
-        """Return training status dict for all known symbols."""
-        all_symbols = set(self._models) | set(self._training)
+        """Return training status dict for all known symbol+type keys."""
+        all_keys = set(self._models) | set(self._training)
         return {
-            sym: {
-                "trained":  sym in self._models,
-                "training": sym in self._training,
-                **self._metadata.get(sym, {}),
+            key: {
+                "trained":  key in self._models,
+                "training": key in self._training,
+                **self._metadata.get(key, {}),
             }
-            for sym in all_symbols
+            for key in all_keys
         }
 
     # ── internal ──────────────────────────────────────────────────────────────
 
-    def _train(self, symbol: str, df: pd.DataFrame) -> None:
+    def _train(self, symbol: str, trading_type: str, df: pd.DataFrame) -> None:
+        key = _model_key(symbol, trading_type)
         try:
             if not _torch_available():
                 logger.warning("PyTorch not installed — run: pip install -r requirements-ml.txt")
                 return
-            self._do_train(symbol, df)
+            self._do_train(symbol, trading_type, df)
         except Exception as exc:
-            logger.exception(f"LSTM training failed for {symbol}: {exc}")
+            logger.exception(f"LSTM training failed for {key}: {exc}")
         finally:
             with self._lock:
-                self._training.discard(symbol)
+                self._training.discard(key)
 
-    def _do_train(self, symbol: str, df: pd.DataFrame) -> None:
+    def _do_train(self, symbol: str, trading_type: str, df: pd.DataFrame) -> None:
         import torch
         import torch.nn as nn
         from sklearn.preprocessing import StandardScaler
+
+        key = _model_key(symbol, trading_type)
+        tf  = TRADING_TYPE_TF.get(trading_type, "H1")
 
         features = _make_features(df)
         if features is None or len(features) < SEQUENCE_LEN + 10:
@@ -200,20 +213,22 @@ class PricePredictor:
             accuracy = (preds == y_val).float().mean().item()
 
         # Persist
-        torch.save(model.state_dict(), MODELS_DIR / f"{symbol}_lstm.pt")
-        with open(MODELS_DIR / f"{symbol}_scaler.pkl", "wb") as f:
+        torch.save(model.state_dict(), MODELS_DIR / f"{key}_lstm.pt")
+        with open(MODELS_DIR / f"{key}_scaler.pkl", "wb") as f:
             pickle.dump(scaler, f)
 
         with self._lock:
-            self._models[symbol]   = model
-            self._scalers[symbol]  = scaler
-            self._metadata[symbol] = {
-                "trained_at": datetime.utcnow().isoformat(),
-                "accuracy":   round(accuracy, 4),
-                "bars_used":  len(df),
+            self._models[key]   = model
+            self._scalers[key]  = scaler
+            self._metadata[key] = {
+                "trained_at":   datetime.utcnow().isoformat(),
+                "accuracy":     round(accuracy, 4),
+                "bars_used":    len(df),
+                "trading_type": trading_type,
+                "timeframe":    tf,
             }
 
-        logger.info(f"LSTM trained for {symbol} — val accuracy: {accuracy:.2%}")
+        logger.info(f"LSTM trained: {key} ({tf}) — val accuracy: {accuracy:.2%}")
 
     def _load_all(self) -> None:
         """Load any previously saved models from disk at startup."""
@@ -222,8 +237,8 @@ class PricePredictor:
         import torch
 
         for model_file in MODELS_DIR.glob("*_lstm.pt"):
-            symbol       = model_file.stem.replace("_lstm", "")
-            scaler_file  = MODELS_DIR / f"{symbol}_scaler.pkl"
+            key         = model_file.stem.replace("_lstm", "")
+            scaler_file = MODELS_DIR / f"{key}_scaler.pkl"
             if not scaler_file.exists():
                 continue
             try:
@@ -232,11 +247,11 @@ class PricePredictor:
                 model.eval()
                 with open(scaler_file, "rb") as f:
                     scaler = pickle.load(f)
-                self._models[symbol]  = model
-                self._scalers[symbol] = scaler
-                logger.info(f"Loaded LSTM model: {symbol}")
+                self._models[key]  = model
+                self._scalers[key] = scaler
+                logger.info(f"Loaded LSTM model: {key}")
             except Exception as exc:
-                logger.warning(f"Could not load model for {symbol}: {exc}")
+                logger.warning(f"Could not load model {key}: {exc}")
 
 
 def _make_features(df: pd.DataFrame) -> Optional[np.ndarray]:
@@ -266,6 +281,11 @@ def _make_features(df: pd.DataFrame) -> Optional[np.ndarray]:
     wick    = (high - close) / (close + eps)
 
     return np.column_stack([ret_c, ret_hl, ret_oc, vol_n, wick])
+
+
+def _model_key(symbol: str, trading_type: str) -> str:
+    """Composite key: e.g. 'EURUSD_scalping'"""
+    return f"{symbol}_{trading_type}"
 
 
 # Application-level singleton

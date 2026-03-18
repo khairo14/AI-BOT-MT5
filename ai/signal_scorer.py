@@ -34,19 +34,47 @@ class SignalScorer:
 
     def score(
         self,
-        symbol:    str,
-        direction: str,        # "BUY" or "SELL"
-        entry:     float,
-        sl:        float,
-        tp:        float,
-        df:        pd.DataFrame,   # primary timeframe OHLCV, most-recent bar last
+        symbol:       str,
+        direction:    str,        # "BUY" or "SELL"
+        entry:        float,
+        sl:           float,
+        tp:           float,
+        df:           pd.DataFrame,   # primary timeframe OHLCV, most-recent bar last
+        trading_type: str = "day_trading",
     ) -> float:
         """
         Return a 0–1 confidence score for a pending signal.
         Gracefully returns 0.5 on any error.
         """
         try:
-            lstm   = self._lstm_score(symbol, direction, df)
+            lstm   = self._lstm_score(symbol, direction, df, trading_type)
+            rr     = self._rr_score(entry, sl, tp)
+            trend  = self._trend_score(direction, df)
+            volume = self._volume_score(df)
+
+            score = (
+                self.W_LSTM   * lstm   +
+                self.W_RR     * rr     +
+                self.W_TREND  * trend  +
+                self.W_VOLUME * volume
+            )
+            return round(float(np.clip(score, 0.0, 1.0)), 4)
+
+        except Exception as exc:
+            logger.warning(f"SignalScorer error [{symbol}]: {exc}")
+            return 0.5
+
+    def is_tradeable(self, confidence: float, trading_type: str = "day_trading") -> bool:
+        """
+        Ask the RL agent whether this signal's confidence clears the
+        dynamically-learned threshold for the given trading type.
+        Defaults to True (pass-through) if rl_manager is unavailable.
+        """
+        try:
+            from ai.rl_agent import rl_manager
+            return rl_manager.should_take_signal(trading_type, confidence)
+        except Exception:
+            return True
             rr     = self._rr_score(entry, sl, tp)
             trend  = self._trend_score(direction, df)
             volume = self._volume_score(df)
@@ -65,13 +93,13 @@ class SignalScorer:
 
     # ── component scorers ────────────────────────────────────────────────────
 
-    def _lstm_score(self, symbol: str, direction: str, df: pd.DataFrame) -> float:
+    def _lstm_score(self, symbol: str, direction: str, df: pd.DataFrame, trading_type: str = "day_trading") -> float:
         """
         Align LSTM P(up) with signal direction.
         BUY: high P(up) → high score.
         SELL: low P(up) → high score.
         """
-        prob = self.predictor.predict(symbol, df)
+        prob = self.predictor.predict(symbol, df, trading_type)
         return prob if direction.upper() == "BUY" else (1.0 - prob)
 
     def _rr_score(self, entry: float, sl: float, tp: float) -> float:
