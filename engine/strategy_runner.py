@@ -1,0 +1,310 @@
+"""
+Strategy Runner / Dispatcher
+Loads strategies from config/strategies.json + config/symbols.json,
+fetches OHLCV data for each symbol, runs the assigned strategies,
+validates signals through RiskManager, and emits them to either
+auto-execution (OrderManager) or the manual-confirmation signal queue.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+import MetaTrader5 as mt5
+import pandas as pd
+from loguru import logger
+
+from engine.mt5_client import MT5Client
+from engine.order_manager import OrderManager, OrderRequest
+from engine.risk_manager import RiskManager
+from engine.strategies.base_strategy import StrategyResult
+
+# ── strategy imports ──────────────────────────────────────────────────────────
+from engine.strategies.scalping.ema_scalp import EMAScalp
+from engine.strategies.scalping.bb_squeeze import BBSqueeze
+from engine.strategies.scalping.vwap_reversion import VWAPReversion
+from engine.strategies.day_trading.macd_ema_trend import MACDEMATrend
+from engine.strategies.day_trading.sr_breakout import SRBreakout
+from engine.strategies.day_trading.rsi_divergence import RSIDivergence
+from engine.strategies.swing.ema_trend_rider import EMATrendRider
+from engine.strategies.swing.fibonacci_rsi import FibonacciRSI
+from engine.strategies.swing.weekly_breakout import WeeklyBreakout
+
+CONFIG_DIR = Path(__file__).parent.parent / "config"
+
+STRATEGY_MAP = {
+    "ema_scalp":        EMAScalp,
+    "bb_squeeze":       BBSqueeze,
+    "vwap_reversion":   VWAPReversion,
+    "macd_ema_trend":   MACDEMATrend,
+    "sr_breakout":      SRBreakout,
+    "rsi_divergence":   RSIDivergence,
+    "ema_trend_rider":  EMATrendRider,
+    "fibonacci_rsi":    FibonacciRSI,
+    "weekly_breakout":  WeeklyBreakout,
+}
+
+# Timeframes required per strategy (primary timeframe → bars to fetch)
+TIMEFRAME_BARS: dict[str, dict[str, int]] = {
+    "ema_scalp":       {"M1": 100, "M5": 100},
+    "bb_squeeze":      {"M5": 100},
+    "vwap_reversion":  {"M5": 200},
+    "macd_ema_trend":  {"H1": 200, "M15": 200},
+    "sr_breakout":     {"H1": 150},
+    "rsi_divergence":  {"M30": 100, "H1": 100},
+    "ema_trend_rider": {"H1": 250, "H4": 100, "D1": 60},
+    "fibonacci_rsi":   {"H4": 100},
+    "weekly_breakout": {"H4": 80, "D1": 30},
+}
+
+MT5_TF = {
+    "M1":  mt5.TIMEFRAME_M1,
+    "M5":  mt5.TIMEFRAME_M5,
+    "M15": mt5.TIMEFRAME_M15,
+    "M30": mt5.TIMEFRAME_M30,
+    "H1":  mt5.TIMEFRAME_H1,
+    "H4":  mt5.TIMEFRAME_H4,
+    "D1":  mt5.TIMEFRAME_D1,
+    "W1":  mt5.TIMEFRAME_W1,
+}
+
+
+@dataclass
+class StrategySignal:
+    """Pending signal waiting for execution or manual confirmation."""
+    trading_type: str
+    symbol: str
+    strategy: str
+    direction: str
+    entry_price: float
+    sl_price: float
+    tp_price: float
+    tp2_price: float | None
+    lot_size: float
+    comment: str
+    indicators: dict[str, Any] = field(default_factory=dict)
+    approved: bool = False  # set to True when user confirms (manual mode)
+
+
+class StrategyRunner:
+
+    def __init__(
+        self,
+        client: MT5Client,
+        order_manager: OrderManager,
+        risk_manager: RiskManager,
+        execution_mode: str = "manual",  # "manual" | "auto"
+    ):
+        self.client = client
+        self.order_manager = order_manager
+        self.risk_manager = risk_manager
+        self.execution_mode = execution_mode
+
+        self._strategies_cfg: dict = self._load_json("strategies.json")
+        self._symbols_cfg: dict    = self._load_json("symbols.json")
+
+        # Pending signals for manual confirmation (populated when mode == "manual")
+        self.pending_signals: list[StrategySignal] = []
+
+    # ── public interface ──────────────────────────────────────────────────────
+
+    def run_all(self) -> list[StrategySignal]:
+        """Run all enabled symbols through their assigned strategies.
+        Returns any new signals generated this iteration."""
+        new_signals: list[StrategySignal] = []
+        for trading_type in ("scalping", "day_trading", "swing"):
+            symbols = self._enabled_symbols(trading_type)
+            active_strategies = self._active_strategies(trading_type)
+            for symbol in symbols:
+                per_symbol_strats = self._per_symbol_overrides(trading_type, symbol) or active_strategies
+                for strat_name in per_symbol_strats:
+                    sig = self._run_strategy(trading_type, symbol, strat_name)
+                    if sig:
+                        new_signals.append(sig)
+                        if self.execution_mode == "auto":
+                            self._execute(sig)
+                        else:
+                            self.pending_signals.append(sig)
+        return new_signals
+
+    def confirm_signal(self, signal_index: int) -> bool:
+        """Approve and execute a pending signal by index. Returns True on success."""
+        if signal_index >= len(self.pending_signals):
+            logger.warning(f"confirm_signal: index {signal_index} out of range")
+            return False
+        sig = self.pending_signals.pop(signal_index)
+        sig.approved = True
+        return self._execute(sig)
+
+    def reject_signal(self, signal_index: int) -> None:
+        """Remove a pending signal without executing."""
+        if signal_index < len(self.pending_signals):
+            removed = self.pending_signals.pop(signal_index)
+            logger.info(f"Signal rejected: {removed.strategy} {removed.symbol} {removed.direction}")
+
+    # ── internal ──────────────────────────────────────────────────────────────
+
+    def _run_strategy(
+        self,
+        trading_type: str,
+        symbol: str,
+        strat_name: str,
+    ) -> StrategySignal | None:
+        if strat_name not in STRATEGY_MAP:
+            logger.warning(f"Unknown strategy: {strat_name}")
+            return None
+
+        strat_cls = STRATEGY_MAP[strat_name]
+        params    = self._strategy_params(strat_name)
+        strategy  = strat_cls(symbol=symbol, params=params)
+
+        # Fetch all required timeframes
+        tf_data   = self._fetch_timeframes(symbol, strat_name)
+        if not tf_data:
+            return None
+
+        # Call strategy with appropriate dataframe arguments
+        try:
+            result = self._dispatch(strategy, strat_name, tf_data)
+        except Exception as exc:
+            logger.exception(f"Strategy {strat_name} raised on {symbol}: {exc}")
+            return None
+
+        if result.signal is None:
+            return None
+
+        sig = result.signal
+
+        # Risk validation
+        account = self.client.get_account_info()
+        if account is None:
+            return None
+
+        balance = account.get("balance", 0.0)
+        self.risk_manager.update_balance(balance)
+
+        valid = self.risk_manager.validate_sl_tp(
+            direction=sig.direction,
+            entry=sig.entry_price,
+            sl=sig.sl_price,
+            tp=sig.tp_price,
+        )
+        if not valid:
+            logger.debug(f"{strat_name}/{symbol}: R:R validation failed — signal skipped")
+            return None
+
+        if not self.risk_manager.is_trading_allowed(trading_type):
+            logger.info(f"Trading halted for {trading_type} — signal skipped ({symbol})")
+            return None
+
+        sym_info = self.client.get_symbol_info(symbol)
+        if sym_info is None:
+            return None
+
+        lot = self.risk_manager.calculate_lot_size(
+            balance=balance,
+            entry=sig.entry_price,
+            sl=sig.sl_price,
+            symbol=symbol,
+            contract_size=sym_info.get("trade_contract_size", 100_000),
+            tick_value=sym_info.get("trade_tick_value", 1.0),
+            tick_size=sym_info.get("trade_tick_size", 0.00001),
+        )
+
+        return StrategySignal(
+            trading_type=trading_type,
+            symbol=symbol,
+            strategy=strat_name,
+            direction=sig.direction,
+            entry_price=sig.entry_price,
+            sl_price=sig.sl_price,
+            tp_price=sig.tp_price,
+            tp2_price=sig.tp2_price,
+            lot_size=lot,
+            comment=sig.comment,
+            indicators=result.indicators,
+        )
+
+    def _execute(self, sig: StrategySignal) -> bool:
+        if not self.risk_manager.check_concurrent_limit(sig.trading_type, sig.symbol):
+            logger.info(f"Concurrent limit reached for {sig.trading_type}/{sig.symbol}")
+            return False
+
+        req = OrderRequest(
+            symbol=sig.symbol,
+            direction=sig.direction,
+            lot_size=sig.lot_size,
+            sl_price=sig.sl_price,
+            tp_price=sig.tp_price,
+            comment=sig.comment,
+        )
+        result = self.order_manager.place_market_order(req)
+        if result and result.success:
+            logger.info(
+                f"Order placed: {sig.strategy}/{sig.symbol} {sig.direction} "
+                f"lot={sig.lot_size} sl={sig.sl_price} tp={sig.tp_price} ticket={result.ticket}"
+            )
+            return True
+        else:
+            logger.warning(f"Order failed: {sig.strategy}/{sig.symbol} {sig.direction}")
+            return False
+
+    def _fetch_timeframes(self, symbol: str, strat_name: str) -> dict[str, pd.DataFrame]:
+        tf_spec = TIMEFRAME_BARS.get(strat_name, {})
+        result: dict[str, pd.DataFrame] = {}
+        for tf_str, bars in tf_spec.items():
+            mt5_tf = MT5_TF.get(tf_str)
+            if mt5_tf is None:
+                continue
+            df = self.client.get_ohlcv(symbol, mt5_tf, bars)
+            if df is None or df.empty:
+                logger.debug(f"No data for {symbol} {tf_str}")
+                return {}  # abort — required data unavailable
+            result[tf_str] = df
+        return result
+
+    def _dispatch(
+        self,
+        strategy: Any,
+        strat_name: str,
+        tf_data: dict[str, pd.DataFrame],
+    ) -> StrategyResult:
+        """Call each strategy's calculate() with the right keyword arguments."""
+        if strat_name == "ema_scalp":
+            return strategy.calculate(tf_data["M1"], df_m5=tf_data.get("M5"))
+        if strat_name == "macd_ema_trend":
+            return strategy.calculate(tf_data["H1"], df_m15=tf_data.get("M15"))
+        if strat_name == "rsi_divergence":
+            return strategy.calculate(tf_data["M30"], df_h1=tf_data.get("H1"))
+        if strat_name == "ema_trend_rider":
+            return strategy.calculate(tf_data["H1"], df_h4=tf_data.get("H4"), df_d1=tf_data.get("D1"))
+        if strat_name == "weekly_breakout":
+            return strategy.calculate(tf_data["H4"], df_daily=tf_data.get("D1"))
+        # default: single dataframe using the first TF
+        primary_tf = next(iter(tf_data))
+        return strategy.calculate(tf_data[primary_tf])
+
+    # ── config helpers ────────────────────────────────────────────────────────
+
+    def _load_json(self, filename: str) -> dict:
+        path = CONFIG_DIR / filename
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def _enabled_symbols(self, trading_type: str) -> list[str]:
+        symbols = self._symbols_cfg.get(trading_type, {})
+        return [s for s, cfg in symbols.items() if cfg.get("enabled", False)]
+
+    def _active_strategies(self, trading_type: str) -> list[str]:
+        return self._strategies_cfg.get("active_strategies", {}).get(trading_type, [])
+
+    def _per_symbol_overrides(self, trading_type: str, symbol: str) -> list[str] | None:
+        overrides = self._strategies_cfg.get("per_symbol_overrides", {})
+        return overrides.get(trading_type, {}).get(symbol)
+
+    def _strategy_params(self, strat_name: str) -> dict:
+        return self._strategies_cfg.get("strategy_params", {}).get(strat_name, {})
