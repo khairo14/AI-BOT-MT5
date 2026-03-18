@@ -307,6 +307,14 @@ class RiskManager:
     # Status
     # ------------------------------------------------------------------
 
+    def reload_config(self) -> None:
+        """Re-read risk.json and apply updated thresholds at runtime."""
+        try:
+            self._config = self._load_config()
+            logger.info("RiskManager: config reloaded from disk")
+        except Exception as exc:
+            logger.warning(f"RiskManager.reload_config failed: {exc}")
+
     def get_status(self) -> dict:
         return {
             "daily_halted":          self._daily_halted,

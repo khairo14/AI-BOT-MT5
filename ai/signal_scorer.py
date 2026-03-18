@@ -119,9 +119,10 @@ class SignalScorer:
         Compare last bar's volume to its 20-bar average.
           at average → 0.5 | 2× above average → 1.0 | below average → 0.0
         """
-        if "tick_volume" not in df.columns or len(df) < 20:
+        vol_col = "volume" if "volume" in df.columns else "tick_volume"
+        if vol_col not in df.columns or len(df) < 20:
             return 0.5
-        vol = df["tick_volume"].values.astype(float)
+        vol = df[vol_col].values.astype(float)
         avg = vol[-20:].mean()
         if avg == 0:
             return 0.5

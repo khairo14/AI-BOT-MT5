@@ -100,6 +100,30 @@ def reject_signal(signal_id: str):
 
 @router.delete("/{signal_id}")
 def delete_signal(signal_id: str):
+    """Permanently remove a signal from the queue (any status)."""
+    if signal_id not in bus.queue:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    bus.queue.pop(signal_id, None)
+    return {"status": "deleted", "id": signal_id}
+
+
+@router.delete("/")
+def delete_all_terminal_signals():
+    """Remove all signals in a terminal state (executed, rejected, failed)."""
+    removed = _purge_all_terminal()
+    return {"status": "ok", "removed": removed}
+
+
+def _purge_all_terminal() -> int:
+    terminal = frozenset({"executed", "rejected", "failed"})
+    ids = [sid for sid, s in bus.queue.items() if s.get("status") in terminal]
+    for sid in ids:
+        bus.queue.pop(sid, None)
+    return len(ids)
+
+
+@router.delete("/{signal_id}")
+def delete_signal(signal_id: str):
     """Remove a signal from the queue."""
     if signal_id not in bus.queue:
         raise HTTPException(status_code=404, detail="Signal not found")

@@ -3,6 +3,7 @@ FastAPI application entry point — Phase 3.
 Mounts all REST routes and the WebSocket live feed.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,7 +12,7 @@ from loguru import logger
 
 from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes
 from api.websocket.feed import router as ws_router
-from api.signal_bus import bus
+from api.signal_bus import bus, _set_event_loop
 from api.runner_loop import start_runner_loop
 from engine.mt5_client import MT5Client
 from engine.order_manager import OrderManager
@@ -21,6 +22,7 @@ from engine.risk_manager import RiskManager
 # Shared MT5 client — created once at startup, closed at shutdown
 # ---------------------------------------------------------------------------
 mt5_client: MT5Client | None = None
+_risk_manager: RiskManager | None = None
 
 
 def get_mt5_client() -> "MT5Client | None":
@@ -28,10 +30,17 @@ def get_mt5_client() -> "MT5Client | None":
     return mt5_client
 
 
+def get_risk_manager() -> "RiskManager | None":
+    """Return the shared RiskManager instance (created at startup)."""
+    return _risk_manager
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global mt5_client
+    global mt5_client, _risk_manager
     logger.info("Starting AI-BOT-MT5 API...")
+    # Register the running event loop so thread executors can schedule coroutines safely
+    _set_event_loop(asyncio.get_event_loop())
     mt5_client = MT5Client()
     connected = mt5_client.connect()
     if not connected:
@@ -39,11 +48,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("MT5 connected at startup.")
         order_manager = OrderManager(mt5_client)
-        risk_manager = RiskManager()
+        _risk_manager = RiskManager()
         # Wire the SignalBus so approve → execute works
         bus.init(mt5_client, order_manager)
-        # Start the strategy runner background loop
-        start_runner_loop(mt5_client, order_manager, risk_manager)
+        # Start the strategy runner background loop (passes the same instance)
+        start_runner_loop(mt5_client, order_manager, _risk_manager)
     yield
     # Shutdown
     if mt5_client:

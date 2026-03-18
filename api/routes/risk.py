@@ -54,7 +54,8 @@ def risk_status():
     """
     from engine.risk_manager import RiskManager
     try:
-        from api.runner_loop import _risk_manager as rm  # type: ignore[attr-defined]
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
         if rm is None:
             raise AttributeError
     except (ImportError, AttributeError):

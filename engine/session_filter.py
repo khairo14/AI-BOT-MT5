@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, time
 from pathlib import Path
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -159,9 +160,6 @@ class SessionFilter:
         except Exception:
             return {}
 
-
-# Type hint shim so _SYMBOL_CATEGORY and Optional work at module level
-from typing import Optional   # noqa: E402
 
 # Application-level singleton
 session_filter = SessionFilter()

@@ -68,8 +68,10 @@ def update_risk_config(body: PatchRequest):
     _save("risk.json", current)
     # Signal the risk manager to reload
     try:
-        from api.routes.trades import _risk_manager
-        _risk_manager.reload_config()
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is not None:
+            rm.reload_config()
     except Exception:
         pass
     return current

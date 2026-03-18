@@ -353,7 +353,10 @@ class StrategyRunner:
             return json.load(f)
 
     def _enabled_symbols(self, trading_type: str) -> list[str]:
-        symbols = self._symbols_cfg.get(trading_type, {})
+        symbols = self._symbols_cfg.get(trading_type, [])
+        if isinstance(symbols, list):
+            return [s["symbol"] for s in symbols if s.get("enabled", False)]
+        # legacy dict format
         return [s for s, cfg in symbols.items() if cfg.get("enabled", False)]
 
     def _active_strategies(self, trading_type: str) -> list[str]:

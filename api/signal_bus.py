@@ -29,6 +29,18 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+# Signals older than this (seconds) with a terminal status are purged from the queue
+_SIGNAL_TTL_SECONDS = 3600  # 1 hour
+_TERMINAL_STATUSES = frozenset({"executed", "rejected", "failed"})
+
+
+def _set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Called once at startup so the thread executor can schedule coroutines safely."""
+    global _event_loop
+    _event_loop = loop
+
 from loguru import logger
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
@@ -54,6 +66,26 @@ class SignalBus:
         self._client = client
         self._order_manager = order_manager
 
+    def purge_stale(self) -> int:
+        """Remove terminal-state signals older than _SIGNAL_TTL_SECONDS. Returns count removed."""
+        now = datetime.now(tz=ZoneInfo("UTC"))
+        to_delete = []
+        for sid, sig in self.queue.items():
+            if sig.get("status") not in _TERMINAL_STATUSES:
+                continue
+            try:
+                created = datetime.fromisoformat(sig["created_at"].replace("Z", "+00:00"))
+                age = (now - created).total_seconds()
+                if age > _SIGNAL_TTL_SECONDS:
+                    to_delete.append(sid)
+            except Exception:
+                to_delete.append(sid)
+        for sid in to_delete:
+            self.queue.pop(sid, None)
+        if to_delete:
+            logger.debug(f"SignalBus: purged {len(to_delete)} stale signals")
+        return len(to_delete)
+
     # ── public API ──────────────────────────────────────────────────────────
 
     async def add_signal(self, signal: dict) -> dict:
@@ -65,6 +97,8 @@ class SignalBus:
         from api.websocket.feed import broadcast_signal
 
         self.queue[signal["id"]] = signal
+        # Lazily purge stale terminal-state signals to keep queue bounded
+        self.purge_stale()
 
         exec_mode = self._get_exec_mode(signal.get("trading_mode", ""))
         if exec_mode == "auto" and self._order_manager is not None:
@@ -152,13 +186,15 @@ class SignalBus:
                 except Exception:
                     pass
                 # Phase 7: kick off outcome poller in background
-                asyncio.create_task(
-                    _poll_outcome(
-                        ticket=result.ticket,
-                        signal=signal,
-                        client=self._client,
+                if ticket is not None and _event_loop is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        _poll_outcome(
+                            ticket=ticket,
+                            signal=signal,
+                            client=self._client,
+                        ),
+                        _event_loop,
                     )
-                )
                 return True
             else:
                 logger.warning(f"Signal execution failed: {signal['symbol']} {signal['direction']}")
@@ -202,9 +238,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             if positions:
                 continue   # still open
 
-            # Look in history
+            # Look in history — query from just before trade open to now
+            open_dt = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
+            end_dt  = datetime.now(tz=ZoneInfo("UTC"))
             deals = await asyncio.to_thread(
-                mt5.history_deals_get, 0, mt5.symbol_info_tick(signal["symbol"]).time + 86400 * 30  # type: ignore
+                mt5.history_deals_get, open_dt, end_dt
             )
             if deals is None:
                 deals = []

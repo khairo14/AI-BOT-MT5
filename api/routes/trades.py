@@ -15,8 +15,17 @@ from engine.risk_manager import RiskManager
 
 router = APIRouter()
 
-# Single risk manager instance for the API (shares state across requests)
-_risk_manager = RiskManager()
+
+def _get_risk_manager() -> RiskManager:
+    """Return the shared RiskManager created at startup, falling back to a fresh one."""
+    try:
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is not None:
+            return rm
+    except Exception:
+        pass
+    return RiskManager()
 
 
 class PlaceOrderRequest(BaseModel):
@@ -82,6 +91,7 @@ def place_order(
     Used by the manual confirmation flow and the strategy runner.
     """
     # Check circuit breakers
+    _risk_manager = _get_risk_manager()
     allowed, reason = _risk_manager.is_trading_allowed(body.trading_mode)
     if not allowed:
         raise HTTPException(status_code=403, detail=reason)
