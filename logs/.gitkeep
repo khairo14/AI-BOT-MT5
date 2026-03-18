@@ -1,0 +1,3 @@
+# This file keeps the logs/ directory in git.
+# Runtime log files (*.log, pids.json) are excluded by .gitignore.
+# start.ps1 writes: api_out.log, api_err.log, dashboard_out.log, dashboard_err.log, pids.json

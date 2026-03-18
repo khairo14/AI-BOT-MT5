@@ -35,9 +35,10 @@ ai/models/*.h5
 data/raw/
 data/processed/
 
-# Logs
-logs/
-*.log
+# Logs — keep directory, exclude runtime files
+logs/*.log
+logs/pids.json
+!logs/.gitkeep
 
 # OS
 .DS_Store

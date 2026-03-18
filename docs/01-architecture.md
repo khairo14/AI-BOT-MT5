@@ -194,11 +194,11 @@ AI-BOT-MT5/
 | 3 | FastAPI backend + WebSocket live price feed | ✅ Done (`44a1a04`) |
 | 4 | Next.js dashboard — 3 separate trading dashboards + charts | ✅ Done (`c152c0d`) |
 | 5 | Execution loop, signal bus, auto/manual mode toggle, browser notifications | ✅ Done (`2e18f82`) |
-| 6 | AI price prediction model + signal confidence scoring | Not Started |
-| 7 | Reinforcement learning agent training loop | Not Started |
-| 8 | Risk manager hardening + news filter + drawdown circuit breaker | Not Started |
-| 9 | Demo ↔ Live account switching + full paper trade sync | Not Started |
-| 10 | `start.ps1` / `stop.ps1` — 1-click Windows launcher (no Docker) | Not Started |
+| 6 | AI price prediction model + signal confidence scoring | ✅ Done (`af1818b`) |
+| 7 | Reinforcement learning agent training loop | ✅ Done (`0fbe1bd`) |
+| 8 | Risk manager hardening + news filter + drawdown circuit breaker | ✅ Done (`982d8ef`) |
+| 9 | Demo ↔ Live account switching + full paper trade sync | ✅ Done (`36e0437`) |
+| 10 | `start.ps1` / `stop.ps1` — 1-click Windows launcher (no Docker) | ✅ Done |
 
 ---
 
