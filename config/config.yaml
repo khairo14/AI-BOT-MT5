@@ -1,0 +1,73 @@
+# MT5 connection settings
+mt5:
+  login: 0               # Your XM account number (override via .env or env var MT5_LOGIN)
+  password: ""           # Your XM account password (override via .env or env var MT5_PASSWORD)
+  server: "XMGlobal-MT5" # XM broker server name
+  timeout: 60000         # Connection timeout in milliseconds
+  portable: false        # Use portable MetaTrader 5 installation
+
+# Trading parameters
+trading:
+  symbol: "EURUSD"       # Trading symbol
+  timeframe: "M15"       # Candlestick timeframe: M1, M5, M15, M30, H1, H4, D1, W1, MN1
+  magic_number: 20240101 # Unique identifier for bot's orders
+  comment: "AI-BOT-MT5"  # Order comment
+
+# Risk management
+risk:
+  risk_per_trade: 0.01   # Fraction of account balance to risk per trade (1%)
+  max_trades: 3          # Maximum number of simultaneous open trades
+  stop_loss_pips: 30     # Stop loss in pips
+  take_profit_pips: 60   # Take profit in pips (2:1 reward-to-risk)
+  max_daily_loss: 0.05   # Maximum daily loss as fraction of balance (5%)
+  trailing_stop: false   # Enable trailing stop loss
+  trailing_stop_pips: 15 # Trailing stop distance in pips
+
+# Strategy / AI model settings
+strategy:
+  lookback_periods: 100  # Number of historical candles used for feature calculation
+  train_lookback: 500    # Number of candles used to train the model
+  retrain_interval: 24   # Hours between model retraining
+  prediction_threshold: 0.60  # Minimum confidence for trade signals (0-1)
+  features:
+    - rsi
+    - macd
+    - macd_signal
+    - bb_upper
+    - bb_middle
+    - bb_lower
+    - ema_fast
+    - ema_slow
+    - atr
+    - stoch_k
+    - stoch_d
+    - close
+    - volume
+
+# Indicator parameters
+indicators:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+  ema_fast: 9
+  ema_slow: 21
+  atr_period: 14
+  stoch_k: 14
+  stoch_d: 3
+  stoch_smooth: 3
+
+# Logging
+logging:
+  level: "INFO"          # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_dir: "logs"        # Directory for log files
+  log_file: "bot.log"    # Log file name
+  max_bytes: 5242880     # 5 MB max log file size
+  backup_count: 5        # Number of rotated backup files
+
+# Model persistence
+model:
+  model_dir: "models"    # Directory to save trained models
+  model_file: "trading_model.joblib"  # Saved model filename
