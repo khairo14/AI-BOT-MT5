@@ -13,8 +13,13 @@ const ALL_SYMBOLS = [
 export default function AppBootstrap() {
   const { setAccount, setConfig, setSignals, setPositions } = useBotStore();
 
-  // boot: fetch initial data
+  // boot: fetch initial data + request browser notification permission
   useEffect(() => {
+    // Request browser notification permission once
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
     fetchAccount().then(setAccount).catch(() => {});
     fetchAppConfig().then(setConfig).catch(() => {});
     fetchSignals().then(setSignals).catch(() => {});

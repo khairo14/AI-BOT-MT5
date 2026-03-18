@@ -229,6 +229,19 @@ class StrategyRunner:
             indicators=result.indicators,
         )
 
+    def run_mode(self, trading_type: str) -> list[StrategySignal]:
+        """Run all enabled symbols for a single trading type. Used by the runner loop."""
+        new_signals: list[StrategySignal] = []
+        symbols = self._enabled_symbols(trading_type)
+        active_strategies = self._active_strategies(trading_type)
+        for symbol in symbols:
+            per_symbol_strats = self._per_symbol_overrides(trading_type, symbol) or active_strategies
+            for strat_name in per_symbol_strats:
+                sig = self._run_strategy(trading_type, symbol, strat_name)
+                if sig:
+                    new_signals.append(sig)
+        return new_signals
+
     def _execute(self, sig: StrategySignal) -> bool:
         if not self.risk_manager.check_concurrent_limit(sig.trading_type, sig.symbol):
             logger.info(f"Concurrent limit reached for {sig.trading_type}/{sig.symbol}")
@@ -237,9 +250,9 @@ class StrategyRunner:
         req = OrderRequest(
             symbol=sig.symbol,
             direction=sig.direction,
-            lot_size=sig.lot_size,
-            sl_price=sig.sl_price,
-            tp_price=sig.tp_price,
+            volume=sig.lot_size,
+            sl=sig.sl_price,
+            tp=sig.tp_price,
             comment=sig.comment,
         )
         result = self.order_manager.place_market_order(req)

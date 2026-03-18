@@ -12,12 +12,9 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-router = APIRouter()
+from api.signal_bus import bus
 
-# ---------------------------------------------------------------------------
-# In-memory signal queue (replaced by DB in later phase)
-# ---------------------------------------------------------------------------
-_signal_queue: dict[str, dict] = {}
+router = APIRouter()
 
 
 class Signal(BaseModel):
@@ -28,13 +25,10 @@ class Signal(BaseModel):
     entry_price: float
     sl: float
     tp: Optional[float] = None
+    lot_size: Optional[float] = None
     confidence: Optional[float] = None
-    timeframe: str
+    timeframe: str = ""
     note: Optional[str] = None
-
-
-class SignalActionRequest(BaseModel):
-    signal_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -42,87 +36,84 @@ class SignalActionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/")
-def list_signals(trading_mode: Optional[str] = None):
-    """Return all pending signals, optionally filtered by trading mode."""
-    signals = list(_signal_queue.values())
+def list_signals(trading_mode: Optional[str] = None, status: Optional[str] = None):
+    """Return signals, optionally filtered by trading_mode and/or status."""
+    signals = list(bus.queue.values())
     if trading_mode:
-        signals = [s for s in signals if s["trading_mode"] == trading_mode]
+        signals = [s for s in signals if s.get("trading_mode") == trading_mode]
+    if status:
+        signals = [s for s in signals if s.get("status") == status]
     return signals
 
 
 @router.get("/{signal_id}")
 def get_signal(signal_id: str):
     """Return a single signal by ID."""
-    signal = _signal_queue.get(signal_id)
+    signal = bus.queue.get(signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
     return signal
 
 
 @router.post("/")
-def add_signal(signal: Signal):
+async def add_signal(signal: Signal):
     """
-    Add a new signal to the pending queue.
-    Called by the strategy runner when a signal fires.
+    Add a new signal to the queue.
+    If execution_mode is 'auto' for this trading_mode, executes immediately.
     """
     signal_id = str(uuid.uuid4())
     entry = {
         "id":           signal_id,
-        "status":       "pending",
         "created_at":   datetime.now(tz=ZoneInfo("UTC")).isoformat(),
         **signal.model_dump(),
     }
-    _signal_queue[signal_id] = entry
-    return entry
+    return await bus.add_signal(entry)
 
 
 @router.post("/{signal_id}/approve")
-def approve_signal(signal_id: str):
+async def approve_signal(signal_id: str):
     """
-    Mark a signal as approved for execution.
-    The strategy runner polls this and fires the order.
+    Manually approve a signal — places the order immediately.
     """
-    signal = _signal_queue.get(signal_id)
+    signal = bus.queue.get(signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
-    if signal["status"] != "pending":
+    if signal["status"] not in ("pending",):
         raise HTTPException(status_code=400, detail=f"Signal is already '{signal['status']}'")
-    signal["status"] = "approved"
-    signal["actioned_at"] = datetime.now(tz=ZoneInfo("UTC")).isoformat()
-    return signal
+    try:
+        return await bus.execute_signal(signal_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Signal not found")
 
 
 @router.post("/{signal_id}/reject")
 def reject_signal(signal_id: str):
     """Reject and remove a signal from the queue."""
-    signal = _signal_queue.get(signal_id)
+    signal = bus.queue.get(signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
     signal["status"] = "rejected"
     signal["actioned_at"] = datetime.now(tz=ZoneInfo("UTC")).isoformat()
-    # Remove from active queue after rejection
-    _signal_queue.pop(signal_id, None)
+    bus.queue.pop(signal_id, None)
     return {"status": "rejected", "id": signal_id}
 
 
 @router.delete("/{signal_id}")
 def delete_signal(signal_id: str):
-    """Remove a signal from the queue (used after execution)."""
-    if signal_id not in _signal_queue:
+    """Remove a signal from the queue."""
+    if signal_id not in bus.queue:
         raise HTTPException(status_code=404, detail="Signal not found")
-    _signal_queue.pop(signal_id)
+    bus.queue.pop(signal_id)
     return {"status": "deleted", "id": signal_id}
 
 
 @router.delete("/")
 def clear_signals(trading_mode: Optional[str] = None):
-    """Clear all pending signals, optionally filtered by mode."""
-    global _signal_queue
+    """Clear all signals, optionally filtered by mode."""
     if trading_mode:
-        _signal_queue = {
-            k: v for k, v in _signal_queue.items()
-            if v["trading_mode"] != trading_mode
-        }
+        to_remove = [k for k, v in bus.queue.items() if v.get("trading_mode") == trading_mode]
+        for k in to_remove:
+            bus.queue.pop(k)
     else:
-        _signal_queue = {}
+        bus.queue.clear()
     return {"status": "cleared"}

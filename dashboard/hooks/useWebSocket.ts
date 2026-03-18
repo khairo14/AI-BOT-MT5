@@ -39,8 +39,15 @@ export function useWebSocket(symbols: string[]) {
             pushNotification({
               type: "info",
               title: `New signal — ${sig.symbol}`,
-              message: `${sig.direction.toUpperCase()} | ${sig.strategy} | conf: ${(sig.confidence * 100).toFixed(0)}%`,
+              message: `${sig.direction.toUpperCase()} | ${sig.strategy} | conf: ${sig.confidence != null ? (sig.confidence * 100).toFixed(0) + "%" : "—"}`,
             });
+            // Browser notification (if permission granted)
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              new Notification(`Signal: ${sig.symbol} ${sig.direction.toUpperCase()}`, {
+                body: `${sig.strategy} — Entry ${sig.entry?.toFixed(5) ?? "market"}`,
+                icon: "/favicon.ico",
+              });
+            }
             break;
           }
         }

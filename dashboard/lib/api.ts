@@ -75,8 +75,11 @@ export const fetchAppConfig = (): Promise<AppConfig> =>
 export const fetchRiskConfig = (): Promise<RiskConfig> =>
   api.get("/config/risk").then((r) => r.data);
 
+export const fetchExecutionMode = (): Promise<Record<string, string>> =>
+  api.get("/config/execution-mode").then((r) => r.data);
+
 export const setExecutionMode = (mode: TradingMode, execution: ExecutionMode) =>
-  api.post("/config/execution-mode", { mode, execution }).then((r) => r.data);
+  api.patch(`/config/execution-mode/${mode}?mode=${execution}`).then((r) => r.data);
 
 export const patchRiskConfig = (patch: Partial<RiskConfig>) =>
-  api.patch("/config/risk", patch).then((r) => r.data);
+  api.patch("/config/risk", { data: patch }).then((r) => r.data);

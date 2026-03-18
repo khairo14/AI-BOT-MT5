@@ -2,20 +2,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useBotStore } from "@/lib/store";
-import { switchMode } from "@/lib/api";
-import { fetchAccount } from "@/lib/api";
+import { switchMode, fetchAccount } from "@/lib/api";
 
 const NAV = [
   { href: "/", label: "Overview", icon: "⊞" },
   { href: "/scalping", label: "Scalping", icon: "⚡" },
   { href: "/day-trading", label: "Day Trading", icon: "☀" },
   { href: "/swing", label: "Swing", icon: "〰" },
+  { href: "/notifications", label: "Notifications", icon: "🔔" },
   { href: "/guide", label: "Trading Guide", icon: "📖" },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { account, setAccount, wsConnected } = useBotStore();
+  const { account, setAccount, wsConnected, notifications } = useBotStore();
+  const unreadCount = notifications.length;
 
   const handleModeToggle = async () => {
     if (!account) return;
@@ -52,7 +53,12 @@ export default function Sidebar() {
               }`}
             >
               <span className="text-base">{icon}</span>
-              {label}
+              <span className="flex-1">{label}</span>
+              {href === "/notifications" && unreadCount > 0 && (
+                <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 leading-none">
+                  {unreadCount}
+                </span>
+              )}
             </Link>
           );
         })}

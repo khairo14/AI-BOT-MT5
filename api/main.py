@@ -11,7 +11,11 @@ from loguru import logger
 
 from api.routes import account, trades, signals, config
 from api.websocket.feed import router as ws_router
+from api.signal_bus import bus
+from api.runner_loop import start_runner_loop
 from engine.mt5_client import MT5Client
+from engine.order_manager import OrderManager
+from engine.risk_manager import RiskManager
 
 # ---------------------------------------------------------------------------
 # Shared MT5 client — created once at startup, closed at shutdown
@@ -34,6 +38,12 @@ async def lifespan(app: FastAPI):
         logger.error("MT5 failed to connect at startup — check credentials and MT5 terminal.")
     else:
         logger.info("MT5 connected at startup.")
+        order_manager = OrderManager(mt5_client)
+        risk_manager = RiskManager()
+        # Wire the SignalBus so approve → execute works
+        bus.init(mt5_client, order_manager)
+        # Start the strategy runner background loop
+        start_runner_loop(mt5_client, order_manager, risk_manager)
     yield
     # Shutdown
     if mt5_client:
