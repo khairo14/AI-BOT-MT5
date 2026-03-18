@@ -27,15 +27,17 @@ DEFAULT_PARAMS = {
 }
 
 
-def _prior_week_levels(df_daily: pd.DataFrame) -> tuple[float | None, float | None]:
+def _prior_week_levels(df_daily: "pd.DataFrame | None") -> tuple[float | None, float | None]:
     """Return (prior_week_high, prior_week_low) from daily data."""
     if df_daily is None or len(df_daily) < 10:
         return None, None
     df_daily = df_daily.copy()
-    df_daily["week"] = pd.to_datetime(df_daily["time"]).dt.isocalendar().week
-    df_daily["year"] = pd.to_datetime(df_daily["time"]).dt.isocalendar().year
+    # Use .dt accessor directly — time column is already datetime from get_ohlcv
+    iso = df_daily["time"].dt.isocalendar()  # type: ignore[attr-defined]
+    df_daily["week"] = iso.week.values
+    df_daily["year"] = iso.year.values
     grouped = df_daily.groupby(["year", "week"])
-    week_keys = sorted(grouped.groups.keys())
+    week_keys = sorted(grouped.groups.keys())  # type: ignore[type-var]
     if len(week_keys) < 2:
         return None, None
     prior_key = week_keys[-2]

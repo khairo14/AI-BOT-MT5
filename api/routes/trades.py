@@ -110,6 +110,8 @@ def place_order(
 
     # Calculate lot size
     account = client.get_account_info()
+    if account is None:
+        raise HTTPException(status_code=503, detail="Could not fetch account info")
     lot = _risk_manager.calculate_lot_size(
         account_balance=account["balance"],
         entry_price=entry,
@@ -147,7 +149,7 @@ def place_order(
         from engine.trade_journal import trade_journal
         from engine.account_store import current_mode
         trade_journal.log(
-            ticket=result.ticket,
+            ticket=result.ticket or 0,
             symbol=body.symbol,
             direction=body.direction,
             volume=lot,

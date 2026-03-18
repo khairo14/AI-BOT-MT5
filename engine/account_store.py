@@ -15,13 +15,17 @@ import json
 import os
 from pathlib import Path
 
+from typing import Literal, Optional
+
 from loguru import logger
+
+AccountMode = Literal["paper", "live"]
 
 _STORE_PATH = Path(__file__).parent.parent / "config" / "account_mode.json"
 _VALID_MODES = frozenset({"paper", "live"})
 
 
-def load_mode() -> str:
+def load_mode() -> AccountMode:
     """
     Return the active trading mode.
 
@@ -35,12 +39,12 @@ def load_mode() -> str:
             data = json.loads(_STORE_PATH.read_text())
             mode = data.get("mode", "").lower()
             if mode in _VALID_MODES:
-                return mode
+                return mode  # type: ignore[return-value]
         except Exception:
             pass
 
     env_mode = os.getenv("TRADING_MODE", "paper").lower()
-    return env_mode if env_mode in _VALID_MODES else "paper"
+    return env_mode if env_mode in _VALID_MODES else "paper"  # type: ignore[return-value]
 
 
 def save_mode(mode: str) -> None:
@@ -54,6 +58,6 @@ def save_mode(mode: str) -> None:
     logger.info(f"Trading mode saved: {mode.upper()}")
 
 
-def current_mode() -> str:
+def current_mode() -> AccountMode:
     """Convenience alias for load_mode()."""
     return load_mode()

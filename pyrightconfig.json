@@ -1,0 +1,13 @@
+{
+  "pythonVersion": "3.11",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "reportMissingModuleSource": "none",
+  "reportMissingImports": "none",
+  "exclude": [
+    "dashboard/**",
+    "ai/models/**",
+    ".venv/**", "**/node_modules", "**/__pycache__", "**/.*"
+  ]
+}

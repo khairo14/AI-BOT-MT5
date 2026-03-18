@@ -75,21 +75,6 @@ class SignalScorer:
             return rl_manager.should_take_signal(trading_type, confidence)
         except Exception:
             return True
-            rr     = self._rr_score(entry, sl, tp)
-            trend  = self._trend_score(direction, df)
-            volume = self._volume_score(df)
-
-            score = (
-                self.W_LSTM   * lstm   +
-                self.W_RR     * rr     +
-                self.W_TREND  * trend  +
-                self.W_VOLUME * volume
-            )
-            return round(float(np.clip(score, 0.0, 1.0)), 4)
-
-        except Exception as exc:
-            logger.warning(f"SignalScorer error [{symbol}]: {exc}")
-            return 0.5
 
     # ── component scorers ────────────────────────────────────────────────────
 

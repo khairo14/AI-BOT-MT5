@@ -225,7 +225,7 @@ class MT5Client:
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
         df = df.rename(columns={"tick_volume": "volume"})
         df = df[["time", "open", "high", "low", "close", "volume"]]
-        df = df.sort_values("time").reset_index(drop=True)
+        df = df.sort_values(by="time").reset_index(drop=True)  # type: ignore[call-overload]
         return df
 
     def get_ohlcv_range(
@@ -250,7 +250,7 @@ class MT5Client:
         df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
         df = df.rename(columns={"tick_volume": "volume"})
         df = df[["time", "open", "high", "low", "close", "volume"]]
-        df = df.sort_values("time").reset_index(drop=True)
+        df = df.sort_values(by="time").reset_index(drop=True)  # type: ignore[call-overload]
         return df
 
     # ------------------------------------------------------------------

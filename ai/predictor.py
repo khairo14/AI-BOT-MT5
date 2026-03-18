@@ -22,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from loguru import logger
@@ -79,8 +81,8 @@ class PricePredictor:
     """Per-symbol LSTM price direction predictor (application singleton)."""
 
     def __init__(self):
-        self._models:   dict[str, object] = {}   # symbol → nn.Module
-        self._scalers:  dict[str, object] = {}   # symbol → StandardScaler
+        self._models:   dict[str, Any] = {}   # key → nn.Module
+        self._scalers:  dict[str, Any] = {}   # key → StandardScaler
         self._metadata: dict[str, dict]   = {}   # symbol → {trained_at, accuracy, bars_used}
         self._training: set[str]          = set()
         self._lock = threading.Lock()
@@ -88,12 +90,13 @@ class PricePredictor:
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def predict(self, symbol: str, df: pd.DataFrame) -> float:
+    def predict(self, symbol: str, df: pd.DataFrame, trading_type: str = "day_trading") -> float:
         """
         Return P(next bar close > current bar close) in [0, 1].
         Returns 0.5 (neutral) if no model is trained or torch unavailable.
         """
-        if not _torch_available() or symbol not in self._models:
+        key = _model_key(symbol, trading_type)
+        if not _torch_available() or key not in self._models:
             return 0.5
 
         import torch
@@ -102,35 +105,36 @@ class PricePredictor:
         if features is None or len(features) < SEQUENCE_LEN:
             return 0.5
 
-        scaler = self._scalers[symbol]
+        scaler = self._scalers[key]
         scaled = scaler.transform(features[-SEQUENCE_LEN:])
         x      = torch.tensor(scaled, dtype=torch.float32).unsqueeze(0)
 
-        model = self._models[symbol]
+        model = self._models[key]
         model.eval()
         with torch.no_grad():
             prob = model(x).item()
         return float(prob)
 
-    def train_async(self, symbol: str, df: pd.DataFrame) -> bool:
+    def train_async(self, symbol: str, df: pd.DataFrame, trading_type: str = "day_trading") -> bool:
         """
-        Start background training for a symbol. Returns False if already in progress.
+        Start background training for a symbol+type. Returns False if already in progress.
         Poll status() to check completion.
         """
+        key = _model_key(symbol, trading_type)
         with self._lock:
-            if symbol in self._training:
+            if key in self._training:
                 return False
-            self._training.add(symbol)
-        t = threading.Thread(target=self._train, args=(symbol, df), daemon=True)
+            self._training.add(key)
+        t = threading.Thread(target=self._train, args=(symbol, trading_type, df), daemon=True)
         t.start()
-        logger.info(f"LSTM training started for {symbol} ({len(df)} bars)")
+        logger.info(f"LSTM training started for {key} ({len(df)} bars)")
         return True
 
-    def is_training(self, symbol: str) -> bool:
-        return symbol in self._training
+    def is_training(self, symbol: str, trading_type: str = "day_trading") -> bool:
+        return _model_key(symbol, trading_type) in self._training
 
-    def is_trained(self, symbol: str) -> bool:
-        return symbol in self._models
+    def is_trained(self, symbol: str, trading_type: str = "day_trading") -> bool:
+        return _model_key(symbol, trading_type) in self._models
 
     def status(self) -> dict:
         """Return training status dict for all known symbol+type keys."""

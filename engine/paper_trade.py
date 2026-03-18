@@ -83,9 +83,9 @@ class PaperTradeEngine:
         req = OrderRequest(
             symbol=sig.symbol,
             direction=sig.direction,
-            lot_size=sig.lot_size,
-            sl_price=sig.sl_price,
-            tp_price=sig.tp_price,
+            volume=sig.lot_size,
+            sl=sig.sl_price,
+            tp=sig.tp_price,
             comment=comment,
         )
         result: OrderResult = self.order_manager.place_market_order(req)
@@ -94,20 +94,20 @@ class PaperTradeEngine:
             return None
 
         pos = PaperPosition(
-            ticket=result.ticket,
+            ticket=result.ticket or 0,
             symbol=sig.symbol,
             direction=sig.direction,
             lot_size=sig.lot_size,
-            open_price=result.price,
+            open_price=result.open_price or 0.0,
             sl_price=sig.sl_price,
-            tp_price=sig.tp_price,
+            tp_price=sig.tp_price or 0.0,
             open_time=time.time(),
             comment=comment,
             strategy=sig.strategy,
             trading_type=sig.trading_type,
-            current_price=result.price,
+            current_price=result.open_price or 0.0,
         )
-        self._positions[result.ticket] = pos
+        self._positions[result.ticket or 0] = pos
         logger.info(
             f"Paper position opened: {sig.symbol} {sig.direction} "
             f"lot={sig.lot_size} ticket={result.ticket}"
@@ -184,4 +184,4 @@ class PaperTradeEngine:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _verify_paper_mode(self) -> bool:
-        return self.client.mode == "paper"
+        return self.client.trading_mode == "paper"

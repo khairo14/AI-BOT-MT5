@@ -23,7 +23,7 @@ from engine.risk_manager import RiskManager
 mt5_client: MT5Client | None = None
 
 
-def get_mt5_client() -> MT5Client:
+def get_mt5_client() -> "MT5Client | None":
     """Return the application-level MT5 client instance."""
     return mt5_client
 

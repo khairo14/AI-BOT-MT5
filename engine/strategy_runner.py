@@ -84,7 +84,7 @@ class StrategySignal:
     direction: str
     entry_price: float
     sl_price: float
-    tp_price: float
+    tp_price: float | None
     tp2_price: float | None
     lot_size: float
     comment: str
@@ -190,13 +190,13 @@ class StrategyRunner:
         balance = account.get("balance", 0.0)
         self.risk_manager.update_balance(balance)
 
-        valid = self.risk_manager.validate_sl_tp(
+        sl_ok, _err = self.risk_manager.validate_sl_tp(
             direction=sig.direction,
-            entry=sig.entry_price,
-            sl=sig.sl_price,
-            tp=sig.tp_price,
+            entry_price=sig.entry_price,
+            sl_price=sig.sl_price,
+            tp_price=sig.tp_price,
         )
-        if not valid:
+        if not sl_ok:
             logger.debug(f"{strat_name}/{symbol}: R:R validation failed — signal skipped")
             return None
 
@@ -285,8 +285,10 @@ class StrategyRunner:
         return new_signals
 
     def _execute(self, sig: StrategySignal) -> bool:
-        if not self.risk_manager.check_concurrent_limit(sig.trading_type, sig.symbol):
-            logger.info(f"Concurrent limit reached for {sig.trading_type}/{sig.symbol}")
+        open_positions = self.client.get_open_positions()
+        allowed, _reason = self.risk_manager.check_concurrent_limit(sig.trading_type, open_positions)
+        if not allowed:
+            logger.info(f"Concurrent limit reached for {sig.trading_type}/{sig.symbol}: {_reason}")
             return False
 
         req = OrderRequest(
