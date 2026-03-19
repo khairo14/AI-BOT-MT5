@@ -176,6 +176,7 @@ class MT5Client:
             "digits":        info.digits,
             "point":         info.point,
             "pip_value":     info.trade_tick_value,
+            "tick_size":     info.trade_tick_size,
             "contract_size": info.trade_contract_size,
             "min_lot":       info.volume_min,
             "max_lot":       info.volume_max,

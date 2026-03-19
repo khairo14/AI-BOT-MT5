@@ -88,7 +88,7 @@ class OrderManager:
             "magic":     req.magic,
             "comment":   req.comment[:31],  # MT5 limit: 31 chars
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": mt5.ORDER_FILLING_RETURN,
         }
 
         result = mt5.order_send(request)
@@ -187,7 +187,7 @@ class OrderManager:
             "magic":        pos.magic,
             "comment":      reason[:31],
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": mt5.ORDER_FILLING_RETURN,
         }
 
         result = mt5.order_send(request)
@@ -262,7 +262,7 @@ class OrderManager:
             "magic":        pos.magic,
             "comment":      reason[:31],
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": mt5.ORDER_FILLING_RETURN,
         }
 
         result = mt5.order_send(request)

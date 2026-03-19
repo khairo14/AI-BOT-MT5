@@ -228,9 +228,9 @@ class StrategyRunner:
             entry=sig.entry_price,
             sl=sig.sl_price,
             symbol=symbol,
-            contract_size=sym_info.get("trade_contract_size", 100_000),
-            tick_value=sym_info.get("trade_tick_value", 1.0),
-            tick_size=sym_info.get("trade_tick_size", 0.00001),
+            contract_size=sym_info.get("contract_size", 100_000),
+            tick_value=sym_info.get("pip_value", 1.0),
+            tick_size=sym_info.get("tick_size", 0.00001),
         )
 
         # Apply RL agent risk-factor multiplier (1.0 = neutral, 0.5–1.5 range).
@@ -240,8 +240,8 @@ class StrategyRunner:
             from ai.rl_agent import rl_manager as _rl
             rf = _rl.risk_factor(trading_type)
             if rf != 1.0:
-                min_lot = sym_info.get("volume_min", 0.01)
-                lot_step = sym_info.get("volume_step", 0.01)
+                min_lot = sym_info.get("min_lot", 0.01)
+                lot_step = sym_info.get("lot_step", 0.01)
                 lot = max(min_lot, round(round(lot * rf / lot_step) * lot_step, 2))
         except Exception:
             pass  # RL not available — use raw lot as-is
@@ -357,10 +357,7 @@ class StrategyRunner:
         tf_spec = TIMEFRAME_BARS.get(strat_name, {})
         result: dict[str, pd.DataFrame] = {}
         for tf_str, bars in tf_spec.items():
-            mt5_tf = MT5_TF.get(tf_str)
-            if mt5_tf is None:
-                continue
-            df = self.client.get_ohlcv(symbol, mt5_tf, bars)
+            df = self.client.get_ohlcv(symbol, tf_str, bars)
             if df is None or df.empty:
                 logger.debug(f"No data for {symbol} {tf_str}")
                 return {}  # abort — required data unavailable
