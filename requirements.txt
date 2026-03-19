@@ -1,5 +1,5 @@
 # ============================================================
-# AI-BOT-MT5 — Python Dependencies
+# EVOTRADE-AI — Python Dependencies
 # Install with: pip install -r requirements.txt
 # ============================================================
 

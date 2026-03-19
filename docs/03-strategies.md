@@ -1,4 +1,4 @@
-# AI-BOT-MT5 — Trading Strategies
+# EVOTRADE-AI — Trading Strategies
 
 ## Strategy Design Rules
 

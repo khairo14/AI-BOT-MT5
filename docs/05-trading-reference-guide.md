@@ -1,6 +1,6 @@
 # Trading Reference Guide
 
-> This guide is embedded in the AI-BOT-MT5 dashboard as a quick-reference panel. It covers the essentials you need to understand what the bot is doing and why — no prior professional trading knowledge required.
+> This guide is embedded in the EVOTRADE-AI dashboard as a quick-reference panel. It covers the essentials you need to understand what the bot is doing and why — no prior professional trading knowledge required.
 
 ---
 

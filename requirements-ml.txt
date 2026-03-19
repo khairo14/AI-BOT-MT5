@@ -1,5 +1,5 @@
 # ============================================================
-# AI-BOT-MT5 — ML Dependencies (Phase 6+)
+# EVOTRADE-AI — ML Dependencies (Phase 6+)
 # Install with: pip install -r requirements-ml.txt
 # These are large downloads (~2-3GB). Only needed from Phase 6.
 # ============================================================

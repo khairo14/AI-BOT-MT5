@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI-BOT-MT5 | XM Trading Dashboard",
+  title: "EVOTRADE-AI | XM Trading Dashboard",
   description: "Algorithmic trading dashboard for XM MetaTrader 5",
 };
 

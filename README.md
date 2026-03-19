@@ -1,4 +1,4 @@
-# AI-BOT-MT5
+# EVOTRADE-AI
 
 An AI-powered multi-mode trading bot for XM (MetaTrader 5) with scalping, day trading, and swing trading — each with its own dashboard, strategies, and symbol scope. Supports paper (demo) and live trading with manual confirmation or fully automatic execution.
 

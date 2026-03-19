@@ -1,4 +1,4 @@
-# AI-BOT-MT5 — System Architecture
+# EVOTRADE-AI — System Architecture
 
 ## Overview
 
@@ -119,7 +119,7 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 ## Project Directory Structure
 
 ```
-AI-BOT-MT5/
+EVOTRADE-AI/
 ├── docs/                         # All documentation (you are here)
 ├── engine/
 │   ├── mt5_client.py             # MT5 connection, account, data

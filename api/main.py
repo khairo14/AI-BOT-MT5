@@ -38,7 +38,7 @@ def get_risk_manager() -> "RiskManager | None":
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global mt5_client, _risk_manager
-    logger.info("Starting AI-BOT-MT5 API...")
+    logger.info("Starting EVOTRADE-AI API...")
     # Register the running event loop so thread executors can schedule coroutines safely
     _set_event_loop(asyncio.get_event_loop())
     mt5_client = MT5Client()
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="AI-BOT-MT5 API",
+    title="EVOTRADE-AI API",
     version="1.0.0",
     description="Trading bot backend — XM MT5 via Python",
     lifespan=lifespan,

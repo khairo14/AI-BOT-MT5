@@ -1,4 +1,4 @@
-# AI-BOT-MT5 — Symbol Scope & Trading Category Map
+# EVOTRADE-AI — Symbol Scope & Trading Category Map
 
 ## Guiding Principles
 

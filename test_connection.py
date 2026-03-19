@@ -1,5 +1,5 @@
 """
-AI-BOT-MT5 — Phase 1 Connection Test
+EVOTRADE-AI — Phase 1 Connection Test
 Run this to verify MT5 connects, credentials work, and data is flowing.
 """
 
@@ -8,7 +8,7 @@ from engine.mt5_client import MT5Client
 
 def main():
     print("=" * 60)
-    print("AI-BOT-MT5 — Phase 1 Connection Test")
+    print("EVOTRADE-AI — Phase 1 Connection Test")
     print("=" * 60)
 
     with MT5Client() as client:

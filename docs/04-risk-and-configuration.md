@@ -1,4 +1,4 @@
-# AI-BOT-MT5 — Risk Management & Configuration
+# EVOTRADE-AI — Risk Management & Configuration
 
 ## Philosophy
 
