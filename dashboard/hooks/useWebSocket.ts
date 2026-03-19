@@ -17,6 +17,7 @@ function normalizeSignal(raw: Record<string, unknown>): Signal {
     sl:               (raw.sl as number) ?? 0,
     tp:               (raw.tp as number) ?? 0,
     confidence:       (raw.confidence as number) ?? 0,
+    rr:               raw.rr as number | undefined,
     timestamp:        ((raw.created_at ?? raw.timestamp) as string) ?? new Date().toISOString(),
     status:           (raw.status as Signal["status"]) ?? "pending",
     reason:           (raw.rejection_reason ?? raw.reason) as string | undefined,

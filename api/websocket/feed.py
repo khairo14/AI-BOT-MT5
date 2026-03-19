@@ -82,6 +82,11 @@ manager = ConnectionManager()
 
 _poller_task: Optional[asyncio.Task] = None
 
+# Symbols that have had no tick data for ≥ 60 consecutive seconds are suppressed
+# until they produce a tick again (e.g. stocks outside NYSE hours).
+_no_tick_counts: dict[str, int] = {}
+_NO_TICK_SUPPRESS_AFTER = 60  # seconds — suppress after 60 failed attempts
+
 
 async def _tick_poller():
     """
@@ -102,9 +107,15 @@ async def _tick_poller():
 
         symbols = manager.active_symbols
         for symbol in symbols:
+            # Skip symbols that have been consistently returning no tick
+            if _no_tick_counts.get(symbol, 0) >= _NO_TICK_SUPPRESS_AFTER:
+                continue
             tick = client.get_current_price(symbol)
             if tick is None:
+                _no_tick_counts[symbol] = _no_tick_counts.get(symbol, 0) + 1
                 continue
+            # Tick arrived — reset suppress counter
+            _no_tick_counts[symbol] = 0
             payload = {
                 "type":   "tick",
                 "symbol": tick["symbol"],

@@ -53,6 +53,7 @@ export interface Signal {
   sl: number;
   tp: number;
   confidence: number;
+  rr?: number;
   timestamp: string;
   status: SignalStatus;
   reason?: string;

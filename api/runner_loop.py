@@ -114,6 +114,16 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
 
 
 def _signal_to_dict(sig, mode: str) -> dict:
+    # Compute R:R if entry, sl, tp are available
+    rr = None
+    try:
+        if sig.entry_price and sig.sl_price and sig.tp_price:
+            risk = abs(sig.entry_price - sig.sl_price)
+            reward = abs(sig.tp_price - sig.entry_price)
+            if risk > 0:
+                rr = round(reward / risk, 2)
+    except Exception:
+        pass
     return {
         "id":           str(uuid.uuid4()),
         "status":       "pending",
@@ -129,6 +139,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
         "confidence":   sig.confidence if sig.confidence > 0 else None,
         "timeframe":    sig.timeframe,
         "note":         sig.comment,
+        "rr":           rr,
     }
 
 

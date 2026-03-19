@@ -219,6 +219,11 @@ export default function SignalQueue({ mode }: Props) {
                 </span>
                 <span className="font-semibold text-white">{s.symbol}</span>
                 <span className="text-gray-500 text-xs">{s.strategy}</span>
+                {s.rr != null && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700/70 text-gray-400 font-mono">
+                    {s.rr.toFixed(1)}R
+                  </span>
+                )}
                 {s.timeframe && (
                   <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700/70 text-gray-400 font-mono">
                     {s.timeframe}
@@ -268,10 +273,9 @@ export default function SignalQueue({ mode }: Props) {
             </div>
 
             {/* Expiry / rejection reason */}
-            {(s.status === "failed" || s.status === "rejected" || s.status === "expired") &&
-              (s.rejection_reason || s.reason) && (
+            {(s.status === "failed" || s.status === "rejected" || s.status === "expired") && (
               <p className="text-xs text-gray-400 bg-gray-900/60 rounded px-2 py-1.5 border border-gray-700">
-                {s.rejection_reason ?? s.reason}
+                {s.rejection_reason ?? s.reason ?? (s.status === "failed" ? "Order rejected by broker" : s.status === "expired" ? "Signal expired before execution" : "Rejected")}
               </p>
             )}
 
