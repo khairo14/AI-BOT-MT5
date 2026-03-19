@@ -4,11 +4,27 @@ import { useState, useEffect, useCallback } from "react";
 import {
   runBacktest,
   fetchBacktestStrategies,
+  fetchBacktestHistory,
+  fetchBacktestRun,
+  deleteBacktestRun,
   BacktestRequest,
 } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 type TradingType = "scalping" | "day_trading" | "swing";
+
+interface HistoryItem {
+  id: string; run_at: string; symbol: string; strategy: string;
+  trading_type: string; timeframe: string; bars_tested: number;
+  total_trades: number; win_rate: number; profit_factor: number;
+  max_drawdown_pct: number; sharpe_ratio: number; total_pnl_pct: number;
+  initial_balance: number; risk_pct: number;
+}
+
+interface HistoryPage {
+  total: number; page: number; page_size: number; pages: number;
+  items: HistoryItem[];
+}
 
 interface BacktestTrade {
   trade_num:    number;
@@ -47,6 +63,31 @@ interface BacktestResult {
   expectancy_pct:   number;
 }
 
+// ── Symbol groups per mode (mirrors chart pages) ─────────────────────────
+interface SymbolGroup { label: string; symbols: string[] }
+const SYMBOL_GROUPS: Record<TradingType, SymbolGroup[]> = {
+  scalping: [
+    { label: "Forex Majors", symbols: ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"] },
+    { label: "Forex Minors", symbols: ["EURJPY"] },
+    { label: "Indices",      symbols: ["US100Cash", "US30Cash"] },
+  ],
+  day_trading: [
+    { label: "Forex Majors", symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"] },
+    { label: "Forex Minors", symbols: ["GBPJPY"] },
+    { label: "Commodities",  symbols: ["GOLD", "OilCash"] },
+    { label: "Indices",      symbols: ["US100Cash", "US30Cash", "US500Cash", "GER40Cash", "UK100Cash"] },
+    { label: "Crypto",       symbols: ["BTCUSD", "ETHUSD"] },
+    { label: "Stocks",       symbols: ["TSLA.OQ", "NVDA.OQ", "AAPL.OQ", "MSFT.OQ", "AMZN.OQ"] },
+  ],
+  swing: [
+    { label: "Forex Majors", symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"] },
+    { label: "Commodities",  symbols: ["GOLD", "SILVER", "OilCash", "BRENTCash", "NGASCash"] },
+    { label: "Indices",      symbols: ["US100Cash", "US500Cash"] },
+    { label: "Crypto",       symbols: ["BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD"] },
+    { label: "Stocks",       symbols: ["TSLA.OQ", "NVDA.OQ", "GOOGL.OQ", "META.OQ", "NFLX.OQ", "AMD.OQ"] },
+  ],
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 const MODES: TradingType[] = ["scalping", "day_trading", "swing"];
 const DEFAULT_STRATEGIES: Record<TradingType, string[]> = {
@@ -56,9 +97,32 @@ const DEFAULT_STRATEGIES: Record<TradingType, string[]> = {
 };
 
 function pct(v: number) { return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`; }
+function modeLabel(m: string) { return m.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()); }
+function relTime(iso: string) {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60_000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  } catch { return iso; }
+}
 function fmtTime(iso: string) {
   try { return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }); }
   catch { return iso; }
+}
+
+// ── Mini sparkline for history rows ──────────────────────────────────────
+function MiniSparkline({ pnl }: { pnl: number }) {
+  const color = pnl >= 0 ? "#10b981" : "#ef4444";
+  const end = pnl >= 0 ? 4 : 24;
+  return (
+    <svg viewBox="0 0 40 28" width="40" height="28">
+      <polyline points={`2,14 20,14 38,${end}`} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 // ── Equity SVG sparkline ───────────────────────────────────────────────────
@@ -116,8 +180,8 @@ export default function BacktestPage() {
   const [strategies, setStrategies] = useState<Record<TradingType, string[]>>(DEFAULT_STRATEGIES);
 
   // Form state
-  const [symbol,  setSymbol]  = useState("EURUSD");
   const [mode,    setMode]    = useState<TradingType>("scalping");
+  const [symbol,  setSymbol]  = useState("EURUSD");
   const [strat,   setStrat]   = useState("ema_scalp");
   const [bars,    setBars]    = useState(2000);
   const [balance, setBalance] = useState(10000);
@@ -127,44 +191,73 @@ export default function BacktestPage() {
   const [error,   setError]   = useState<string | null>(null);
   const [result,  setResult]  = useState<BacktestResult | null>(null);
 
-  // Load strategy list on mount
+  // History state
+  const [history,     setHistory]     = useState<HistoryPage | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [histLoading, setHistLoading] = useState(false);
+  const [deletingId,  setDeletingId]  = useState<string | null>(null);
+  const [loadingId,   setLoadingId]   = useState<string | null>(null);
+
+  const loadHistory = useCallback(async (page = 1) => {
+    setHistLoading(true);
+    try {
+      const data = await fetchBacktestHistory({ page, page_size: 15 });
+      setHistory(data as HistoryPage);
+      setHistoryPage(page);
+    } catch { /* offline */ }
+    finally { setHistLoading(false); }
+  }, []);
+
+  // Load strategies + history on mount
   useEffect(() => {
     fetchBacktestStrategies()
       .then((data) => setStrategies(data as Record<TradingType, string[]>))
-      .catch(() => {/* use defaults */});
-  }, []);
+      .catch(() => {});
+    loadHistory(1);
+  }, [loadHistory]);
 
-  // When mode changes, reset strategy to first option
-  const handleModeChange = useCallback((m: TradingType) => {
+  const handleModeChange = (m: TradingType) => {
     setMode(m);
+    setSymbol(SYMBOL_GROUPS[m][0]?.symbols[0] ?? "EURUSD");
     setStrat(strategies[m]?.[0] ?? "");
-  }, [strategies]);
+  };
 
   async function handleRun() {
     setRunning(true);
     setError(null);
     setResult(null);
     try {
-      const req: BacktestRequest = {
-        symbol,
-        strategy: strat,
-        trading_type: mode,
-        bars,
-        initial_balance: balance,
-        risk_pct: riskPct,
-      };
+      const req: BacktestRequest = { symbol, strategy: strat, trading_type: mode, bars, initial_balance: balance, risk_pct: riskPct };
       const data = await runBacktest(req);
       setResult(data as BacktestResult);
+      loadHistory(1);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } }; message?: string })
-        ?.response?.data?.detail ?? (e as { message?: string })?.message ?? "Unknown error";
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? (e as { message?: string })?.message ?? "Unknown error";
       setError(String(msg));
-    } finally {
-      setRunning(false);
-    }
+    } finally { setRunning(false); }
   }
 
-  const modeLabel = (m: string) => m.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  async function handleLoadRun(id: string) {
+    setLoadingId(id);
+    try {
+      const data = await fetchBacktestRun(id);
+      setResult(data as BacktestResult);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch { /* ignore */ }
+    finally { setLoadingId(null); }
+  }
+
+  async function handleDelete(id: string) {
+    setDeletingId(id);
+    try {
+      await deleteBacktestRun(id);
+      if ((result as BacktestResult & { id?: string })?.id === id) setResult(null);
+      loadHistory(historyPage);
+    } catch { /* ignore */ }
+    finally { setDeletingId(null); }
+  }
+
   const outcomeColor = (o: string) =>
     o === "tp_hit" ? "text-emerald-400" : o === "sl_hit" ? "text-red-400" : "text-amber-400";
 
@@ -181,18 +274,7 @@ export default function BacktestPage() {
       <section className="bg-gray-900 border border-gray-800 rounded-xl p-6">
         <h2 className="text-base font-semibold text-white mb-5">Configuration</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          {/* Symbol */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">Symbol</label>
-            <input
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-              placeholder="EURUSD"
-            />
-          </div>
-
-          {/* Mode */}
+          {/* Mode — first so symbol resets relative to it */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500">Mode</label>
             <select
@@ -202,6 +284,22 @@ export default function BacktestPage() {
             >
               {MODES.map((m) => (
                 <option key={m} value={m}>{modeLabel(m)}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Symbol — grouped, matches chart page for selected mode */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">Symbol</label>
+            <select
+              value={symbol}
+              onChange={(e) => setSymbol(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              {SYMBOL_GROUPS[mode].map((grp) => (
+                <optgroup key={grp.label} label={grp.label}>
+                  {grp.symbols.map((s) => <option key={s} value={s}>{s}</option>)}
+                </optgroup>
               ))}
             </select>
           </div>
@@ -285,6 +383,9 @@ export default function BacktestPage() {
             <span className="bg-gray-800 px-2 py-0.5 rounded">{result.timeframe}</span>
             <span>{result.bars_tested.toLocaleString()} bars •</span>
             <span>{result.total_trades} trades</span>
+            {(result as BacktestResult & { run_at?: string }).run_at && (
+              <span className="text-gray-600 text-xs">• {relTime((result as BacktestResult & { run_at?: string }).run_at!)}</span>
+            )}
           </div>
 
           {/* ── Stat cards ─────────────────────────────────────────────── */}
@@ -403,6 +504,87 @@ export default function BacktestPage() {
           </section>
         </>
       )}
+
+      {/* ── History panel ───────────────────────────────────────────────── */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-white">
+            Backtest History
+            {history && <span className="ml-2 text-sm text-gray-500 font-normal">({history.total} saved)</span>}
+          </h2>
+          <button onClick={() => loadHistory(historyPage)}
+            className="text-xs text-gray-500 hover:text-white transition-colors">
+            {histLoading ? "Loading…" : "↻ Refresh"}
+          </button>
+        </div>
+
+        {!history || history.items.length === 0 ? (
+          <p className="text-sm text-gray-600">No runs saved yet — run a backtest above.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-gray-800">
+                    {["","Symbol","Strategy","Mode","TF","Bars","Trades","Win %","P-Factor","Max DD","Return","Run",""].map((h, i) => (
+                      <th key={i} className="pb-2 pr-3 font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.items.map((item) => {
+                    const isActive = (result as BacktestResult & { id?: string })?.id === item.id;
+                    return (
+                      <tr key={item.id}
+                        onClick={() => handleLoadRun(item.id)}
+                        className={`border-b border-gray-800/40 hover:bg-gray-900/50 cursor-pointer ${
+                          isActive ? "bg-blue-950/30" : ""
+                        }`}>
+                        <td className="py-2 pr-2"><MiniSparkline pnl={item.total_pnl_pct} /></td>
+                        <td className="py-2 pr-3 font-semibold text-white">{item.symbol}</td>
+                        <td className="py-2 pr-3 text-gray-400">{item.strategy}</td>
+                        <td className="py-2 pr-3 text-gray-400">{modeLabel(item.trading_type)}</td>
+                        <td className="py-2 pr-3">{item.timeframe}</td>
+                        <td className="py-2 pr-3">{item.bars_tested.toLocaleString()}</td>
+                        <td className="py-2 pr-3">{item.total_trades}</td>
+                        <td className={`py-2 pr-3 font-medium ${item.win_rate >= 0.5 ? "text-emerald-400" : "text-amber-400"}`}>
+                          {(item.win_rate * 100).toFixed(1)}%
+                        </td>
+                        <td className="py-2 pr-3">{item.profit_factor.toFixed(2)}</td>
+                        <td className="py-2 pr-3 text-red-400">-{item.max_drawdown_pct.toFixed(1)}%</td>
+                        <td className={`py-2 pr-3 font-semibold ${item.total_pnl_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {pct(item.total_pnl_pct)}
+                        </td>
+                        <td className="py-2 pr-3 text-gray-600">{relTime(item.run_at)}</td>
+                        <td className="py-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                            disabled={deletingId === item.id}
+                            className="px-2 py-0.5 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/40 rounded disabled:opacity-40 transition-colors">
+                            {deletingId === item.id ? "…" : "✕"}
+                          </button>
+                          {loadingId === item.id && <span className="ml-1 text-gray-600 text-[10px]">loading…</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {history.pages > 1 && (
+              <div className="flex items-center gap-2 mt-4 text-sm">
+                <button disabled={historyPage <= 1} onClick={() => loadHistory(historyPage - 1)}
+                  className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700">← Prev</button>
+                <span className="text-gray-500">Page {historyPage} / {history.pages}</span>
+                <button disabled={historyPage >= history.pages} onClick={() => loadHistory(historyPage + 1)}
+                  className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700">Next →</button>
+                <span className="text-gray-600 text-xs ml-2">{history.total} total runs</span>
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </main>
   );
 }

@@ -173,3 +173,14 @@ export const fetchBacktestStrategies = () =>
 
 export const runBacktest = (req: BacktestRequest) =>
   api.post("/backtest/run", req).then((r) => r.data);
+
+export const fetchBacktestHistory = (params?: {
+  page?: number; page_size?: number;
+  trading_type?: string; symbol?: string; strategy?: string;
+}) => api.get("/backtest/history", { params }).then((r) => r.data);
+
+export const fetchBacktestRun = (id: string) =>
+  api.get(`/backtest/history/${id}`).then((r) => r.data);
+
+export const deleteBacktestRun = (id: string) =>
+  api.delete(`/backtest/history/${id}`).then((r) => r.data);
