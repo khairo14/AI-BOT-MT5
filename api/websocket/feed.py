@@ -154,7 +154,7 @@ async def websocket_feed(
         { "type": "positions", "data": [ { ...position fields... } ] }
         { "type": "signal",    ...signal fields... }
     """
-    symbol_set = {s.strip().upper() for s in symbols.split(",") if s.strip()}
+    symbol_set = {s.strip() for s in symbols.split(",") if s.strip()}
 
     await manager.connect(ws, symbol_set)
     start_poller()  # idempotent — only starts once
@@ -185,7 +185,7 @@ async def websocket_feed(
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "subscribe" and "symbols" in msg:
-                    new_syms = {s.strip().upper() for s in msg["symbols"]}
+                    new_syms = {s.strip() for s in msg["symbols"]}
                     manager._connections[ws] = new_syms
                     logger.debug(f"WS subscription updated: {new_syms}")
                 elif msg.get("type") == "ping":

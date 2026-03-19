@@ -187,7 +187,7 @@ class MT5Client:
         """Return current bid/ask for a symbol."""
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
-            logger.warning(f"No tick data for {symbol}: {mt5.last_error()}")
+            logger.debug(f"No tick data for {symbol}: {mt5.last_error()}")
             return None
         return {
             "symbol": symbol,
