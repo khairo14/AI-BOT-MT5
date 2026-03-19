@@ -6,12 +6,13 @@ export default function SwingPage() {
       mode="swing"
       label="Swing Trading"
       icon="〰"
-      symbols={[
-        "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","NZDUSD","USDCAD",
-        "GBPJPY","EURJPY","EURGBP","AUDCAD",
-        "XAUUSD","XAGUSD","USOIL","UKOIL","NATGAS",
-        "BTCUSD","ETHUSD",
-        "US30","SPX500","NAS100","GER40","UK100",
+      symbolGroups={[
+        { label: "Forex Majors",  symbols: ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD"] },
+        { label: "Forex Minors",  symbols: ["GBPJPY", "EURJPY", "EURGBP", "AUDCAD"] },
+        { label: "Metals",        symbols: ["XAUUSD", "XAGUSD"] },
+        { label: "Energy",        symbols: ["USOIL", "UKOIL", "NATGAS"] },
+        { label: "Crypto",        symbols: ["BTCUSD", "ETHUSD"] },
+        { label: "Indices",       symbols: ["US30", "SPX500", "NAS100", "GER40", "UK100"] },
       ]}
       defaultSymbol="EURUSD"
       defaultTimeframe="D1"

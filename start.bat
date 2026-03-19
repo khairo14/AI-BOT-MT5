@@ -70,10 +70,18 @@ for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENV_FILE%") do (
     if /i "%%A"=="API_PORT" set "API_PORT=%%B"
 )
 
-echo   Starting FastAPI backend on http://%API_HOST%:%API_PORT% ...
+:: -- export vars for PowerShell to use via $env: --
+set EVOTRADE_PY=%VENV_PY%
+set EVOTRADE_ROOT=%ROOT%
+set EVOTRADE_HOST=%API_HOST%
+set EVOTRADE_PORT=%API_PORT%
+set EVOTRADE_LOGDIR=%LOG_DIR%
+set EVOTRADE_DASH=%DASHBOARD%
 
-:: -- start FastAPI (named window so stop.bat can identify it) --
-start "EVOTRADE-API" /min "%VENV_PY%" -m uvicorn api.main:app --host %API_HOST% --port %API_PORT% --log-level info
+:: -- start FastAPI hidden (no popup window) --
+echo   Starting FastAPI backend on http://%API_HOST%:%API_PORT% ...
+powershell -NoProfile -Command "$a=@('-m','uvicorn','api.main:app','--host',$env:EVOTRADE_HOST,'--port',$env:EVOTRADE_PORT,'--log-level','info'); $p=Start-Process -FilePath $env:EVOTRADE_PY -ArgumentList $a -WorkingDirectory $env:EVOTRADE_ROOT -WindowStyle Hidden -PassThru; [IO.File]::WriteAllText($env:EVOTRADE_LOGDIR+'\api.pid',[string]$p.Id)"
+echo   [OK] API started
 
 :: -- health check loop (up to 30 s) --
 echo   Waiting for API to become ready...
@@ -84,22 +92,21 @@ set /a _tries=0
     if not errorlevel 1 goto :health_ok
     set /a _tries+=1
     if !_tries! geq 30 (
-        echo   [WARN] API did not respond after 30 s - it may still be starting.
-        echo         Check the EVOTRADE-API window for errors.
+        echo   [WARN] API did not respond after 30 s.
+        echo         Check %LOG_DIR%\api.log for errors.
         goto :launch_dash
     )
-    echo   [!_tries!/30] waiting...
+    echo     [!_tries!/30] waiting...
 goto :health_loop
 
 :health_ok
 echo   [OK] API is ready
 
 :launch_dash
-:: -- start Next.js dashboard --
+:: -- start Next.js dashboard hidden (no popup window) --
 echo   Starting Next.js dashboard...
-pushd "%DASHBOARD%"
-start "EVOTRADE-DASH" /min cmd /c npm run start
-popd
+powershell -NoProfile -Command "$a=@('/c','npm run start'); $p=Start-Process -FilePath 'cmd.exe' -ArgumentList $a -WorkingDirectory $env:EVOTRADE_DASH -WindowStyle Hidden -PassThru; [IO.File]::WriteAllText($env:EVOTRADE_LOGDIR+'\dash.pid',[string]$p.Id)"
+echo   [OK] Dashboard started
 
 :: -- wait then open browser --
 timeout /t 4 /nobreak >nul
@@ -111,9 +118,10 @@ echo   EVOTRADE-AI is running!
 echo.
 echo   API:       http://%API_HOST%:%API_PORT%
 echo   Dashboard: http://localhost:3000
-echo   Logs:      %LOG_DIR%\
+echo   Logs:      %LOG_DIR%\api.log
 echo.
 echo   Run stop.bat to stop the bot.
+echo   This window can be closed safely.
 echo ================================================
 echo.
 pause

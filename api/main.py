@@ -4,7 +4,9 @@ Mounts all REST routes and the WebSocket live feed.
 """
 
 import asyncio
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +19,17 @@ from api.runner_loop import start_runner_loop
 from engine.mt5_client import MT5Client
 from engine.order_manager import OrderManager
 from engine.risk_manager import RiskManager
+
+# ---------------------------------------------------------------------------
+# Logging setup — write to file so dashboard can tail it
+# ---------------------------------------------------------------------------
+_LOG_FILE = Path("logs/api.log")
+_LOG_FILE.parent.mkdir(exist_ok=True)
+logger.remove()  # drop default stderr sink
+logger.add(sys.stderr, level="INFO", colorize=True,
+           format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> | <level>{message}</level>")
+logger.add(str(_LOG_FILE), level="DEBUG", rotation="10 MB", retention=3, encoding="utf-8",
+           format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}")
 
 # ---------------------------------------------------------------------------
 # Shared MT5 client — created once at startup, closed at shutdown
@@ -96,3 +109,13 @@ def health():
     """Quick liveness check."""
     connected = mt5_client.is_connected() if mt5_client else False
     return {"status": "ok", "mt5_connected": connected}
+
+
+@app.get("/logs/tail", tags=["Logs"])
+def log_tail(n: int = 200):
+    """Return the last N lines from the API log file for the dashboard log console."""
+    if not _LOG_FILE.exists():
+        return {"lines": []}
+    text = _LOG_FILE.read_text(encoding="utf-8", errors="ignore")
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    return {"lines": lines[-n:]}

@@ -103,3 +103,7 @@ export const fetchTradeJournal = (
 
 export const fetchJournalStats = (): Promise<JournalStatsResponse> =>
   api.get("/trades/journal/stats").then((r) => r.data);
+
+// -- Logs ------------------------------------------------------------------
+export const fetchLogTail = (n = 200): Promise<{ lines: string[] }> =>
+  api.get(`/logs/tail?n=${n}`).then((r) => r.data);

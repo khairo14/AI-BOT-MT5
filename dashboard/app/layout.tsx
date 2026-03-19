@@ -4,6 +4,7 @@ import "./globals.css";
 import Sidebar from "@/components/nav/Sidebar";
 import NotificationBar from "@/components/notifications/NotificationBar";
 import AppBootstrap from "@/components/AppBootstrap";
+import LogConsole from "@/components/LogConsole";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,11 +33,14 @@ export default function RootLayout({
       >
         <AppBootstrap />
         <NotificationBar />
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 overflow-y-auto">
-            {children}
-          </main>
+        <div className="flex min-h-screen flex-col">
+          <div className="flex flex-1">
+            <Sidebar />
+            <main className="flex-1 overflow-y-auto">
+              {children}
+            </main>
+          </div>
+          <LogConsole />
         </div>
       </body>
     </html>

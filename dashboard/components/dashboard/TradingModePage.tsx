@@ -15,11 +15,16 @@ const TradingChart = dynamic(() => import("@/components/chart/TradingChart"), {
   loading: () => <div className="w-full h-96 bg-gray-900 rounded-xl animate-pulse" />,
 });
 
+export interface SymbolGroup {
+  label: string;
+  symbols: string[];
+}
+
 interface Props {
   mode: TradingMode;
   label: string;
   icon: string;
-  symbols: string[];
+  symbolGroups: SymbolGroup[];
   defaultSymbol: string;
   defaultTimeframe: string;
   timeframes: string[];
@@ -30,7 +35,7 @@ export default function TradingModePage({
   mode,
   label,
   icon,
-  symbols,
+  symbolGroups,
   defaultSymbol,
   defaultTimeframe,
   timeframes,
@@ -44,9 +49,8 @@ export default function TradingModePage({
   const [execMode, setExecMode] = useState<ExecutionMode>("manual");
   const [togglingExec, setTogglingExec] = useState(false);
 
-  const modePositions = positions.filter((p) =>
-    symbols.includes(p.symbol)
-  );
+  const allSymbols = symbolGroups.flatMap((g) => g.symbols);
+  const modePositions = positions.filter((p) => allSymbols.includes(p.symbol));
 
   const loadChart = useCallback(() => {
     fetchOHLCV(symbol, timeframe, 300)
@@ -134,8 +138,12 @@ export default function TradingModePage({
           onChange={(e) => setSymbol(e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
         >
-          {symbols.map((s) => (
-            <option key={s} value={s}>{s}</option>
+          {symbolGroups.map((grp) => (
+            <optgroup key={grp.label} label={grp.label}>
+              {grp.symbols.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
 
@@ -174,7 +182,7 @@ export default function TradingModePage({
 
         {/* Trade panel */}
         <div className="xl:col-span-1">
-          <TradePanel mode={mode} defaultSymbol={symbol} symbols={symbols} />
+          <TradePanel mode={mode} defaultSymbol={symbol} symbolGroups={symbolGroups} execMode={execMode} />
         </div>
       </div>
 

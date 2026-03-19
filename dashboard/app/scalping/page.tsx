@@ -6,7 +6,11 @@ export default function ScalpingPage() {
       mode="scalping"
       label="Scalping"
       icon="⚡"
-      symbols={["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "BTCUSD", "USOIL", "ETHUSD"]}
+      symbolGroups={[
+        { label: "Forex Majors",  symbols: ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD"] },
+        { label: "Metals",        symbols: ["XAUUSD"] },
+        { label: "Energy",        symbols: ["USOIL"] },
+      ]}
       defaultSymbol="EURUSD"
       defaultTimeframe="M5"
       timeframes={["M1", "M5", "M15"]}

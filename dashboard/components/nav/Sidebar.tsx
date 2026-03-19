@@ -33,7 +33,7 @@ export default function Sidebar() {
     <aside className="w-56 min-h-screen bg-gray-950 border-r border-gray-800 flex flex-col">
       {/* Logo */}
       <div className="px-4 py-5 border-b border-gray-800">
-        <h1 className="text-lg font-bold text-white tracking-tight">AI-BOT-MT5</h1>
+        <h1 className="text-lg font-bold text-white tracking-tight">EVOTRADE-AI</h1>
         <p className="text-xs text-gray-500 mt-0.5">XM Trading Dashboard</p>
       </div>
 

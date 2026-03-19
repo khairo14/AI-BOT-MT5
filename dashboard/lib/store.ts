@@ -51,6 +51,11 @@ interface BotStore {
   // WebSocket status
   wsConnected: boolean;
   setWsConnected: (v: boolean) => void;
+
+  // API log console
+  logLines: string[];
+  appendLogLines: (lines: string[]) => void;
+  setLogLines: (lines: string[]) => void;
 }
 
 export const useBotStore = create<BotStore>((set) => ({
@@ -100,4 +105,11 @@ export const useBotStore = create<BotStore>((set) => ({
 
   wsConnected: false,
   setWsConnected: (wsConnected) => set({ wsConnected }),
+
+  logLines: [] as string[],
+  appendLogLines: (lines: string[]) =>
+    set((state) => ({
+      logLines: [...state.logLines, ...lines].slice(-500),
+    })),
+  setLogLines: (lines: string[]) => set({ logLines: lines }),
 }));
