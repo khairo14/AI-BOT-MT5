@@ -429,18 +429,12 @@ async def recover_unclosed_trades(client) -> None:
         if ticket in live_tickets:
             continue  # still open — _poll_outcome will handle it (re-launched below)
 
-        # Position is gone — look it up in deal history
-        try:
-            open_dt  = datetime.fromisoformat(entry.get("open_time", "").replace("Z", "+00:00"))
-        except Exception:
-            open_dt = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0)
-
-        end_dt = datetime.now(tz=timezone.utc)
-        deals = await asyncio.to_thread(mt5.history_deals_get, open_dt, end_dt)
+        # Position is gone — look it up in deal history by position ID
+        deals = await asyncio.to_thread(mt5.history_deals_get, position=ticket)
         if not deals:
             deals = []
 
-        closed = [d for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT]
+        closed = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
         if not closed:
             logger.debug(f"Recovery: no close deal found for ticket #{ticket} — skipping")
             continue
@@ -559,16 +553,12 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             if positions:
                 continue   # still open
 
-            # Look in history — query from just before trade open to now
-            open_dt = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
-            end_dt  = datetime.now(tz=timezone.utc)
-            deals = await asyncio.to_thread(
-                mt5.history_deals_get, open_dt, end_dt
-            )
+            # Look in history by position ID — more reliable than time range
+            deals = await asyncio.to_thread(mt5.history_deals_get, position=ticket)
             if deals is None:
                 deals = []
 
-            closed = [d for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT]
+            closed = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
             if not closed:
                 continue
 
