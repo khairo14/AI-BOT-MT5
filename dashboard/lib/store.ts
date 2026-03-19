@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type {
   AccountInfo,
   Position,
@@ -59,7 +60,9 @@ interface BotStore {
   setLogLines: (lines: string[]) => void;
 }
 
-export const useBotStore = create<BotStore>((set) => ({
+export const useBotStore = create<BotStore>()(
+  persist(
+    (set) => ({
   account: null,
   setAccount: (account) => set({ account }),
 
@@ -117,4 +120,14 @@ export const useBotStore = create<BotStore>((set) => ({
       logLines: [...state.logLines, ...lines].slice(-500),
     })),
   setLogLines: (lines: string[]) => set({ logLines: lines }),
-}));
+    }),
+    {
+      name: "evotrade-store",
+      // Only persist signals and notifications — live data (ticks, positions, account) should not be cached
+      partialize: (state) => ({
+        signals:       state.signals,
+        notifications: state.notifications,
+      }),
+    }
+  )
+);
