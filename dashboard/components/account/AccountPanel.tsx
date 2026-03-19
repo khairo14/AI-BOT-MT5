@@ -125,10 +125,13 @@ export default function AccountPanel() {
               <thead>
                 <tr className="text-gray-500 border-b border-gray-800">
                   <th className="text-left py-2 pr-4">Ticket</th>
+                  <th className="text-left py-2 pr-4">Date</th>
                   <th className="text-left py-2 pr-4">Symbol</th>
                   <th className="text-left py-2 pr-4">Dir</th>
                   <th className="text-left py-2 pr-4">Lots</th>
                   <th className="text-left py-2 pr-4">Entry</th>
+                  <th className="text-left py-2 pr-4">SL</th>
+                  <th className="text-left py-2 pr-4">TP</th>
                   <th className="text-left py-2 pr-4">P&L</th>
                   <th className="text-left py-2 pr-4">Type</th>
                   <th className="text-left py-2 pr-4">Account</th>
@@ -139,12 +142,17 @@ export default function AccountPanel() {
                 {entries.map((e, i) => (
                   <tr key={i} className="text-gray-300 hover:bg-gray-800/50 transition-colors">
                     <td className="py-2 pr-4 font-mono text-gray-500">#{e.ticket}</td>
+                    <td className="py-2 pr-4 font-mono text-gray-400 whitespace-nowrap">
+                      {e.open_time ? new Date(e.open_time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                    </td>
                     <td className="py-2 pr-4 font-semibold">{e.symbol}</td>
                     <td className={`py-2 pr-4 font-semibold ${e.direction === "buy" ? "text-green-400" : "text-red-400"}`}>
                       {e.direction.toUpperCase()}
                     </td>
                     <td className="py-2 pr-4">{e.volume}</td>
                     <td className="py-2 pr-4 font-mono">{e.entry}</td>
+                    <td className="py-2 pr-4 font-mono text-red-400">{e.sl ? e.sl : "—"}</td>
+                    <td className="py-2 pr-4 font-mono text-green-400">{e.tp ? e.tp : "—"}</td>
                     {(() => {
                       const live = e.event === "open" ? liveProfit[e.ticket] : undefined;
                       const pnl  = e.profit ?? live ?? null;
