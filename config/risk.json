@@ -1,6 +1,6 @@
 {
-  "risk_per_trade_pct": 1.0,
-  "max_risk_per_trade_pct": 2.0,
+  "risk_per_trade_pct": 1.5,
+  "max_risk_per_trade_pct": 2,
   "risk_reward_min": 1.5,
   "sl_required": true,
   "tp_required": false,
@@ -13,8 +13,8 @@
     "per_symbol": 1
   },
   "drawdown": {
-    "daily_limit_pct": 5.0,
-    "weekly_limit_pct": 10.0,
+    "daily_limit_pct": 5,
+    "weekly_limit_pct": 10,
     "max_consecutive_losses": 5,
     "consecutive_loss_pause_hours": 4,
     "action": "pause"

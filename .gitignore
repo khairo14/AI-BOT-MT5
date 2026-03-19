@@ -37,8 +37,16 @@ data/processed/
 
 # Logs — keep directory, exclude runtime files
 logs/*.log
+logs/*.pid
 logs/pids.json
 !logs/.gitkeep
+
+# Runtime data — keep directory structure, exclude generated files
+data/backtest_history/*.json
+data/backtest_history/*.jsonl
+data/*.jsonl
+!data/.gitkeep
+!data/backtest_history/.gitkeep
 
 # OS
 .DS_Store
