@@ -62,6 +62,13 @@ async def lifespan(app: FastAPI):
         logger.info("MT5 connected at startup.")
         order_manager = OrderManager(mt5_client)
         _risk_manager = RiskManager()
+        # Create paper trade engine singleton (used for sync_positions)
+        import engine.paper_trade as _pt_mod
+        _pt_mod.paper_engine = _pt_mod.PaperTradeEngine(
+            client=mt5_client,
+            order_manager=order_manager,
+            risk_manager=_risk_manager,
+        )
         # Wire the SignalBus so approve → execute works
         bus.init(mt5_client, order_manager)
         # Start the strategy runner background loop (passes the same instance)

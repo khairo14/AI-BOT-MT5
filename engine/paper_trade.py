@@ -20,6 +20,9 @@ from engine.order_manager import OrderManager, OrderRequest, OrderResult
 from engine.risk_manager import RiskManager
 from engine.strategy_runner import StrategyRunner, StrategySignal
 
+# Module-level singleton — set by main.py at startup
+paper_engine: "PaperTradeEngine | None" = None
+
 
 @dataclass
 class PaperPosition:

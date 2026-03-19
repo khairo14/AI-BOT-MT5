@@ -162,7 +162,8 @@ class MT5Client:
 
         # Ensure symbol is visible in Market Watch
         if not info.visible:
-            mt5.symbol_select(symbol, True)
+            if not mt5.symbol_select(symbol, True):
+                logger.warning(f"symbol_select failed for {symbol}: {mt5.last_error()}")
 
         tick = mt5.symbol_info_tick(symbol)
         spread_pips = round(info.spread * info.point, 5)

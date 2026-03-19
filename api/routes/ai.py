@@ -18,6 +18,7 @@ Trade Memory:
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Literal, Optional
 
 import MetaTrader5 as mt5
@@ -274,13 +275,12 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
     """
     from api.main import get_mt5_client
     import json, MetaTrader5 as _mt5
-    from pathlib import Path as _Path
 
     client = get_mt5_client()
     if client is None or not client.is_connected():
         raise HTTPException(status_code=503, detail="MT5 not connected")
 
-    CONFIG_PATH = _Path(__file__).parent.parent.parent / "config"
+    CONFIG_PATH = Path(__file__).parent.parent.parent / "config"
     try:
         symbols_cfg    = json.loads((CONFIG_PATH / "symbols.json").read_text())
         strategies_cfg = json.loads((CONFIG_PATH / "strategies.json").read_text())
