@@ -86,7 +86,7 @@ class EMAScalp(BaseStrategy):
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
-                    comment="ema_scalp|buy",
+                    comment="scalp|ema_scalp|buy",
                 ),
                 indicators=indicators,
             )
@@ -112,7 +112,7 @@ class EMAScalp(BaseStrategy):
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
-                    comment="scalp|sell",
+                    comment="scalp|ema_scalp|sell",
                 ),
                 indicators=indicators,
             )

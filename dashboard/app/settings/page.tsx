@@ -3,10 +3,12 @@ import { useEffect, useState, useCallback } from "react";
 import {
   fetchRiskConfig,
   fetchAppConfig,
+  fetchAccountMode,
   fetchExecutionMode,
   setExecutionMode,
   patchRiskConfig,
   patchAppConfig,
+  switchMode,
 } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import type { TradingMode, ExecutionMode } from "@/types";
@@ -106,14 +108,16 @@ export default function SettingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [exec, riskData, appData] = await Promise.all([
+      const [exec, riskData, appData, modeData] = await Promise.all([
         fetchExecutionMode(),
         fetchRiskConfig(),
         fetchAppConfig(),
+        fetchAccountMode(),
       ]);
       setExecModes(exec);
       setRisk(riskData as unknown as Record<string, unknown>);
-      setTradingMode((appData as unknown as Record<string, unknown>).trading_mode as "paper" | "live" ?? "paper");
+      // Use actual MT5 connection mode, not app.json (which may be stale)
+      setTradingMode((modeData as { mode: "paper" | "live" }).mode ?? "paper");
       const nf = (riskData as unknown as Record<string, unknown>).news_filter as Record<string, unknown> | undefined;
       const sf = (riskData as unknown as Record<string, unknown>).session_filter as Record<string, unknown> | undefined;
       setNewsFilter((nf?.enabled as boolean) ?? true);
@@ -163,9 +167,11 @@ export default function SettingsPage() {
   const saveApp = async () => {
     setAppSaving(true);
     try {
-      await patchAppConfig({
-        trading_mode: tradingMode,
-      });
+      // Switch MT5 account mode via the proper endpoint (not just app.json)
+      const currentMode = await fetchAccountMode();
+      if (currentMode.mode !== tradingMode) {
+        await switchMode(tradingMode, false);
+      }
       await patchRiskConfig({
         news_filter: { enabled: newsFilter },
         session_filter: { enabled: sessionFilter },
@@ -173,8 +179,10 @@ export default function SettingsPage() {
       setAppSaved(true);
       setTimeout(() => setAppSaved(false), 2500);
       pushNotification({ type: "success", title: "App settings saved", message: "" });
-    } catch {
-      pushNotification({ type: "error", title: "Save failed", message: "Could not update app config." });
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: { message?: string } | string } } })?.response?.data?.detail;
+      const msg = typeof detail === "object" ? detail?.message : (detail as string) ?? "Could not update app settings.";
+      pushNotification({ type: "error", title: "Save failed", message: msg ?? "Could not update app settings." });
     } finally {
       setAppSaving(false);
     }
@@ -291,6 +299,7 @@ export default function SettingsPage() {
           onChange={(v) => setMaxTrades("per_symbol", Math.round(v))}
           min={1} max={5} step={1} unit=""
         />
+        <SaveBtn onClick={saveRisk} saving={riskSaving} saved={riskSaved} />
       </Section>
 
       {/* ── Drawdown Protection ───────────────────────────────────────── */}

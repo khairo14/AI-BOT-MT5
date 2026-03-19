@@ -317,7 +317,7 @@ class RiskManager:
     def reload_config(self) -> None:
         """Re-read risk.json and apply updated thresholds at runtime."""
         try:
-            self._config = self._load_config()
+            self._config = _load_config()
             logger.info("RiskManager: config reloaded from disk")
         except Exception as exc:
             logger.warning(f"RiskManager.reload_config failed: {exc}")
@@ -334,8 +334,3 @@ class RiskManager:
                 for k, v in self._paused_modes.items()
             },
         }
-
-    def reload_config(self) -> None:
-        """Reload risk parameters from disk (useful after dashboard config changes)."""
-        self._config = _load_config()
-        logger.info("Risk config reloaded from disk.")

@@ -85,14 +85,20 @@ async def approve_signal(signal_id: str):
         raise HTTPException(status_code=404, detail="Signal not found")
 
 
+class RejectRequest(BaseModel):
+    reason: Optional[str] = None
+
+
 @router.post("/{signal_id}/reject")
-def reject_signal(signal_id: str):
+def reject_signal(signal_id: str, body: RejectRequest = RejectRequest()):
     """Reject and remove a signal from the queue."""
     signal = bus.queue.get(signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
     signal["status"] = "rejected"
     signal["actioned_at"] = datetime.now(tz=timezone.utc).isoformat()
+    if body.reason:
+        signal["rejection_reason"] = body.reason
     bus.queue.pop(signal_id, None)
     return {"status": "rejected", "id": signal_id}
 

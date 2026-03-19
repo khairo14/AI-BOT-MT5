@@ -171,13 +171,15 @@ class SignalBus:
             logger.debug(f"SignalBus: concurrent limit check skipped: {_exc}")
 
         try:
+            trading_mode = signal.get("trading_mode", "day_trading")
+            mode_prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(trading_mode, "bot")
             req = OrderRequest(
                 symbol=signal["symbol"],
                 direction=signal["direction"].upper(),
                 volume=float(signal.get("lot_size") or 0.01),
                 sl=float(signal["sl"]),
                 tp=float(signal["tp"]) if signal.get("tp") else None,
-                comment=f"bot:{signal.get('strategy', '?')[:20]}",
+                comment=f"{mode_prefix}|{signal.get('strategy', '?')[:20]}",
             )
             result = self._order_manager.place_market_order(req)
             if result and result.success:
@@ -344,6 +346,25 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
             trading_type = signal.get("trading_mode", "day_trading")
             stats = memory.stats(trading_type=trading_type)
+
+            # Update consecutive win/loss counter in the risk manager
+            try:
+                from api.runner_loop import _risk_manager as _rm
+                if _rm is not None:
+                    if profit > 0:
+                        _rm.record_win(trading_type)
+                    else:
+                        _rm.record_loss(trading_type)
+                    # Update drawdown tracking with current account balance
+                    from api.main import get_mt5_client as _gclient2
+                    _c2 = _gclient2()
+                    if _c2 and _c2.is_connected():
+                        _acct = await asyncio.to_thread(_c2.get_account_info)
+                        if _acct and _acct.get("balance"):
+                            _rm.update_balance(_acct["balance"])
+            except Exception:
+                pass
+
             rl_manager.on_trade_closed(
                 trading_type=trading_type,
                 profit_pct=profit,
