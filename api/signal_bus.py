@@ -150,6 +150,25 @@ class SignalBus:
                 )
                 return existing
 
+        # ── Open position guard: skip if bot already holds this symbol+direction ──
+        try:
+            if self._client is not None:
+                open_positions = self._client.get_open_positions()
+                sym = signal.get("symbol", "")
+                direction = signal.get("direction", "").upper()
+                for pos in open_positions:
+                    if (
+                        pos.get("symbol") == sym
+                        and pos.get("direction", "").upper() == direction
+                    ):
+                        logger.debug(
+                            f"SignalBus: dedup dropped {sym}/{signal.get('strategy')} "
+                            f"— open {direction} position already exists"
+                        )
+                        return signal
+        except Exception:
+            pass
+
         self.queue[signal["id"]] = signal
         # Lazily purge stale + expired signals to keep queue bounded
         self.purge_stale()
