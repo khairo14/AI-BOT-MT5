@@ -232,6 +232,19 @@ class StrategyRunner:
             tick_size=sym_info.get("trade_tick_size", 0.00001),
         )
 
+        # Apply RL agent risk-factor multiplier (1.0 = neutral, 0.5–1.5 range).
+        # The RL agent learns whether to scale position size up or down based on
+        # recent win rate and confidence — this is how it feeds back into live sizing.
+        try:
+            from ai.rl_agent import rl_manager as _rl
+            rf = _rl.risk_factor(trading_type)
+            if rf != 1.0:
+                min_lot = sym_info.get("volume_min", 0.01)
+                lot_step = sym_info.get("volume_step", 0.01)
+                lot = max(min_lot, round(round(lot * rf / lot_step) * lot_step, 2))
+        except Exception:
+            pass  # RL not available — use raw lot as-is
+
         strat_sig = StrategySignal(
             trading_type=trading_type,
             symbol=symbol,

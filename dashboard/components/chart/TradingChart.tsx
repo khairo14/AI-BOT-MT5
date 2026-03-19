@@ -68,7 +68,7 @@ const CHART_OPTS = {
   layout: { background: { type: ColorType.Solid, color: "#0f172a" }, textColor: "#94a3b8", attributionLogo: false },
   grid:       { vertLines: { color: "#1e293b" }, horzLines: { color: "#1e293b" } },
   crosshair:  { mode: CrosshairMode.Normal },
-  rightPriceScale: { borderColor: "#1e293b", minimumWidth: 70 },
+  rightPriceScale: { borderColor: "#1e293b", minimumWidth: 52 },
   timeScale:  { borderColor: "#1e293b", timeVisible: true, secondsVisible: false },
 } as const;
 
@@ -334,7 +334,7 @@ export default function TradingChart({ bars, height = 420, positions, ind, onTog
     if (ind.volume) {
       if (!volS.current) {
         volS.current = chart.addSeries(HistogramSeries, { color:COLOR.volume, priceFormat:{type:"volume"}, priceScaleId:"volume" });
-        chart.priceScale("volume").applyOptions({ scaleMargins:{ top:0.78, bottom:0 } });
+        chart.priceScale("volume").applyOptions({ scaleMargins:{ top:0.78, bottom:0 }, visible:false });
       }
       volS.current.setData(bars.map((b, i) => ({ time:times[i], value:b.volume, color:b.close>=b.open?"#16a34a44":"#dc262644" })));
     } else if (volS.current) {

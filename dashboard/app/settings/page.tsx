@@ -271,6 +271,7 @@ export default function SettingsPage() {
           onChange={(v) => setRiskKey("risk_reward_min", v)}
           min={1} max={5} step={0.1} unit=":1"
         />
+        <SaveBtn onClick={saveRisk} saving={riskSaving} saved={riskSaved} />
       </Section>
 
       {/* ── Concurrent Trade Limits ───────────────────────────────────── */}
