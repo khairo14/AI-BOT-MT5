@@ -40,7 +40,9 @@ function Stop-ById([int]$pid_, [string]$label) {
     }
 }
 
-# ── read saved PIDs ───────────────────────────────────────────────────────────
+# -- read saved PIDs -----------------------------------------------------------
+$usedFallback = $false
+
 if (Test-Path $PidFile) {
     try {
         $saved = Get-Content $PidFile -Raw | ConvertFrom-Json
@@ -49,13 +51,15 @@ if (Test-Path $PidFile) {
         Remove-Item $PidFile -Force
         Write-Ok "PID file removed"
     } catch {
-        Write-Warn "Could not parse pids.json — falling back to name scan"
-        goto fallback
+        Write-Warn "Could not parse pids.json -- falling back to name scan"
+        $usedFallback = $true
     }
 } else {
-    Write-Warn "logs\pids.json not found — scanning by process name"
-    :fallback
+    Write-Warn "logs\pids.json not found -- scanning by process name"
+    $usedFallback = $true
+}
 
+if ($usedFallback) {
     # Kill any uvicorn workers attached to this repo path
     Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object {
         $_.CommandLine -like "*uvicorn*api.main*"
@@ -81,3 +85,4 @@ Write-Host "  Bot stopped." -ForegroundColor Green
 Write-Host "  Logs are at: $Root\logs\" -ForegroundColor DarkGray
 Write-Host "================================================" -ForegroundColor DarkCyan
 Write-Host ""
+Read-Host "Press Enter to close this window"

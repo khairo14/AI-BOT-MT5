@@ -5,10 +5,10 @@
 
 .DESCRIPTION
     1. Checks prerequisites (.env exists, .venv exists, node_modules exist)
-    2. Verifies MT5 terminal is running (warns if not — required for trade execution)
+    2. Verifies MT5 terminal is running (warns if not -- required for trade execution)
     3. Starts the FastAPI/uvicorn backend in a minimised window
     4. Waits for the API health check to pass (up to 30 s)
-    5. Starts the Next.js dashboard (next start — uses the pre-built .next directory)
+    5. Starts the Next.js dashboard (next start -- uses the pre-built .next directory)
     6. Opens http://localhost:3000 in the default browser
 
 .NOTES
@@ -25,7 +25,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ── paths ────────────────────────────────────────────────────────────────────
+# -- paths --------------------------------------------------------------------
 $Root      = $PSScriptRoot
 $EnvFile   = Join-Path $Root ".env"
 $Venv      = Join-Path $Root ".venv"
@@ -34,7 +34,7 @@ $Dashboard = Join-Path $Root "dashboard"
 $LogDir    = Join-Path $Root "logs"
 $PidFile   = Join-Path $Root "logs\pids.json"
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+# -- helpers ------------------------------------------------------------------
 function Write-Step([string]$msg) {
     Write-Host "  $msg" -ForegroundColor Cyan
 }
@@ -55,14 +55,14 @@ function Get-EnvValue([string]$Path, [string]$Key, [string]$Default) {
     return $Default
 }
 
-# ── banner ───────────────────────────────────────────────────────────────────
+# -- banner -------------------------------------------------------------------
 Write-Host ""
 Write-Host "================================================" -ForegroundColor DarkCyan
 Write-Host "  AI-BOT-MT5  |  XM Trading System" -ForegroundColor White
 Write-Host "================================================" -ForegroundColor DarkCyan
 Write-Host ""
 
-# ── prerequisite checks ───────────────────────────────────────────────────────
+# -- prerequisite checks -------------------------------------------------------
 Write-Step "Checking prerequisites..."
 
 if (-not (Test-Path $EnvFile)) {
@@ -90,7 +90,7 @@ if (-not (Test-Path $NextBuild)) {
     Write-Ok "Dashboard build found"
 }
 
-# ── MT5 terminal check ────────────────────────────────────────────────────────
+# -- MT5 terminal check --------------------------------------------------------
 Write-Step "Checking MT5 terminal..."
 $mt5Proc = Get-Process -Name "terminal64" -ErrorAction SilentlyContinue
 if (-not $mt5Proc) {
@@ -100,15 +100,15 @@ if (-not $mt5Proc) {
     Write-Ok "MT5 terminal running (PID $($mt5Proc.Id))"
 }
 
-# ── create log dir ────────────────────────────────────────────────────────────
+# -- create log dir ------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-# ── load .env to read API port ────────────────────────────────────────────────
+# -- load .env to read API port ------------------------------------------------
 $ApiHost = Get-EnvValue $EnvFile 'API_HOST' '127.0.0.1'
 $ApiPort = Get-EnvValue $EnvFile 'API_PORT' '8000'
 $ApiUrl  = "http://$($ApiHost):$($ApiPort)"
 
-# ── start FastAPI backend ─────────────────────────────────────────────────────
+# -- start FastAPI backend -----------------------------------------------------
 Write-Step "Starting FastAPI backend on $ApiUrl ..."
 
 $apiLogOut = Join-Path $LogDir "api_out.log"
@@ -128,7 +128,7 @@ $apiProc = Start-Process `
 
 Write-Ok "API process started (PID $($apiProc.Id))"
 
-# ── wait for API health ────────────────────────────────────────────────────────
+# -- wait for API health --------------------------------------------------------
 Write-Step "Waiting for API to become ready..."
 $ready   = $false
 $timeout = 30
@@ -149,7 +149,7 @@ if (-not $ready) {
     Write-Ok "API is ready at $ApiUrl"
 }
 
-# ── start Next.js dashboard ────────────────────────────────────────────────────
+# -- start Next.js dashboard ----------------------------------------------------
 Write-Step "Starting Next.js dashboard on http://localhost:3000 ..."
 
 # Verify npm is available
@@ -172,7 +172,7 @@ $dashProc = Start-Process `
 
 Write-Ok "Dashboard process started (PID $($dashProc.Id))"
 
-# ── save PIDs for stop.ps1 ────────────────────────────────────────────────────
+# -- save PIDs for stop.ps1 ----------------------------------------------------
 $pids = @{
     api       = $apiProc.Id
     dashboard = $dashProc.Id
@@ -181,12 +181,12 @@ $pids = @{
 $pids | ConvertTo-Json | Set-Content $PidFile
 Write-Ok "PIDs saved to logs\pids.json"
 
-# ── open browser ──────────────────────────────────────────────────────────────
+# -- open browser --------------------------------------------------------------
 Start-Sleep -Seconds 2
 Write-Step "Opening dashboard in browser..."
 Start-Process "http://localhost:3000"
 
-# ── done ─────────────────────────────────────────────────────────────────────
+# -- done ---------------------------------------------------------------------
 Write-Host ""
 Write-Host "================================================" -ForegroundColor DarkCyan
 Write-Host "  Bot is running!" -ForegroundColor Green
