@@ -34,11 +34,17 @@ _event_loop: Optional[asyncio.AbstractEventLoop] = None
 _SIGNAL_TTL_SECONDS = 3600  # 1 hour
 _TERMINAL_STATUSES = frozenset({"executed", "rejected", "failed", "expired"})
 
-# Default expiry (seconds) per trading mode for PENDING manual signals
+# Default expiry (seconds) per timeframe for PENDING manual signals
+# One bar's worth of time — after this the signal's entry/SL/TP are considered stale
 _DEFAULT_EXPIRY: dict[str, int] = {
-    "scalping":    300,    # 5 min  — M5 bar
-    "day_trading": 1800,   # 30 min
-    "swing":       14400,  # 4 hours
+    "M1":  60,
+    "M5":  300,
+    "M15": 900,
+    "M30": 1800,
+    "H1":  3600,
+    "H4":  14400,
+    "D1":  86400,
+    "W1":  604800,
 }
 
 from loguru import logger
@@ -155,14 +161,15 @@ class SignalBus:
             asyncio.create_task(broadcast_signal(dict(signal)))
             asyncio.create_task(self._execute_async(signal))
         else:
-            # Compute expiry for manual pending signals
+            # Compute expiry for manual pending signals — keyed by timeframe, not mode
             try:
                 exp_cfg = json.loads((CONFIG_DIR / "app.json").read_text()).get(
                     "signal_expiry_seconds", {}
                 )
             except Exception:
                 exp_cfg = {}
-            exp_secs = exp_cfg.get(mode) or _DEFAULT_EXPIRY.get(mode, 1800)
+            tf = signal.get("timeframe", "")
+            exp_secs = exp_cfg.get(tf) or _DEFAULT_EXPIRY.get(tf, 1800)
             from datetime import timedelta
             signal["expires_at"] = (
                 datetime.now(tz=timezone.utc) + timedelta(seconds=exp_secs)

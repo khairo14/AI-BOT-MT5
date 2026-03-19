@@ -127,7 +127,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
         "tp":           sig.tp_price,
         "lot_size":     sig.lot_size,
         "confidence":   sig.confidence if sig.confidence > 0 else None,
-        "timeframe":    "",
+        "timeframe":    sig.timeframe,
         "note":         sig.comment,
     }
 

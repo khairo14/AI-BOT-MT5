@@ -48,6 +48,7 @@ export interface Signal {
   direction: "buy" | "sell";
   strategy: string;
   mode: "scalping" | "day_trading" | "swing";
+  timeframe?: string;
   entry: number;
   sl: number;
   tp: number;

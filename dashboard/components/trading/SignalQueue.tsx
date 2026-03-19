@@ -219,6 +219,11 @@ export default function SignalQueue({ mode }: Props) {
                 </span>
                 <span className="font-semibold text-white">{s.symbol}</span>
                 <span className="text-gray-500 text-xs">{s.strategy}</span>
+                {s.timeframe && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700/70 text-gray-400 font-mono">
+                    {s.timeframe}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <span
