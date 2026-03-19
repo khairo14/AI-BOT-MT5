@@ -93,7 +93,7 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                 # Re-read scanner.json every tick so dashboard changes apply immediately
                 _sym_override = None
                 try:
-                    _scan = json.loads((CONFIG_DIR / "scanner.json").read_text()).get(mode, {})
+                    _scan = json.loads((CONFIG_DIR / "scanner.json").read_text(encoding="utf-8-sig")).get(mode, {})
                     if not _scan.get("enabled", False):
                         logger.debug(f"Scanner [{mode}] is paused — skipping")
                         continue  # scanner disabled for this mode

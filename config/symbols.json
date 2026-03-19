@@ -1,4 +1,4 @@
-﻿{
+{
   "scalping": [
     { "symbol": "EURUSD",    "enabled": true,  "category": "forex" },
     { "symbol": "GBPUSD",    "enabled": true,  "category": "forex" },

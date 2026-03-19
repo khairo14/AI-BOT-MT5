@@ -390,7 +390,7 @@ class StrategyRunner:
 
     def _load_json(self, filename: str) -> dict:
         path = CONFIG_DIR / filename
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             return json.load(f)
 
     def _enabled_symbols(self, trading_type: str) -> list[str]:

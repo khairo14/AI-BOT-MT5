@@ -180,9 +180,7 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
     CONFIG_PATH = Path(__file__).parent.parent.parent / "config"
     try:
         import json
-        symbols_cfg = json.loads((CONFIG_PATH / "symbols.json").read_text())
-    except Exception:
-        raise HTTPException(status_code=500, detail="Cannot read symbols.json")
+        symbols_cfg = json.loads((CONFIG_PATH / "symbols.json").read_text(encoding="utf-8-sig"))
 
     tf_map = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
     started, skipped = [], []
@@ -282,8 +280,8 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
 
     CONFIG_PATH = Path(__file__).parent.parent.parent / "config"
     try:
-        symbols_cfg    = json.loads((CONFIG_PATH / "symbols.json").read_text())
-        strategies_cfg = json.loads((CONFIG_PATH / "strategies.json").read_text())
+        symbols_cfg    = json.loads((CONFIG_PATH / "symbols.json").read_text(encoding="utf-8-sig"))
+        strategies_cfg = json.loads((CONFIG_PATH / "strategies.json").read_text(encoding="utf-8-sig"))
     except Exception:
         raise HTTPException(status_code=500, detail="Cannot read config files")
 
