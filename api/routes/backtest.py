@@ -228,4 +228,50 @@ async def backtest_run(req: BacktestRequest):
     }
     await asyncio.to_thread(_append_index, index_entry)
 
+    # ── Feed simulated trades into trade memory ───────────────────────────
+    # Each BacktestTrade becomes a TradeOutcome with source="backtest" so the
+    # RL agent can learn from historical simulation data (not just live trades).
+    try:
+        from ai.trade_memory import memory, TradeOutcome
+        for t in result.trades:
+            outcome = TradeOutcome(
+                ticket=0,
+                symbol=result.symbol,
+                strategy=result.strategy,
+                trading_type=result.trading_type,
+                direction=t.direction,
+                confidence=0.5,          # no live confidence score in backtest
+                entry_price=t.entry_price,
+                close_price=t.exit_price,
+                sl_price=t.sl_price,
+                tp_price=t.tp_price,
+                volume=0.0,
+                profit=t.pnl_pct,        # store pnl_pct as proxy (no lot/pip data)
+                profit_pips=0.0,
+                profit_pct=t.pnl_pct,
+                outcome=t.outcome,
+                open_time=t.entry_time,
+                close_time=t.exit_time,
+                duration_mins=0.0,
+                extra={"source": "backtest", "run_id": run_id, "rr": t.rr},
+            )
+            memory.record(outcome)
+    except Exception:
+        pass  # never block the response if memory write fails
+
+    # ── Auto-trigger param optimizer if enough backtest data accumulated ──
+    # Only re-optimize if this run had meaningful trade volume (≥ 30 trades).
+    # Re-uses the same df already fetched above so no second MT5 call is needed.
+    if result.total_trades >= 30:
+        try:
+            from ai.param_optimizer import optimizer as _optimizer
+            _optimizer.optimize_async(
+                req.strategy,
+                req.symbol,
+                df,
+                req.trading_type,
+            )
+        except Exception:
+            pass  # optimizer trigger is best-effort
+
     return payload

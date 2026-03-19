@@ -41,10 +41,11 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 
 ### Layer 3 — AI / ML Engine (Python)
 
-- **Price Prediction**: LSTM or Transformer model trained per symbol on OHLCV data
-- **Signal Confidence Scoring**: AI assigns a 0–100 confidence score to each strategy signal before execution; low-confidence signals can be filtered or flagged
-- **Reinforcement Learning Agent**: learns from trade outcomes (P&L, drawdown, win rate) and improves parameter selection over time
-- Training data stored in PostgreSQL
+- **LSTM Price Predictor** (`ai/predictor.py`) — trained per symbol+type on OHLCV data; returns a 0–1 directional confidence score used to filter weak signals
+- **Reinforcement Learning Agent** (`ai/rl_agent.py`) — Q-table per trading type; learns from closed trade outcomes and adjusts confidence thresholds + risk sizing in real time
+- **Parameter Optimizer** (`ai/param_optimizer.py`) — grid-searches strategy parameters (EMA periods, RSI thresholds, etc.) using walk-forward backtesting; auto-triggers after 20+ new trades or after a user-facing backtest with ≥ 30 simulated trades
+- **Trade Memory** (`ai/trade_memory.py`) — append-only JSONL store (`ai/data/trade_memory.jsonl`); up to 5,000 outcomes in RAM, unlimited on disk. Sources: live trades, paper trades, and backtest simulations
+- **Signal Scorer** (`ai/signal_scorer.py`) — per-signal confidence scoring using recent win-rate and RL agent state
 - ML frameworks: `PyTorch`, `scikit-learn`, `pandas`, `numpy`
 
 ### Layer 4 — Risk Manager (Python)
@@ -67,30 +68,33 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 
 ### Layer 6 — Backend API (Python / FastAPI)
 
-- REST + WebSocket server
+- REST + WebSocket server; no auth layer (local-only deployment)
 - Bridges the frontend dashboard with the trading engine
-- JWT-authenticated endpoints
-- Key endpoints:
-  - `GET /account` — balance, equity, margin
-  - `GET /positions` — open trades
-  - `GET /history` — closed trade history
-  - `GET /signals` — pending signals queue
-  - `POST /trade/confirm` — manual trade confirmation
-  - `POST /trade/reject` — reject a pending signal
-  - `WebSocket /feed` — live price tick stream per symbol
-  - `PATCH /config` — update strategy/risk configuration
+- Route modules in `api/routes/`:
+  - `account.py` — balance, equity, margin, positions, trade history
+  - `signals.py` — pending signals queue, confirm/reject
+  - `trades.py` — open/close trades
+  - `config.py` — read/write `config/*.json` settings
+  - `risk.py` — risk parameter overrides
+  - `ai.py` — LSTM train/status, RL status/reset, trade memory stats, param optimizer
+  - `backtest.py` — walk-forward backtest, saved run history (CRUD)
+- `api/signal_bus.py` — execution loop: strategy signal → confidence score → RL gate → order → outcome recording
+- `api/runner_loop.py` — background polling loop; runs strategies on live ticks
+- WebSocket: `ws/feed` — live price tick stream per symbol
 
-### Layer 7 — Web Dashboard (Next.js / TypeScript)
+### Layer 7 — Web Dashboard (Next.js 16 / TypeScript / Tailwind CSS)
 
-- 4 main sections: **Scalping**, **Day Trading**, **Swing Trading**, **Overview**
-- Each trading dashboard is fully separate with its own chart, trade panel, strategy config, and active positions
-- TradingView Lightweight Charts — live price feed, no missing candles during market hours, all standard indicators built in
-- Open trade overlays on chart (entry price line, SL line, TP line)
-- Manual confirmation mode: signal popup → user clicks Approve or Reject → order fires
+- Pages: **Scalping**, **Day Trading**, **Swing Trading**, **Backtest**, **AI / ML Brain**, **Notifications**, **Settings**, **Guide**
+- Each trading page has its own TradingView Lightweight Chart, trade panel, strategy config, and active positions
+- Collapsible sidebar with persistent state
+- Symbol grouped `<select>` per mode (matches exactly the symbol scope from `02-symbol-scope.md`)
+- Manual confirmation mode: signal popup → Approve / Reject → order fires
 - Auto mode: order fires immediately on signal
 - In-app notification system: browser toasts for signals, fills, SL/TP hits, drawdown alerts
-- Built-in trading reference guide (see [05-trading-reference-guide.md](./05-trading-reference-guide.md))
+- **Backtest page**: run walk-forward strategy simulations, view equity curve + trade log (paginated), save/load/delete run history
+- **AI / ML Brain page**: LSTM train status + trigger, RL agent state, param optimizer status + trigger, trade memory stats
 - Account switcher: Demo ↔ Live
+- Built-in trading reference guide (see [05-trading-reference-guide.md](./05-trading-reference-guide.md))
 
 ---
 
@@ -102,17 +106,19 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 | Scalping Order Execution | MQL5 Expert Advisor (inside MT5 terminal) |
 | Data & Indicators | `pandas`, `pandas-ta`, `numpy` |
 | Strategy Engine | Python classes (modular) |
-| AI / Price Prediction | `PyTorch` (LSTM / Transformer) |
-| Reinforcement Learning | `stable-baselines3` or custom RL loop |
-| Signal Confidence Scoring | `scikit-learn` classifier |
+| AI / Price Prediction | `PyTorch` (LSTM) — `ai/predictor.py` |
+| Reinforcement Learning | Custom Q-table — `ai/rl_agent.py` |
+| Signal Confidence Scoring | Custom scorer — `ai/signal_scorer.py` |
+| Parameter Optimization | Walk-forward grid search — `ai/param_optimizer.py` |
+| Trade Memory | Append-only JSONL — `ai/data/trade_memory.jsonl` |
 | Backend API | `FastAPI` + `WebSocket` |
 | Task Queue | `asyncio` background tasks (built into FastAPI) |
-| Frontend | `Next.js` + TypeScript |
+| Frontend | `Next.js 16` + TypeScript + Tailwind CSS |
 | Charts | TradingView Lightweight Charts |
 | Real-time Feed | WebSocket (MT5 ticks → FastAPI → UI) |
-| Database | `PostgreSQL` |
-| Auth | JWT |
-| Deployment | `start.ps1` / `stop.ps1` — Windows-native launcher |
+| Persistence | Flat JSON/JSONL files — no database required |
+| Auth | None (local-only deployment) |
+| Deployment | `start.bat` / `stop.bat` — Windows-native launcher |
 
 ---
 
@@ -172,15 +178,55 @@ EVOTRADE-AI/
 │       └── swing.tsx
 ├── mql5/
 │   └── AIBotScalper.mq5          # Expert Advisor for scalping execution
-├── data/                         # Historical OHLCV, ML training sets
-├── db/                           # PostgreSQL models + Alembic migrations
+├── data/                         # Backtest run history (JSON per run + _index.jsonl)
 ├── config/
 │   ├── symbols.json              # Symbol list per trading type
 │   ├── strategies.json           # Active strategy per mode/symbol
 │   ├── risk.json                 # Risk parameters
 │   └── app.json                  # Execution mode per trading type (manual/auto)
-├── start.ps1                     # 1-click launcher: API + dashboard
-└── stop.ps1                      # Kills all processes
+├── ai/
+│   ├── predictor.py              # LSTM price predictor
+│   ├── rl_agent.py               # Q-table RL agent (per trading type)
+│   ├── param_optimizer.py        # Walk-forward strategy parameter optimizer
+│   ├── trade_memory.py           # Closed trade outcome store (JSONL)
+│   ├── signal_scorer.py          # Per-signal confidence scorer
+│   └── data/
+│       ├── trade_memory.jsonl    # Permanent trade outcome log
+│       ├── rl_qtable_*.json      # Persisted Q-tables per trading type
+│       └── opt_params.json       # Optimized strategy params per symbol
+├── engine/
+│   ├── backtester.py             # Walk-forward backtest engine (user-facing)
+│   ├── mt5_client.py             # MT5 connection wrapper
+│   ├── strategies/               # 9 strategy classes (3 per trading type)
+│   ├── risk_manager.py           # Position sizing, drawdown circuit breaker
+│   ├── order_manager.py          # Order send/modify/close
+│   ├── news_filter.py            # Forex Factory news pause logic
+│   └── session_filter.py         # Session-aware signal suppression
+├── api/
+│   ├── main.py                   # FastAPI app, router registration
+│   ├── signal_bus.py             # Signal → confidence → RL gate → order → record
+│   ├── runner_loop.py            # Background strategy polling loop
+│   └── routes/
+│       ├── account.py            # Balance, positions, trade history
+│       ├── signals.py            # Pending signals, confirm/reject
+│       ├── trades.py             # Open/close trades
+│       ├── config.py             # Settings read/write
+│       ├── risk.py               # Risk parameter overrides
+│       ├── ai.py                 # LSTM, RL, optimizer, trade memory endpoints
+│       └── backtest.py           # Backtest run + saved history CRUD
+├── dashboard/
+│   └── app/
+│       ├── scalping/             # Scalping chart + trade panel
+│       ├── day-trading/          # Day trading chart + trade panel
+│       ├── swing/                # Swing chart + trade panel
+│       ├── backtest/             # Backtest page (run + history)
+│       ├── ml/                   # AI/ML Brain page
+│       ├── notifications/        # Notification history
+│       ├── settings/             # Settings panel
+│       └── guide/                # Trading reference guide
+├── docs/                         # This documentation
+├── start.bat                     # 1-click launcher: API + dashboard
+└── stop.bat                      # Kills all processes
 ```
 
 ---
@@ -198,7 +244,11 @@ EVOTRADE-AI/
 | 7 | Reinforcement learning agent training loop | ✅ Done (`0fbe1bd`) |
 | 8 | Risk manager hardening + news filter + drawdown circuit breaker | ✅ Done (`982d8ef`) |
 | 9 | Demo ↔ Live account switching + full paper trade sync | ✅ Done (`36e0437`) |
-| 10 | `start.ps1` / `stop.ps1` — 1-click Windows launcher (no Docker) | ✅ Done |
+| 10 | `start.bat` / `stop.bat` — 1-click Windows launcher (no Docker) | ✅ Done |
+| 11 | Collapsible sidebar, custom MA overlay, sub-chart panel alignment | ✅ Done (`ef23e26`) |
+| 12 | AI/ML Brain page — LSTM train, RL status, param optimizer, trade memory | ✅ Done (`0ad92fb`) |
+| 13 | Walk-forward backtest engine + backtest page with history, grouped symbol dropdown | ✅ Done (`9ed34cd`) |
+| 14 | Backtest → trade memory feed + auto optimizer trigger after ≥30 simulated trades | ✅ Done |
 
 ---
 
