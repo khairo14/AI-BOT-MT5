@@ -8,9 +8,9 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 const ALL_SYMBOLS = [
   "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
   "EURJPY","GBPJPY","EURCAD","EURGBP",
-  "GOLD","SILVER","OilCash","BRENTCash","NGASCash",
-  "US30Cash","US100Cash","US500Cash","GER40Cash","UK100Cash",
-  "BTCUSD","ETHUSD","XRPUSD","SOLUSD",
+  "GOLD","OILCash",
+  "US30Cash",
+  "BTCUSD",
 ];
 
 export default function AppBootstrap() {
