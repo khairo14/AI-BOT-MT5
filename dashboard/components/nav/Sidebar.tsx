@@ -11,6 +11,7 @@ const NAV = [
   { href: "/scalping", label: "Scalping", icon: "⚡" },
   { href: "/day-trading", label: "Day Trading", icon: "☀" },
   { href: "/swing", label: "Swing", icon: "〰" },
+  { href: "/ml", label: "AI / ML Brain", icon: "🧠" },
   { href: "/notifications", label: "Notifications", icon: "🔔" },
   { href: "/guide", label: "Trading Guide", icon: "📖" },
   { href: "/settings", label: "Settings", icon: "⚙️" },
@@ -37,7 +38,7 @@ export default function Sidebar() {
       style={{ width: collapsed ? "56px" : "224px" }}
     >
       {/* Logo + collapse toggle */}
-      <div className="px-3 py-5 border-b border-gray-800 flex items-center justify-between gap-2 min-h-[60px]">
+      <div className="px-3 py-5 border-b border-gray-800 flex items-center justify-between gap-2 min-h-15">
         {!collapsed && (
           <div className="overflow-hidden">
             <h1 className="text-lg font-bold text-white tracking-tight whitespace-nowrap">EVOTRADE-AI</h1>

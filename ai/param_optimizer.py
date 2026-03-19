@@ -1,0 +1,452 @@
+"""
+Strategy Parameter Optimizer
+
+Two-phase approach:
+  Phase 1 — Backtest grid search over historical OHLCV bars.
+             Tests parameter combinations walk-forward, scores by win_rate × avg_rr.
+
+  Phase 2 — Live refinement.
+             Reads trade_memory.jsonl outcomes for a (strategy, symbol) pair.
+             If win_rate drops below threshold (>=20 trades), triggers re-backtest
+             with more bars to find updated best params.
+
+Optimized params are written to: config/optimized_params.json
+Format:
+  {
+    "ema_scalp": {
+      "EURUSD":    {"ema_fast": 10, "rr": 2.5},
+      "__global__": {"ema_fast": 8}
+    }
+  }
+
+StrategyRunner._strategy_params() reads this file and merges over defaults,
+so optimizations take effect on the next strategy run without restart.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable, Optional
+
+import numpy as np
+import pandas as pd
+from loguru import logger
+
+CONFIG_DIR = Path(__file__).parent.parent / "config"
+OPT_FILE   = CONFIG_DIR / "optimized_params.json"
+
+MIN_TRADES_FOR_REFINEMENT = 20   # closed trades before live refinement kicks in
+MIN_BACKTEST_SIGNALS      = 5    # discard combos that fired fewer signals
+MAX_GRID_COMBOS           = 64   # cap to keep backtest fast
+BACKTEST_COOLDOWN_HOURS   = 24   # min hours between automatic re-backtests
+LIVE_REFINE_WIN_THRESH    = 0.45 # re-optimize when win_rate drops below this
+
+# Walk-forward step (every Nth bar) and max hold per mode
+_BACKTEST_CONFIG = {
+    "scalping":    {"step": 3,  "max_hold": 50,  "warmup": 50},
+    "day_trading": {"step": 5,  "max_hold": 100, "warmup": 100},
+    "swing":       {"step": 10, "max_hold": 200, "warmup": 200},
+}
+
+# ── Parameter grids ──────────────────────────────────────────────────────────
+# Only the most impactful parameters per strategy (keep total combos ≤ MAX_GRID_COMBOS)
+PARAM_GRIDS: dict[str, dict[str, list]] = {
+    "ema_scalp": {
+        "ema_fast": [5, 8, 10, 13],
+        "ema_slow": [18, 21, 26, 34],
+        "rr":       [1.5, 2.0, 2.5, 3.0],
+    },
+    "bb_squeeze": {
+        "bb_period":       [15, 20, 25],
+        "bb_std":          [1.5, 2.0, 2.5],
+        "min_squeeze_bars": [3, 5, 7],
+    },
+    "vwap_reversion": {
+        "sigma_entry": [1.0, 1.5, 2.0],
+        "sigma_sl":    [2.0, 2.5, 3.0],
+        "rsi_period":  [7, 9, 14],
+    },
+    "macd_ema_trend": {
+        "macd_fast":   [9, 12],
+        "macd_slow":   [21, 26],
+        "macd_signal": [6, 9],
+        "ema_fast":    [15, 20],
+        "ema_slow":    [45, 50],
+    },
+    "sr_breakout": {
+        "lookback_bars": [30, 50, 70],
+        "atr_period":    [10, 14, 20],
+    },
+    "rsi_divergence": {
+        "rsi_period":      [10, 14, 18],
+        "ema_bias_period": [40, 50, 65],
+    },
+    "ema_trend_rider": {
+        "ema_fast": [13, 20, 25],
+        "ema_slow": [50, 60, 75],
+    },
+    "fibonacci_rsi": {
+        "rsi_period":   [10, 14, 18],
+        "fib_lookback": [30, 50, 70],
+    },
+    "weekly_breakout": {
+        "lookback_bars": [50, 80, 100],
+        "atr_mult_sl":   [1.5, 2.0, 2.5],
+    },
+}
+
+# Single-df dispatch for backtesting (secondary TFs not available during replay)
+_DISPATCH: dict[str, Callable] = {
+    "ema_scalp":       lambda s, df: s.calculate(df, df_m5=None),
+    "bb_squeeze":      lambda s, df: s.calculate(df),
+    "vwap_reversion":  lambda s, df: s.calculate(df),
+    "macd_ema_trend":  lambda s, df: s.calculate(df, df_h1=None),
+    "rsi_divergence":  lambda s, df: s.calculate(df, df_h1=None),
+    "ema_trend_rider": lambda s, df: s.calculate(df, df_h4=None, df_d1=None),
+    "fibonacci_rsi":   lambda s, df: s.calculate(df),
+    "weekly_breakout": lambda s, df: s.calculate(df, df_daily=None),
+    "sr_breakout":     lambda s, df: s.calculate(df),
+}
+
+_STRATEGY_MAP: Optional[dict] = None
+
+
+def _get_strategy_map() -> dict:
+    global _STRATEGY_MAP
+    if _STRATEGY_MAP is None:
+        from engine.strategies.scalping.ema_scalp       import EMAScalp
+        from engine.strategies.scalping.bb_squeeze      import BBSqueeze
+        from engine.strategies.scalping.vwap_reversion  import VWAPReversion
+        from engine.strategies.day_trading.macd_ema_trend import MACDEMATrend
+        from engine.strategies.day_trading.sr_breakout  import SRBreakout
+        from engine.strategies.day_trading.rsi_divergence import RSIDivergence
+        from engine.strategies.swing.ema_trend_rider    import EMATrendRider
+        from engine.strategies.swing.fibonacci_rsi      import FibonacciRSI
+        from engine.strategies.swing.weekly_breakout    import WeeklyBreakout
+        _STRATEGY_MAP = {
+            "ema_scalp":       EMAScalp,
+            "bb_squeeze":      BBSqueeze,
+            "vwap_reversion":  VWAPReversion,
+            "macd_ema_trend":  MACDEMATrend,
+            "sr_breakout":     SRBreakout,
+            "rsi_divergence":  RSIDivergence,
+            "ema_trend_rider": EMATrendRider,
+            "fibonacci_rsi":   FibonacciRSI,
+            "weekly_breakout": WeeklyBreakout,
+        }
+    return _STRATEGY_MAP
+
+
+# ── Helper functions ─────────────────────────────────────────────────────────
+
+def _grid_combos(strategy_name: str) -> list[dict]:
+    """Return all valid param combos for a strategy, capped at MAX_GRID_COMBOS."""
+    grid = PARAM_GRIDS.get(strategy_name, {})
+    if not grid:
+        return [{}]
+    keys   = list(grid.keys())
+    values = list(grid.values())
+    all_combos = [
+        dict(zip(keys, combo))
+        for combo in itertools.product(*values)
+        if _valid_combo(strategy_name, dict(zip(keys, combo)))
+    ]
+    if len(all_combos) > MAX_GRID_COMBOS:
+        rng = np.random.default_rng(42)
+        idx = rng.choice(len(all_combos), MAX_GRID_COMBOS, replace=False)
+        all_combos = [all_combos[int(i)] for i in sorted(idx)]
+    return all_combos
+
+
+def _valid_combo(strategy_name: str, combo: dict) -> bool:
+    """Filter logically invalid combinations."""
+    fast = combo.get("ema_fast", 0)
+    slow = combo.get("ema_slow", 0)
+    if fast and slow and fast >= slow:
+        return False
+    if strategy_name == "macd_ema_trend":
+        if combo.get("macd_fast", 0) >= combo.get("macd_slow", 0):
+            return False
+    return True
+
+
+def _simulate_trade(
+    df: pd.DataFrame, idx: int,
+    direction: str, entry: float, sl: float, tp: float,
+    max_hold: int,
+) -> tuple[bool, float]:
+    """Walk forward from bar idx+1 to determine if SL or TP hits first.
+    Returns (won, rr_achieved)."""
+    if tp == 0 or sl == 0 or entry == 0:
+        return False, 0.0
+    risk   = abs(entry - sl)
+    reward = abs(tp   - entry)
+    if risk == 0:
+        return False, 0.0
+    target_rr = reward / risk
+
+    end = min(idx + 1 + max_hold, len(df))
+    for j in range(idx + 1, end):
+        high = float(df.iloc[j]["high"])
+        low  = float(df.iloc[j]["low"])
+        if direction == "BUY":
+            if low  <= sl: return False, -1.0
+            if high >= tp: return True,  target_rr
+        else:
+            if high >= sl: return False, -1.0
+            if low  <= tp: return True,  target_rr
+
+    # Timeout: close at last available bar
+    close_px  = float(df.iloc[end - 1]["close"])
+    actual    = (close_px - entry) if direction == "BUY" else (entry - close_px)
+    rr_actual = actual / risk
+    return actual > 0, rr_actual
+
+
+def _backtest_combo(
+    strategy_cls,
+    dispatch_fn,
+    df: pd.DataFrame,
+    params: dict,
+    step: int,
+    max_hold: int,
+    warmup: int,
+) -> tuple[float, float, int]:
+    """Walk-forward backtest one param combo. Returns (win_rate, avg_rr, n_trades)."""
+    wins: list[float] = []
+    rrs:  list[float] = []
+    i = warmup
+
+    while i < len(df) - 1:
+        try:
+            strat  = strategy_cls(symbol="__bt__", params=params)
+            result = dispatch_fn(strat, df.iloc[:i + 1])
+            sig    = result.signal
+            if sig and sig.direction in ("BUY", "SELL") and sig.tp_price:
+                won, rr = _simulate_trade(
+                    df, i, sig.direction,
+                    sig.entry_price, sig.sl_price, sig.tp_price or 0.0,
+                    max_hold,
+                )
+                wins.append(float(won))
+                rrs.append(rr)
+                i += max(max_hold // 4, step)
+                continue
+        except Exception:
+            pass
+        i += step
+
+    n = len(wins)
+    if n < MIN_BACKTEST_SIGNALS:
+        return 0.0, 0.0, n
+    win_rate = float(np.mean(wins))
+    avg_rr   = float(np.mean(rrs))
+    return win_rate, avg_rr, n
+
+
+# ── Optimizer class ──────────────────────────────────────────────────────────
+
+class ParamOptimizer:
+    """
+    Singleton that manages strategy parameter optimization.
+    Thread-safe — all public methods can be called from background threads.
+    """
+
+    def __init__(self):
+        self._lock    = threading.Lock()
+        self._running: set[str] = set()  # keys currently being optimized
+        self._status: dict[str, dict] = {}  # key → status dict
+        self._load_status()
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def optimize_async(
+        self,
+        strategy_name: str,
+        symbol: str,
+        df: pd.DataFrame,
+        trading_type: str,
+    ) -> bool:
+        """Start background optimization. Returns False if already running."""
+        key = f"{strategy_name}__{symbol}"
+        with self._lock:
+            if key in self._running:
+                return False
+            self._running.add(key)
+        t = threading.Thread(
+            target=self._optimize,
+            args=(strategy_name, symbol, df, trading_type, key),
+            daemon=True,
+        )
+        t.start()
+        logger.info(f"Param optimizer started: {strategy_name}/{symbol} ({len(df)} bars)")
+        return True
+
+    def get_params(self, strategy_name: str, symbol: str = "") -> dict:
+        """Return best known params for a strategy+symbol (empty dict = use defaults)."""
+        data = self._load_opt()
+        strat = data.get(strategy_name, {})
+        return strat.get(symbol) or strat.get("__global__") or {}
+
+    def should_reoptimize(self, strategy_name: str, symbol: str) -> bool:
+        """
+        True if:
+        - Never been optimized for this pair, OR
+        - Last optimized > BACKTEST_COOLDOWN_HOURS ago AND recent win_rate low
+        """
+        key = f"{strategy_name}__{symbol}"
+        with self._lock:
+            info = self._status.get(key, {})
+
+        last = info.get("last_optimized_at")
+        if not last:
+            return True
+        hours_ago = (
+            datetime.now(tz=timezone.utc) -
+            datetime.fromisoformat(last)
+        ).total_seconds() / 3600
+        if hours_ago < BACKTEST_COOLDOWN_HOURS:
+            return False
+
+        # Check if live win_rate has fallen — if so, re-optimize despite cooldown
+        from ai.trade_memory import memory
+        outcomes = [
+            o for o in memory.recent(n=50)
+            if o.get("strategy") == strategy_name and o.get("symbol") == symbol
+        ]
+        if len(outcomes) >= MIN_TRADES_FOR_REFINEMENT:
+            wins = sum(1 for o in outcomes if o["profit"] > 0)
+            if wins / len(outcomes) < LIVE_REFINE_WIN_THRESH:
+                return True
+        return False
+
+    def status(self) -> dict:
+        with self._lock:
+            return dict(self._status)
+
+    # ── Internal ─────────────────────────────────────────────────────────────
+
+    def _optimize(
+        self,
+        strategy_name: str,
+        symbol: str,
+        df: pd.DataFrame,
+        trading_type: str,
+        key: str,
+    ) -> None:
+        try:
+            best_params, score, n = self._run_backtest(
+                strategy_name, symbol, df, trading_type
+            )
+            if best_params is not None:
+                self._save_params(strategy_name, symbol, best_params)
+                with self._lock:
+                    self._status[key] = {
+                        "strategy":          strategy_name,
+                        "symbol":            symbol,
+                        "trading_type":      trading_type,
+                        "best_score":        round(score, 4),
+                        "n_signals":         n,
+                        "best_params":       best_params,
+                        "last_optimized_at": datetime.now(tz=timezone.utc).isoformat(),
+                        "bars_used":         len(df),
+                    }
+                self._save_status()
+                logger.info(
+                    f"Optimizer: {strategy_name}/{symbol} best_score={score:.3f} "
+                    f"params={best_params}"
+                )
+            else:
+                logger.warning(f"Optimizer: no valid combos found for {strategy_name}/{symbol}")
+        except Exception as exc:
+            logger.exception(f"Optimizer error {strategy_name}/{symbol}: {exc}")
+        finally:
+            with self._lock:
+                self._running.discard(key)
+
+    def _run_backtest(
+        self,
+        strategy_name: str,
+        symbol: str,
+        df: pd.DataFrame,
+        trading_type: str,
+    ) -> tuple[Optional[dict], float, int]:
+        """Run grid-search backtest. Returns (best_params, best_score, n_trades)."""
+        strat_map    = _get_strategy_map()
+        strategy_cls = strat_map.get(strategy_name)
+        if strategy_cls is None:
+            logger.warning(f"Optimizer: unknown strategy {strategy_name}")
+            return None, 0.0, 0
+
+        dispatch = _DISPATCH.get(strategy_name, lambda s, d: s.calculate(d))
+        combos   = _grid_combos(strategy_name)
+        cfg      = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
+
+        best_params: Optional[dict] = None
+        best_score  = -1.0
+        best_n      = 0
+
+        for combo in combos:
+            wr, avg_rr, n = _backtest_combo(
+                strategy_cls, dispatch, df, combo,
+                cfg["step"], cfg["max_hold"], cfg["warmup"],
+            )
+            # Score = win_rate weighted by quality of avg R:R
+            # Zero-score combos with negative avg_rr
+            score = wr * max(avg_rr, 0.0) if n >= MIN_BACKTEST_SIGNALS else 0.0
+            if score > best_score:
+                best_score  = score
+                best_params = combo
+                best_n      = n
+
+        return best_params, best_score, best_n
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+
+    def _load_opt(self) -> dict:
+        try:
+            if OPT_FILE.exists():
+                return json.loads(OPT_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {}
+
+    def _save_params(self, strategy_name: str, symbol: str, params: dict) -> None:
+        with self._lock:
+            data = self._load_opt()
+            data.setdefault(strategy_name, {})
+            data[strategy_name][symbol] = params
+            # Also update __global__ if this is the first symbol
+            if "__global__" not in data[strategy_name]:
+                data[strategy_name]["__global__"] = params
+            OPT_FILE.write_text(
+                json.dumps(data, indent=2),
+                encoding="utf-8",
+            )
+
+    _STATUS_FILE = Path(__file__).parent / "data" / "optimizer_status.json"
+
+    def _load_status(self) -> None:
+        try:
+            if self._STATUS_FILE.exists():
+                self._status = json.loads(self._STATUS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            self._status = {}
+
+    def _save_status(self) -> None:
+        try:
+            self._STATUS_FILE.parent.mkdir(exist_ok=True)
+            self._STATUS_FILE.write_text(
+                json.dumps(self._status, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+
+# Application singleton
+optimizer = ParamOptimizer()

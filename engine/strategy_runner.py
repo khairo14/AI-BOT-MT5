@@ -162,7 +162,7 @@ class StrategyRunner:
             return None
 
         strat_cls = STRATEGY_MAP[strat_name]
-        params    = self._strategy_params(strat_name)
+        params    = self._strategy_params(strat_name, symbol)
         strategy  = strat_cls(symbol=symbol, params=params)
 
         # Fetch all required timeframes
@@ -381,5 +381,23 @@ class StrategyRunner:
         overrides = self._strategies_cfg.get("per_symbol_overrides", {})
         return overrides.get(trading_type, {}).get(symbol)
 
-    def _strategy_params(self, strat_name: str) -> dict:
-        return self._strategies_cfg.get("strategy_params", {}).get(strat_name, {})
+    def _strategy_params(self, strat_name: str, symbol: str = "") -> dict:
+        """Return merged params: strategies.json defaults + optimized overrides."""
+        # Base params: search per-mode params in strategies.json
+        base: dict = {}
+        for mode_cfg in self._strategies_cfg.values():
+            if isinstance(mode_cfg, dict):
+                p = mode_cfg.get("params", {}).get(strat_name)
+                if p:
+                    base = dict(p)
+                    break
+
+        # Optimized params from param_optimizer (per-symbol > global > none)
+        try:
+            from ai.param_optimizer import optimizer
+            opt = optimizer.get_params(strat_name, symbol)
+            if opt:
+                return {**base, **opt}
+        except Exception:
+            pass
+        return base

@@ -152,3 +152,164 @@ def memory_stats(trading_type: Optional[TRADING_TYPE] = None):
 def memory_recent(n: int = 50, trading_type: Optional[TRADING_TYPE] = None):
     """Return the last N trade outcomes, newest last."""
     return memory.recent(n=min(n, 500), trading_type=trading_type)
+
+
+# ───────────────────────────────────
+# Train-all endpoint
+# ───────────────────────────────────
+
+class TrainAllRequest(BaseModel):
+    bars: int = 1000
+
+
+@router.post("/train/all")
+async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
+    """
+    Trigger LSTM retraining for all enabled symbols × trading types.
+    Runs in background threads — poll GET /ai/status to track progress.
+    """
+    from api.main import get_mt5_client
+    from engine.mt5_client import MT5Client
+    import MetaTrader5 as _mt5
+
+    client = get_mt5_client()
+    if client is None or not client.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 not connected")
+
+    CONFIG_PATH = Path(__file__).parent.parent.parent / "config"
+    try:
+        import json
+        symbols_cfg = json.loads((CONFIG_PATH / "symbols.json").read_text())
+    except Exception:
+        raise HTTPException(status_code=500, detail="Cannot read symbols.json")
+
+    tf_map = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
+    started, skipped = [], []
+
+    for trading_type, sym_list in symbols_cfg.items():
+        if not isinstance(sym_list, list):
+            continue
+        tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
+        tf_mt5 = tf_map.get(tf_str, _mt5.TIMEFRAME_H1)
+        for entry in sym_list:
+            symbol = entry.get("symbol") if isinstance(entry, dict) else entry
+            if not symbol:
+                continue
+            if predictor.is_training(symbol, trading_type):
+                skipped.append(f"{symbol}/{trading_type}")
+                continue
+            df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, req.bars)
+            if df is None or df.empty:
+                skipped.append(f"{symbol}/{trading_type} (no data)")
+                continue
+            predictor.train_async(symbol, df, trading_type)
+            started.append(f"{symbol}/{trading_type}")
+
+    return {"started": started, "skipped": skipped}
+
+
+# ───────────────────────────────────
+# Parameter Optimizer endpoints
+# ───────────────────────────────────
+
+from ai.param_optimizer import optimizer as _optimizer, PARAM_GRIDS
+
+
+@router.get("/optimizer/status")
+def optimizer_status():
+    """Return current optimizer status for all (strategy, symbol) pairs."""
+    return {
+        "jobs":        _optimizer.status(),
+        "param_grids": {k: list(v.keys()) for k, v in PARAM_GRIDS.items()},
+    }
+
+
+class OptimizeRequest(BaseModel):
+    trading_type: TRADING_TYPE = "day_trading"
+    bars: int = 1500
+
+
+@router.post("/optimizer/run/{strategy_name}/{symbol}")
+async def run_optimizer(
+    strategy_name: str,
+    symbol: str,
+    req: OptimizeRequest = OptimizeRequest(),
+):
+    """
+    Trigger backtest grid-search optimization for one (strategy, symbol) pair.
+    Runs in background — poll GET /ai/optimizer/status to track progress.
+    """
+    from api.main import get_mt5_client
+    import MetaTrader5 as _mt5
+
+    if strategy_name not in PARAM_GRIDS:
+        raise HTTPException(status_code=400, detail=f"Unknown strategy: {strategy_name}")
+
+    client = get_mt5_client()
+    if client is None or not client.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 not connected")
+
+    tf_str = TRADING_TYPE_TF.get(req.trading_type, "H1")
+    tf_map = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
+    tf_mt5 = tf_map.get(tf_str, _mt5.TIMEFRAME_H1)
+
+    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, req.bars)
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol}/{tf_str}")
+
+    started = _optimizer.optimize_async(strategy_name, symbol, df, req.trading_type)
+    return {
+        "status":         "optimization_started" if started else "already_running",
+        "strategy":       strategy_name,
+        "symbol":         symbol,
+        "trading_type":   req.trading_type,
+        "bars":           len(df),
+    }
+
+
+@router.post("/optimizer/run/all")
+async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
+    """
+    Trigger optimization for every (strategy, enabled-symbol) pair.
+    """
+    from api.main import get_mt5_client
+    import json, MetaTrader5 as _mt5
+    from pathlib import Path as _Path
+
+    client = get_mt5_client()
+    if client is None or not client.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 not connected")
+
+    CONFIG_PATH = _Path(__file__).parent.parent.parent / "config"
+    try:
+        symbols_cfg    = json.loads((CONFIG_PATH / "symbols.json").read_text())
+        strategies_cfg = json.loads((CONFIG_PATH / "strategies.json").read_text())
+    except Exception:
+        raise HTTPException(status_code=500, detail="Cannot read config files")
+
+    tf_map = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
+    started, skipped = [], []
+
+    for trading_type in ("scalping", "day_trading", "swing"):
+        active = strategies_cfg.get(trading_type, {}).get("active_strategies", [])
+        tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
+        tf_mt5 = tf_map.get(tf_str, _mt5.TIMEFRAME_H1)
+        sym_list = symbols_cfg.get(trading_type, [])
+        symbols  = [
+            (e.get("symbol") if isinstance(e, dict) else e)
+            for e in sym_list
+            if (e.get("enabled", False) if isinstance(e, dict) else True)
+        ]
+        for strat in active:
+            for symbol in symbols:
+                if not symbol or strat not in PARAM_GRIDS:
+                    continue
+                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, req.bars)
+                if df is None or df.empty:
+                    skipped.append(f"{strat}/{symbol}")
+                    continue
+                ok = _optimizer.optimize_async(strat, symbol, df, trading_type)
+                (started if ok else skipped).append(f"{strat}/{symbol}")
+
+    return {"started": started, "skipped": skipped}
+

@@ -130,3 +130,30 @@ export const fetchJournalStats = (): Promise<JournalStatsResponse> =>
 // -- Logs ------------------------------------------------------------------
 export const fetchLogTail = (n = 200): Promise<{ lines: string[] }> =>
   api.get(`/logs/tail?n=${n}`).then((r) => r.data);
+
+// ── AI / ML ----------------------------------------------------------------
+export const fetchAIStatus = () =>
+  api.get("/ai/status").then((r) => r.data);
+
+export const fetchRLStatus = () =>
+  api.get("/ai/rl/status").then((r) => r.data);
+
+export const fetchMemoryStats = (tradingType?: string) => {
+  const params = tradingType ? `?trading_type=${tradingType}` : "";
+  return api.get(`/ai/memory/stats${params}`).then((r) => r.data);
+};
+
+export const fetchOptimizerStatus = () =>
+  api.get("/ai/optimizer/status").then((r) => r.data);
+
+export const trainSymbol = (symbol: string, tradingType: string, bars = 1000) =>
+  api.post(`/ai/train/${symbol}`, { trading_type: tradingType, bars }).then((r) => r.data);
+
+export const trainAllSymbols = (bars = 1000) =>
+  api.post("/ai/train/all", { bars }).then((r) => r.data);
+
+export const runOptimizer = (strategy: string, symbol: string, tradingType: string, bars = 1500) =>
+  api.post(`/ai/optimizer/run/${strategy}/${symbol}`, { trading_type: tradingType, bars }).then((r) => r.data);
+
+export const runOptimizerAll = (bars = 1500) =>
+  api.post("/ai/optimizer/run/all", { bars }).then((r) => r.data);
