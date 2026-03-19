@@ -304,7 +304,12 @@ class RiskManager:
             return False, f"Total position limit reached ({total_count}/{total_limit})"
 
         if symbol is not None:
-            symbol_count = sum(1 for p in open_positions if p.get("symbol") == symbol)
+            # Scope per-symbol count to the same trading mode so a day-trade
+            # position on GBPUSD does NOT block a scalping signal on GBPUSD.
+            symbol_count = sum(
+                1 for p in open_positions
+                if p.get("symbol") == symbol and p.get("comment", "").startswith(prefix)
+            )
             if symbol_count >= per_symbol_limit:
                 return False, f"Per-symbol limit reached for {symbol} ({symbol_count}/{per_symbol_limit})"
 
