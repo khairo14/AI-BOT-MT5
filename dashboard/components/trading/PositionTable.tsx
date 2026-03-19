@@ -6,9 +6,17 @@ import type { Position } from "@/types";
 interface Props {
   positions: Position[];
   onRefresh: () => void;
+  showMode?: boolean;
 }
 
-export default function PositionTable({ positions, onRefresh }: Props) {
+function modeFromComment(comment: string): { label: string; color: string } {
+  if (comment.startsWith("scalp")) return { label: "Scalping",    color: "text-violet-400" };
+  if (comment.startsWith("day"))   return { label: "Day Trading", color: "text-sky-400" };
+  if (comment.startsWith("swing")) return { label: "Swing",       color: "text-amber-400" };
+  return { label: "Manual", color: "text-gray-400" };
+}
+
+export default function PositionTable({ positions, onRefresh, showMode = false }: Props) {
   const { pushNotification } = useBotStore();
 
   const handleClose = async (ticket: number) => {
@@ -33,6 +41,7 @@ export default function PositionTable({ positions, onRefresh }: Props) {
         <thead>
           <tr className="text-xs text-gray-500 uppercase border-b border-gray-800">
             <th className="pb-2 pr-4">Symbol</th>
+            {showMode && <th className="pb-2 pr-4">Mode</th>}
             <th className="pb-2 pr-4">Type</th>
             <th className="pb-2 pr-4">Lots</th>
             <th className="pb-2 pr-4">Open</th>
@@ -46,6 +55,7 @@ export default function PositionTable({ positions, onRefresh }: Props) {
           {positions.map((p) => (
             <tr key={p.ticket} className="text-gray-300">
               <td className="py-2 pr-4 font-medium text-white">{p.symbol}</td>
+              {showMode && (() => { const m = modeFromComment(p.comment ?? ""); return <td className={`py-2 pr-4 text-xs font-medium ${m.color}`}>{m.label}</td>; })()}
               <td className={`py-2 pr-4 font-semibold ${p.type === "buy" ? "text-emerald-400" : "text-red-400"}`}>
                 {p.type.toUpperCase()}
               </td>

@@ -74,7 +74,10 @@ export default function TradingModePage({
   const removeCustomMA = (id: string) => setCustomMAs((prev) => prev.filter((m) => m.id !== id));
 
   const allSymbols = symbolGroups.flatMap((g) => g.symbols);
-  const modePositions = positions.filter((p) => allSymbols.includes(p.symbol));
+  const modePrefix = mode === "scalping" ? "scalp" : mode === "day_trading" ? "day" : "swing";
+  const modePositions = positions.filter((p) =>
+    p.comment ? p.comment.startsWith(modePrefix) : allSymbols.includes(p.symbol)
+  );
 
   const loadChart = useCallback(() => {
     fetchOHLCV(symbol, timeframe, 300)

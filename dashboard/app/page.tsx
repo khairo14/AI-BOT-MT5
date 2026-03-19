@@ -45,7 +45,7 @@ export default function OverviewPage() {
           <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">Open Positions ({positions.length})</h3>
           <button onClick={refresh} className="text-xs text-gray-500 hover:text-white transition-colors">Refresh</button>
         </div>
-        <PositionTable positions={positions} onRefresh={refresh} />
+        <PositionTable positions={positions} onRefresh={refresh} showMode />
       </div>
 
       {/* Phase 9: paper vs live journal */}
