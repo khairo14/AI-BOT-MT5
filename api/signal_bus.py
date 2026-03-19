@@ -401,6 +401,33 @@ class SignalBus:
 
 # ── outcome poller ────────────────────────────────────────────────────────────
 
+def _get_server_utc_offset_secs(symbol: str = "EURUSD") -> int:
+    """
+    Detect how many seconds the MT5 server clock is ahead of true UTC.
+    Many brokers (e.g. XM EET = UTC+2) return deal/tick timestamps that are
+    offset from the Unix epoch by their local timezone.  We detect this by
+    comparing a fresh tick timestamp with the Python wall clock and rounding
+    to the nearest hour.
+
+    Returns 0 if a tick cannot be obtained (safe default).
+    """
+    import MetaTrader5 as mt5
+    import time as _time
+
+    tick = mt5.symbol_info_tick(symbol)
+    if tick is None:
+        # Try a fallback symbol
+        for sym in ("GBPUSD", "USDJPY", "BTCUSD"):
+            tick = mt5.symbol_info_tick(sym)
+            if tick is not None:
+                break
+    if tick is None:
+        return 0
+    diff = tick.time - int(_time.time())
+    # Round to nearest hour — offsets are always whole hours
+    return round(diff / 3600) * 3600
+
+
 async def recover_unclosed_trades(client) -> None:
     """
     Called once at startup to backfill close journal entries and trade
@@ -424,6 +451,10 @@ async def recover_unclosed_trades(client) -> None:
     live_positions = await asyncio.to_thread(mt5.positions_get)
     live_tickets = {p.ticket for p in (live_positions or [])}
 
+    # Detect server-clock UTC offset once (e.g. EET = +7200 s)
+    server_offset = await asyncio.to_thread(_get_server_utc_offset_secs)
+    logger.info(f"Recovery: detected server UTC offset = {server_offset // 3600:+d}h")
+
     for entry in unclosed:
         ticket = entry["ticket"]
         if ticket in live_tickets:
@@ -439,8 +470,9 @@ async def recover_unclosed_trades(client) -> None:
             logger.debug(f"Recovery: no close deal found for ticket #{ticket} — skipping")
             continue
 
-        deal       = closed[-1]
-        close_time = datetime.fromtimestamp(deal.time, tz=timezone.utc).isoformat()
+        deal      = closed[-1]
+        # Correct deal.time for broker server-clock offset so we store true UTC
+        close_time = datetime.fromtimestamp(deal.time - server_offset, tz=timezone.utc).isoformat()
         profit     = deal.profit
         close_px   = deal.price
         entry_px   = float(entry.get("entry") or 0)
@@ -563,7 +595,9 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 continue
 
             deal       = closed[-1]
-            close_time = datetime.fromtimestamp(deal.time, tz=timezone.utc).isoformat()
+            # Use Python clock for close_time — avoids broker server-clock offset issues.
+            # deal.time can be in local server time (e.g. EET = UTC+2) on some brokers.
+            close_time = datetime.now(tz=timezone.utc).isoformat()
             profit     = deal.profit
             close_px   = deal.price
             entry_px   = float(signal.get("fill_price") or signal.get("entry_price", 0))
