@@ -8,7 +8,7 @@ export default function SwingPage() {
       icon="〰"
       symbolGroups={[
         { label: "Forex Majors",  symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"] },
-        { label: "Commodities",   symbols: ["GOLD", "SILVER", "OilCash", "BRENTCash", "NGASCash"] },
+        { label: "Commodities",   symbols: ["GOLD", "SILVER", "OILCash", "BRENTCash", "NGASCash"] },
         { label: "Indices",       symbols: ["US100Cash", "US500Cash"] },
         { label: "Crypto",        symbols: ["BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD"] },
         { label: "Stocks",        symbols: ["TSLA.OQ", "NVDA.OQ", "GOOGL.OQ", "META.OQ", "NFLX.OQ", "AMD.OQ"] },

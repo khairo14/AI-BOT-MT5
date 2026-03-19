@@ -9,7 +9,7 @@ export default function DayTradingPage() {
       symbolGroups={[
         { label: "Forex Majors",  symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"] },
         { label: "Forex Minors",  symbols: ["GBPJPY"] },
-        { label: "Commodities",   symbols: ["GOLD", "OilCash"] },
+        { label: "Commodities",   symbols: ["GOLD", "OILCash"] },
         { label: "Indices",       symbols: ["US100Cash", "US30Cash", "US500Cash", "GER40Cash", "UK100Cash"] },
         { label: "Crypto",        symbols: ["BTCUSD", "ETHUSD"] },
         { label: "Stocks",        symbols: ["TSLA.OQ", "NVDA.OQ", "AAPL.OQ", "MSFT.OQ", "AMZN.OQ"] },
