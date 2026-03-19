@@ -127,11 +127,13 @@ class SessionFilter:
     @staticmethod
     def _category_to_session(cat: str) -> str:
         return {
-            "stock":     "us_stocks",
-            "index":     "eu_indices",   # conservative — use EU hours as base
+            "stock":    "us_stocks",
+            "us_index": "us_indices",
+            "eu_index": "eu_indices",
+            "index":    "eu_indices",   # legacy fallback
             "commodity": "commodities",
-            "forex":     "forex",
-            "crypto":    "crypto",
+            "forex":    "forex",
+            "crypto":   "crypto",
         }.get(cat, "forex")
 
     @staticmethod

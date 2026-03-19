@@ -267,17 +267,18 @@ class MT5Client:
         return [
             {
                 "ticket":      p.ticket,
-                "symbol":      p.symbol,
-                "type":        "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
-                "volume":      p.volume,
-                "open_price":  p.price_open,
-                "sl":          p.sl,
-                "tp":          p.tp,
-                "profit":      p.profit,
-                "swap":        p.swap,
-                "open_time":   datetime.fromtimestamp(p.time, tz=timezone.utc),
-                "comment":     p.comment,
-                "magic":       p.magic,
+                "symbol":        p.symbol,
+                "type":          "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
+                "volume":        p.volume,
+                "open_price":    p.price_open,
+                "price_current": p.price_current,
+                "sl":            p.sl,
+                "tp":            p.tp,
+                "profit":        p.profit,
+                "swap":          p.swap,
+                "open_time":     datetime.fromtimestamp(p.time, tz=timezone.utc),
+                "comment":       p.comment,
+                "magic":         p.magic,
             }
             for p in positions
         ]
