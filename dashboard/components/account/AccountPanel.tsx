@@ -119,13 +119,33 @@ export default function AccountPanel() {
 
         {entries.length === 0 ? (
           <p className="text-xs text-gray-600">No journal entries yet. Trades will appear here once the bot executes orders.</p>
-        ) : (
+        ) : (() => {
+          // Merge open + close rows into one row per ticket.
+          // close entry takes priority (has profit); open entry fills in times.
+          const merged = new Map<number, JournalEntry & { open_entry?: JournalEntry }>();
+          for (const e of [...entries].reverse()) {
+            const existing = merged.get(e.ticket);
+            if (!existing) {
+              merged.set(e.ticket, { ...e });
+            } else if (e.event === "close") {
+              merged.set(e.ticket, { ...e, open_time: existing.open_time ?? e.open_time });
+            } else if (existing.event === "close") {
+              // keep close, just fill open_time if missing
+              if (!existing.open_time) existing.open_time = e.open_time;
+            }
+          }
+          const rows = Array.from(merged.values()).reverse();
+          const fmtTime = (iso: string | null | undefined) =>
+            iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
+          return (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-gray-500 border-b border-gray-800">
                   <th className="text-left py-2 pr-4">Ticket</th>
-                  <th className="text-left py-2 pr-4">Date</th>
+                  <th className="text-left py-2 pr-4">Entry Time</th>
+                  <th className="text-left py-2 pr-4">Close Time</th>
                   <th className="text-left py-2 pr-4">Symbol</th>
                   <th className="text-left py-2 pr-4">Dir</th>
                   <th className="text-left py-2 pr-4">Lots</th>
@@ -135,57 +155,50 @@ export default function AccountPanel() {
                   <th className="text-left py-2 pr-4">P&L</th>
                   <th className="text-left py-2 pr-4">Type</th>
                   <th className="text-left py-2 pr-4">Account</th>
-                  <th className="text-left py-2">Event</th>
+                  <th className="text-left py-2">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
-                {entries.map((e, i) => (
-                  <tr key={i} className="text-gray-300 hover:bg-gray-800/50 transition-colors">
-                    <td className="py-2 pr-4 font-mono text-gray-500">#{e.ticket}</td>
-                    <td className="py-2 pr-4 font-mono text-gray-400 whitespace-nowrap">
-                      {e.open_time ? new Date(e.open_time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
-                    </td>
-                    <td className="py-2 pr-4 font-semibold">{e.symbol}</td>
-                    <td className={`py-2 pr-4 font-semibold ${e.direction === "buy" ? "text-green-400" : "text-red-400"}`}>
-                      {e.direction.toUpperCase()}
-                    </td>
-                    <td className="py-2 pr-4">{e.volume}</td>
-                    <td className="py-2 pr-4 font-mono">{e.entry}</td>
-                    <td className="py-2 pr-4 font-mono text-red-400">{e.sl ? e.sl : "—"}</td>
-                    <td className="py-2 pr-4 font-mono text-green-400">{e.tp ? e.tp : "—"}</td>
-                    {(() => {
-                      const live = e.event === "open" ? liveProfit[e.ticket] : undefined;
-                      const pnl  = e.profit ?? live ?? null;
-                      const isLive = e.profit == null && live != null;
-                      return (
-                        <td className={`py-2 pr-4 font-mono ${
-                          pnl == null ? "text-gray-500" :
-                          pnl >= 0 ? "text-green-400" : "text-red-400"
-                        }`}>
-                          {pnl == null
-                            ? "—"
-                            : `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}${isLive ? " ~" : ""}`
-                          }
-                        </td>
-                      );
-                    })()}
-                    <td className="py-2 pr-4 text-gray-500">{e.trading_type}</td>
-                    <td className="py-2 pr-4">
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${
-                        e.account_mode === "live"
-                          ? "bg-red-900/40 text-red-300"
-                          : "bg-emerald-900/40 text-emerald-300"
-                      }`}>
-                        {e.account_mode}
-                      </span>
-                    </td>
-                    <td className="py-2 text-gray-500 capitalize">{e.event}</td>
-                  </tr>
-                ))}
+                {rows.map((e, i) => {
+                  const isClosed = e.event === "close";
+                  const live = !isClosed ? liveProfit[e.ticket] : undefined;
+                  const pnl  = e.profit ?? live ?? null;
+                  const isLive = e.profit == null && live != null;
+                  return (
+                    <tr key={i} className="text-gray-300 hover:bg-gray-800/50 transition-colors">
+                      <td className="py-2 pr-4 font-mono text-gray-500">#{e.ticket}</td>
+                      <td className="py-2 pr-4 font-mono text-gray-400 whitespace-nowrap">{fmtTime(e.open_time)}</td>
+                      <td className="py-2 pr-4 font-mono text-gray-400 whitespace-nowrap">{fmtTime(e.close_time)}</td>
+                      <td className="py-2 pr-4 font-semibold">{e.symbol}</td>
+                      <td className={`py-2 pr-4 font-semibold ${e.direction === "buy" ? "text-green-400" : "text-red-400"}`}>
+                        {e.direction.toUpperCase()}
+                      </td>
+                      <td className="py-2 pr-4">{e.volume}</td>
+                      <td className="py-2 pr-4 font-mono">{e.entry}</td>
+                      <td className="py-2 pr-4 font-mono text-red-400">{e.sl || "—"}</td>
+                      <td className="py-2 pr-4 font-mono text-green-400">{e.tp || "—"}</td>
+                      <td className={`py-2 pr-4 font-mono ${pnl == null ? "text-gray-500" : pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {pnl == null ? "—" : `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}${isLive ? " ~" : ""}`}
+                      </td>
+                      <td className="py-2 pr-4 text-gray-500">{e.trading_type}</td>
+                      <td className="py-2 pr-4">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${
+                          e.account_mode === "live" ? "bg-red-900/40 text-red-300" : "bg-emerald-900/40 text-emerald-300"
+                        }`}>{e.account_mode}</span>
+                      </td>
+                      <td className="py-2">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${
+                          isClosed ? "bg-gray-700 text-gray-300" : "bg-blue-900/40 text-blue-300"
+                        }`}>{isClosed ? "Closed" : "Open"}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
