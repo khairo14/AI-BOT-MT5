@@ -67,6 +67,10 @@ class OrderManager:
         if tick is None:
             return OrderResult(success=False, error=f"No tick data for {req.symbol}")
 
+        sym_info = mt5.symbol_info(req.symbol)
+        if sym_info is None:
+            return OrderResult(success=False, error=f"Symbol info unavailable for {req.symbol}")
+
         order_type = mt5.ORDER_TYPE_BUY if req.direction == "BUY" else mt5.ORDER_TYPE_SELL
         price = tick.ask if req.direction == "BUY" else tick.bid
 
@@ -75,6 +79,26 @@ class OrderManager:
             return OrderResult(success=False, error="BUY SL must be below entry price")
         if req.direction == "SELL" and req.sl <= price:
             return OrderResult(success=False, error="SELL SL must be above entry price")
+
+        # Enforce broker minimum stop distance (stops_level * point)
+        stops_level = sym_info.trade_stops_level
+        if stops_level > 0:
+            min_dist = stops_level * sym_info.point
+            sl_dist = abs(price - req.sl)
+            if sl_dist < min_dist:
+                return OrderResult(
+                    success=False,
+                    error=f"SL too close: {sl_dist:.5f} < broker minimum {min_dist:.5f} ({stops_level} points)",
+                )
+
+        # Use broker-supported filling mode (filling_mode bitmask: bit0=FOK, bit1=IOC)
+        fm = sym_info.filling_mode
+        if fm & 1:
+            filling = mt5.ORDER_FILLING_FOK
+        elif fm & 2:
+            filling = mt5.ORDER_FILLING_IOC
+        else:
+            filling = mt5.ORDER_FILLING_RETURN
 
         request = {
             "action":    mt5.TRADE_ACTION_DEAL,
@@ -88,7 +112,7 @@ class OrderManager:
             "magic":     req.magic,
             "comment":   req.comment[:31],  # MT5 limit: 31 chars
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_RETURN,
+            "type_filling": filling,
         }
 
         result = mt5.order_send(request)

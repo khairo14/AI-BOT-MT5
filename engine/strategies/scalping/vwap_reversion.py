@@ -89,8 +89,11 @@ class VWAPReversion(BaseStrategy):
             "stoch_d": round(curr_d, 2),
         }
 
-        # Skip if VWAP std is invalid (first bar of session)
+        # Skip if VWAP std is invalid or session is too young (< 20 bars → std unreliable)
+        session_bars = int((df["date"] == curr["date"]).sum())
         if np.isnan(curr["vwap"]) or np.isnan(curr["vwap_std"]) or curr["vwap_std"] == 0:
+            return self._no_signal(indicators)
+        if session_bars < 20:
             return self._no_signal(indicators)
 
         # BUY: price at lower deviation, RSI oversold, Stoch %K crosses above %D
