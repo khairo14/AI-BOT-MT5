@@ -150,20 +150,23 @@ class SignalBus:
                 )
                 return existing
 
-        # ── Open position guard: skip if bot already holds this symbol+direction ──
+        # ── Open position guard: skip if bot already holds this symbol+direction
+        #    in the SAME trading mode (different modes may run concurrently) ──
         try:
             if self._client is not None:
                 open_positions = self._client.get_open_positions()
                 sym = signal.get("symbol", "")
                 direction = signal.get("direction", "").upper()
+                mode_prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(mode, mode)
                 for pos in open_positions:
                     if (
                         pos.get("symbol") == sym
-                        and pos.get("direction", "").upper() == direction
+                        and pos.get("type", "").upper() == direction
+                        and str(pos.get("comment", "")).startswith(mode_prefix)
                     ):
                         logger.debug(
                             f"SignalBus: dedup dropped {sym}/{signal.get('strategy')} "
-                            f"— open {direction} position already exists"
+                            f"— open {direction} {mode} position already exists"
                         )
                         return signal
         except Exception:
