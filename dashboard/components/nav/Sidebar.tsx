@@ -12,6 +12,7 @@ const NAV = [
   { href: "/day-trading", label: "Day Trading", icon: "☀" },
   { href: "/swing", label: "Swing", icon: "〰" },
   { href: "/ml", label: "AI / ML Brain", icon: "🧠" },
+  { href: "/backtest", label: "Backtest", icon: "📈" },
   { href: "/notifications", label: "Notifications", icon: "🔔" },
   { href: "/guide", label: "Trading Guide", icon: "📖" },
   { href: "/settings", label: "Settings", icon: "⚙️" },

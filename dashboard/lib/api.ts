@@ -157,3 +157,19 @@ export const runOptimizer = (strategy: string, symbol: string, tradingType: stri
 
 export const runOptimizerAll = (bars = 1500) =>
   api.post("/ai/optimizer/run/all", { bars }).then((r) => r.data);
+
+// ── Backtest ----------------------------------------------------------------
+export interface BacktestRequest {
+  symbol:          string;
+  strategy:        string;
+  trading_type:    "scalping" | "day_trading" | "swing";
+  bars?:           number;
+  initial_balance?: number;
+  risk_pct?:       number;
+}
+
+export const fetchBacktestStrategies = () =>
+  api.get("/backtest/strategies").then((r) => r.data as Record<string, string[]>);
+
+export const runBacktest = (req: BacktestRequest) =>
+  api.post("/backtest/run", req).then((r) => r.data);
