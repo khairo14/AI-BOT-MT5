@@ -118,6 +118,8 @@ class FibonacciRSI(BaseStrategy):
 
         if bullish_setup and (not p["candle_confirm"] or bull_candle):
             sl = round(curr_close - curr_atr * p["sl_atr_mult"], 5)
+            if self._sl_too_close("BUY", curr_close, sl):
+                return self._no_signal(indicators)
             tp = round(swing_high, 5)  # TP at 100% extension (origin swing high)
             return StrategyResult(
                 signal=Signal(
@@ -135,6 +137,8 @@ class FibonacciRSI(BaseStrategy):
 
         if bearish_setup and (not p["candle_confirm"] or bear_candle):
             sl = round(curr_close + curr_atr * p["sl_atr_mult"], 5)
+            if self._sl_too_close("SELL", curr_close, sl):
+                return self._no_signal(indicators)
             tp = round(swing_low, 5)  # TP at 100% (origin low)
             return StrategyResult(
                 signal=Signal(

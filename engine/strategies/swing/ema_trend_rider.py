@@ -102,6 +102,8 @@ class EMATrendRider(BaseStrategy):
 
         if bull_aligned and adx_ok and at_ema_pull and curr_close > curr_ema21:
             sl = round(low_h1.iloc[-5:].min() - curr_atr * p["sl_atr_mult"] * 0.2, 5)
+            if self._sl_too_close("BUY", curr_close, sl):
+                return self._no_signal(indicators)
             sl_dist = abs(curr_close - sl)
             tp = round(curr_close + sl_dist * p["tp_rr"], 5)
             return StrategyResult(
@@ -120,6 +122,8 @@ class EMATrendRider(BaseStrategy):
 
         if bear_aligned and adx_ok and at_ema_pull and curr_close < curr_ema21:
             sl = round(high_h1.iloc[-5:].max() + curr_atr * p["sl_atr_mult"] * 0.2, 5)
+            if self._sl_too_close("SELL", curr_close, sl):
+                return self._no_signal(indicators)
             sl_dist = abs(sl - curr_close)
             tp = round(curr_close - sl_dist * p["tp_rr"], 5)
             return StrategyResult(

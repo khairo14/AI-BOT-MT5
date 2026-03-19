@@ -129,6 +129,8 @@ class RSIDivergence(BaseStrategy):
         if bullish_div and rsi_cross_up:
             sl = round(price_low_val - curr_atr * 0.3, 5)
             sl_dist = abs(curr_close - sl)
+            if self._sl_too_close("BUY", curr_close, sl):
+                return self._no_signal(indicators)
             tp = round(curr_close + sl_dist * p["tp_rr"], 5)
             return StrategyResult(
                 signal=Signal(
@@ -147,6 +149,8 @@ class RSIDivergence(BaseStrategy):
         if bearish_div and rsi_cross_down:
             sl = round(price_high_val + curr_atr * 0.3, 5)
             sl_dist = abs(sl - curr_close)
+            if self._sl_too_close("SELL", curr_close, sl):
+                return self._no_signal(indicators)
             tp = round(curr_close - sl_dist * p["tp_rr"], 5)
             return StrategyResult(
                 signal=Signal(

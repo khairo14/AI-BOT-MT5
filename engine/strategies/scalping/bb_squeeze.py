@@ -89,6 +89,8 @@ class BBSqueeze(BaseStrategy):
         if curr_close > curr_upper and curr_roc > 0:
             sl = round(curr_close - p["sl_atr_mult"] * curr_atr, 5)
             tp = round(curr_close + p["tp_atr_mult"] * curr_atr, 5)
+            if self._sl_too_close("BUY", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -107,6 +109,8 @@ class BBSqueeze(BaseStrategy):
         if curr_close < curr_lower and curr_roc < 0:
             sl = round(curr_close + p["sl_atr_mult"] * curr_atr, 5)
             tp = round(curr_close - p["tp_atr_mult"] * curr_atr, 5)
+            if self._sl_too_close("SELL", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",

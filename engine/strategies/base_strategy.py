@@ -66,3 +66,15 @@ class BaseStrategy(ABC):
             ),
             indicators=indicators or {},
         )
+
+    @staticmethod
+    def _min_sl_dist(close: float) -> float:
+        """
+        Minimum SL distance that brokers will accept (~30 points for forex majors).
+        Scales with price: covers 5-digit pairs (EUR/USD) and 3-digit (USD/JPY).
+        """
+        return close * 0.00026  # ~30 pts on 1.15 EURUSD, ~28 pts on 110 USDJPY
+
+    def _sl_too_close(self, direction: str, entry: float, sl: float) -> bool:
+        """Return True if the SL distance is below the broker minimum threshold."""
+        return abs(entry - sl) < self._min_sl_dist(entry)
