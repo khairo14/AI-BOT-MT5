@@ -24,10 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -68,7 +67,7 @@ class SignalBus:
 
     def purge_stale(self) -> int:
         """Remove terminal-state signals older than _SIGNAL_TTL_SECONDS. Returns count removed."""
-        now = datetime.now(tz=ZoneInfo("UTC"))
+        now = datetime.now(tz=timezone.utc)
         to_delete = []
         for sid, sig in self.queue.items():
             if sig.get("status") not in _TERMINAL_STATUSES:
@@ -131,7 +130,7 @@ class SignalBus:
         try:
             success = await asyncio.to_thread(self._do_execute_sync, signal)
             signal["status"] = "executed" if success else "failed"
-            signal["actioned_at"] = datetime.now(tz=ZoneInfo("UTC")).isoformat()
+            signal["actioned_at"] = datetime.now(tz=timezone.utc).isoformat()
         except Exception as exc:
             logger.exception(f"SignalBus execution error: {exc}")
             signal["status"] = "failed"
@@ -186,6 +185,7 @@ class SignalBus:
                 except Exception:
                     pass
                 # Phase 7: kick off outcome poller in background
+                ticket = result.ticket
                 if ticket is not None and _event_loop is not None:
                     asyncio.run_coroutine_threadsafe(
                         _poll_outcome(
@@ -228,7 +228,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     from ai.rl_agent import rl_manager
 
     MAX_POLLS  = 7 * 24 * 120   # 7 days at 30 s intervals
-    open_time  = datetime.now(tz=ZoneInfo("UTC")).isoformat()
+    open_time  = datetime.now(tz=timezone.utc).isoformat()
 
     for _ in range(MAX_POLLS):
         await asyncio.sleep(30)
@@ -240,7 +240,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
             # Look in history — query from just before trade open to now
             open_dt = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
-            end_dt  = datetime.now(tz=ZoneInfo("UTC"))
+            end_dt  = datetime.now(tz=timezone.utc)
             deals = await asyncio.to_thread(
                 mt5.history_deals_get, open_dt, end_dt
             )

@@ -5,9 +5,8 @@ All interaction with the MetaTrader5 Python library goes through this module.
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 import MetaTrader5 as mt5
 import pandas as pd
@@ -192,7 +191,7 @@ class MT5Client:
             "symbol": symbol,
             "bid":    tick.bid,
             "ask":    tick.ask,
-            "time":   datetime.fromtimestamp(tick.time, tz=ZoneInfo("UTC")),
+            "time":   datetime.fromtimestamp(tick.time, tz=timezone.utc),
         }
 
     # ------------------------------------------------------------------
@@ -274,7 +273,7 @@ class MT5Client:
                 "tp":          p.tp,
                 "profit":      p.profit,
                 "swap":        p.swap,
-                "open_time":   datetime.fromtimestamp(p.time, tz=ZoneInfo("UTC")),
+                "open_time":   datetime.fromtimestamp(p.time, tz=timezone.utc),
                 "comment":     p.comment,
                 "magic":       p.magic,
             }
@@ -288,9 +287,9 @@ class MT5Client:
     ) -> list[dict]:
         """Return closed trade history."""
         if date_from is None:
-            date_from = datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
+            date_from = datetime(2020, 1, 1, tzinfo=timezone.utc)
         if date_to is None:
-            date_to = datetime.now(tz=ZoneInfo("UTC"))
+            date_to = datetime.now(tz=timezone.utc)
 
         deals = mt5.history_deals_get(date_from, date_to)
         if deals is None:
@@ -308,7 +307,7 @@ class MT5Client:
                 "swap":      d.swap,
                 "fee":       d.fee,
                 "comment":   d.comment,
-                "time":      datetime.fromtimestamp(d.time, tz=ZoneInfo("UTC")),
+                "time":      datetime.fromtimestamp(d.time, tz=timezone.utc),
                 "magic":     d.magic,
             }
             for d in deals

@@ -118,8 +118,7 @@ class FibonacciRSI(BaseStrategy):
 
         if bullish_setup and (not p["candle_confirm"] or bull_candle):
             sl = round(curr_close - curr_atr * p["sl_atr_mult"], 5)
-            tp = round(swing_high + (swing_high - swing_low) * 0.0, 5)  # TP at 100% (origin high)
-            tp = round(swing_high, 5)
+            tp = round(swing_high, 5)  # TP at 100% extension (origin swing high)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",

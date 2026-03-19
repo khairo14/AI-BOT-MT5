@@ -273,6 +273,9 @@ class StrategyRunner:
 
     def run_mode(self, trading_type: str) -> list[StrategySignal]:
         """Run all enabled symbols for a single trading type. Used by the runner loop."""
+        # Reload configs on each run so dashboard changes take effect without restart
+        self._strategies_cfg = self._load_json("strategies.json")
+        self._symbols_cfg    = self._load_json("symbols.json")
         new_signals: list[StrategySignal] = []
         symbols = self._enabled_symbols(trading_type)
         active_strategies = self._active_strategies(trading_type)
@@ -334,7 +337,8 @@ class StrategyRunner:
         if strat_name == "ema_scalp":
             return strategy.calculate(tf_data["M1"], df_m5=tf_data.get("M5"))
         if strat_name == "macd_ema_trend":
-            return strategy.calculate(tf_data["H1"], df_m15=tf_data.get("M15"))
+            # M15 is the primary entry TF; H1 is bias/signal confirmation
+            return strategy.calculate(tf_data["M15"], df_h1=tf_data.get("H1"))
         if strat_name == "rsi_divergence":
             return strategy.calculate(tf_data["M30"], df_h1=tf_data.get("H1"))
         if strat_name == "ema_trend_rider":

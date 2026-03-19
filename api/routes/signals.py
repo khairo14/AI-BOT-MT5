@@ -5,9 +5,8 @@ for manual confirmation (approve/reject) or auto-execution.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -64,7 +63,7 @@ async def add_signal(signal: Signal):
     signal_id = str(uuid.uuid4())
     entry = {
         "id":           signal_id,
-        "created_at":   datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+        "created_at":   datetime.now(tz=timezone.utc).isoformat(),
         **signal.model_dump(),
     }
     return await bus.add_signal(entry)
@@ -93,7 +92,7 @@ def reject_signal(signal_id: str):
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
     signal["status"] = "rejected"
-    signal["actioned_at"] = datetime.now(tz=ZoneInfo("UTC")).isoformat()
+    signal["actioned_at"] = datetime.now(tz=timezone.utc).isoformat()
     bus.queue.pop(signal_id, None)
     return {"status": "rejected", "id": signal_id}
 

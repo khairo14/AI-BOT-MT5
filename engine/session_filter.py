@@ -18,15 +18,14 @@ Crypto is always open (00:00–23:59, all days).
 from __future__ import annotations
 
 import json
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
-UTC = ZoneInfo("UTC")
+UTC = timezone.utc
 
 # Symbol → session category mapping
 _SYMBOL_CATEGORY: dict[str, str] = {}   # built lazily from symbols.json

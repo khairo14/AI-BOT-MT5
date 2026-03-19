@@ -6,8 +6,7 @@ Symbols: GBPUSD, EURJPY, GOLD, GBPJPY, GER40Cash
 
 from __future__ import annotations
 
-from datetime import time as dtime
-from zoneinfo import ZoneInfo
+from datetime import time as dtime, timezone
 
 import ta
 import pandas as pd
@@ -42,14 +41,16 @@ class RSIDivergence(BaseStrategy):
 
         # Session open filter: signal must form within N hours of session open
         last_time = df["time"].iloc[-1]
-        last_utc = last_time.astimezone(ZoneInfo("UTC"))
+        last_utc = last_time.astimezone(timezone.utc)
+        session_window_mins = int(p["session_window_hours"] * 60)
+        now_t = dtime(last_utc.hour, last_utc.minute)
+
+        def _session_end(s: dtime) -> dtime:
+            total = s.hour * 60 + s.minute + session_window_mins
+            return dtime(min(total // 60, 23), total % 60)
+
         in_session_window = any(
-            dtime(last_utc.hour, last_utc.minute) <= dtime(
-                s.hour, s.minute + int(p["session_window_hours"] * 60)
-                if s.minute + int(p["session_window_hours"] * 60) < 60
-                else 59
-            )
-            and dtime(last_utc.hour, last_utc.minute) >= s
+            s <= now_t <= _session_end(s)
             for s in SESSION_OPENS_UTC
         )
         if not in_session_window:

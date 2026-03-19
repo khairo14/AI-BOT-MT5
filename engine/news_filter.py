@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -44,7 +44,7 @@ _SYMBOL_CURRENCIES: dict[str, list[str]] = {
     "ETHUSD": ["ETH", "USD"],
 }
 
-UTC = ZoneInfo("UTC")
+UTC = timezone.utc
 
 
 def _currencies_for(symbol: str) -> list[str]:

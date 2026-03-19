@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -175,7 +174,7 @@ class RiskManager:
 
             rr = tp_dist / sl_dist if sl_dist > 0 else 0
             min_rr = self._config["risk_reward_min"]
-            if rr < min_rr:
+            if rr < min_rr - 1e-9:  # tolerance for floating-point precision
                 return False, f"R:R {rr:.2f} is below minimum {min_rr}"
 
         return True, ""
@@ -236,7 +235,7 @@ class RiskManager:
         pause_hours = self._config["drawdown"]["consecutive_loss_pause_hours"]
 
         if self._consecutive_losses[mode] >= limit:
-            self._paused_modes[mode] = datetime.now(tz=ZoneInfo("UTC"))
+            self._paused_modes[mode] = datetime.now(tz=timezone.utc)
             logger.warning(
                 f"Mode '{mode}' paused for {pause_hours}h after "
                 f"{self._consecutive_losses[mode]} consecutive losses."
@@ -258,7 +257,7 @@ class RiskManager:
         pause_time = self._paused_modes.get(mode)
         if pause_time:
             pause_hours = self._config["drawdown"]["consecutive_loss_pause_hours"]
-            elapsed = (datetime.now(tz=ZoneInfo("UTC")) - pause_time).total_seconds() / 3600
+            elapsed = (datetime.now(tz=timezone.utc) - pause_time).total_seconds() / 3600
             if elapsed < pause_hours:
                 remaining = pause_hours - elapsed
                 return False, f"Mode '{mode}' paused — {remaining:.1f}h remaining"

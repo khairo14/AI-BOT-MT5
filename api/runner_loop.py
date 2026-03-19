@@ -17,9 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -88,7 +87,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
     return {
         "id":           str(uuid.uuid4()),
         "status":       "pending",
-        "created_at":   datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+        "created_at":   datetime.now(tz=timezone.utc).isoformat(),
         "symbol":       sig.symbol,
         "direction":    sig.direction,
         "trading_mode": mode,
