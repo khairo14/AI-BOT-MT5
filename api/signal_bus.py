@@ -349,7 +349,9 @@ class SignalBus:
                     )
                 return True
             else:
-                logger.warning(f"Signal execution failed: {signal['symbol']} {signal['direction']}")
+                err = result.error if result else "Order manager returned no result"
+                signal["rejection_reason"] = err
+                logger.warning(f"Signal execution failed: {signal['symbol']} {signal['direction']} — {err}")
                 return False
         except Exception as exc:
             logger.exception(f"_do_execute_sync error: {exc}")
