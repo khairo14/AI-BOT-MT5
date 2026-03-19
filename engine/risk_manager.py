@@ -143,7 +143,7 @@ class RiskManager:
         self,
         direction: str,
         entry_price: float,
-        sl_price: float,
+        sl_price: Optional[float],
         tp_price: Optional[float],
     ) -> tuple[bool, str]:
         """
