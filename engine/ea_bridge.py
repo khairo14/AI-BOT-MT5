@@ -168,7 +168,7 @@ class EABridge:
 
         try:
             import MetaTrader5 as mt5
-            info = mt5.terminal_info()
+            info = mt5.terminal_info()  # type: ignore[attr-defined]
             if info is None:
                 return None
             # terminal_info().commondata_path → e.g.
