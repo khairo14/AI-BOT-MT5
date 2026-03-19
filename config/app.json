@@ -32,5 +32,10 @@
     "confidence_filter_enabled": false,
     "confidence_threshold": 60,
     "rl_agent_enabled": false
+  },
+  "signal_expiry_seconds": {
+    "scalping":    300,
+    "day_trading": 1800,
+    "swing":       14400
   }
 }

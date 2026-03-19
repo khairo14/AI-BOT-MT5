@@ -32,7 +32,14 @@ _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 # Signals older than this (seconds) with a terminal status are purged from the queue
 _SIGNAL_TTL_SECONDS = 3600  # 1 hour
-_TERMINAL_STATUSES = frozenset({"executed", "rejected", "failed"})
+_TERMINAL_STATUSES = frozenset({"executed", "rejected", "failed", "expired"})
+
+# Default expiry (seconds) per trading mode for PENDING manual signals
+_DEFAULT_EXPIRY: dict[str, int] = {
+    "scalping":    300,    # 5 min  — M5 bar
+    "day_trading": 1800,   # 30 min
+    "swing":       14400,  # 4 hours
+}
 
 from loguru import logger
 
@@ -66,24 +73,49 @@ class SignalBus:
         self._order_manager = order_manager
 
     def purge_stale(self) -> int:
-        """Remove terminal-state signals older than _SIGNAL_TTL_SECONDS. Returns count removed."""
+        """Remove terminal-state signals older than _SIGNAL_TTL_SECONDS, and
+        expire pending signals whose expires_at has passed. Returns count removed/expired."""
         now = datetime.now(tz=timezone.utc)
         to_delete = []
         for sid, sig in self.queue.items():
-            if sig.get("status") not in _TERMINAL_STATUSES:
-                continue
-            try:
-                created = datetime.fromisoformat(sig["created_at"].replace("Z", "+00:00"))
-                age = (now - created).total_seconds()
-                if age > _SIGNAL_TTL_SECONDS:
+            # Expire stale terminal-state signals
+            if sig.get("status") in _TERMINAL_STATUSES:
+                try:
+                    created = datetime.fromisoformat(sig["created_at"].replace("Z", "+00:00"))
+                    if (now - created).total_seconds() > _SIGNAL_TTL_SECONDS:
+                        to_delete.append(sid)
+                except Exception:
                     to_delete.append(sid)
-            except Exception:
-                to_delete.append(sid)
+                continue
+            # Expire pending signals past their expiry window
+            if sig.get("status") == "pending" and sig.get("expires_at"):
+                try:
+                    exp = datetime.fromisoformat(sig["expires_at"].replace("Z", "+00:00"))
+                    if now >= exp:
+                        sig["status"] = "expired"
+                        sig["rejection_reason"] = "Signal expired — market conditions may have changed"
+                        logger.info(f"Signal expired: #{sid[:8]} {sig.get('symbol')} {sig.get('strategy')}")
+                        # Broadcast expiry to dashboard
+                        try:
+                            asyncio.get_event_loop().create_task(
+                                self._broadcast_expired(dict(sig))
+                            )
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
         for sid in to_delete:
             self.queue.pop(sid, None)
         if to_delete:
             logger.debug(f"SignalBus: purged {len(to_delete)} stale signals")
         return len(to_delete)
+
+    async def _broadcast_expired(self, signal: dict) -> None:
+        try:
+            from api.websocket.feed import broadcast_signal
+            await broadcast_signal({**signal, "type": "signal_update"})
+        except Exception:
+            pass
 
     # ── public API ──────────────────────────────────────────────────────────
 
@@ -95,17 +127,46 @@ class SignalBus:
         """
         from api.websocket.feed import broadcast_signal
 
+        # ── Dedup guard: skip if same symbol+direction+strategy+mode already active ──
+        mode = signal.get("trading_mode", "")
+        for existing in self.queue.values():
+            if existing.get("status") not in ("pending", "executing"):
+                continue
+            if (
+                existing.get("symbol") == signal.get("symbol")
+                and existing.get("direction") == signal.get("direction")
+                and existing.get("strategy") == signal.get("strategy")
+                and existing.get("trading_mode") == mode
+            ):
+                logger.debug(
+                    f"SignalBus: dedup dropped {signal.get('symbol')}/{signal.get('strategy')} "
+                    f"({mode}) — already {existing['status']}"
+                )
+                return existing
+
         self.queue[signal["id"]] = signal
-        # Lazily purge stale terminal-state signals to keep queue bounded
+        # Lazily purge stale + expired signals to keep queue bounded
         self.purge_stale()
 
-        exec_mode = self._get_exec_mode(signal.get("trading_mode", ""))
+        exec_mode = self._get_exec_mode(mode)
         if exec_mode == "auto" and self._order_manager is not None:
             signal["status"] = "executing"
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
             asyncio.create_task(self._execute_async(signal))
         else:
+            # Compute expiry for manual pending signals
+            try:
+                exp_cfg = json.loads((CONFIG_DIR / "app.json").read_text()).get(
+                    "signal_expiry_seconds", {}
+                )
+            except Exception:
+                exp_cfg = {}
+            exp_secs = exp_cfg.get(mode) or _DEFAULT_EXPIRY.get(mode, 1800)
+            from datetime import timedelta
+            signal["expires_at"] = (
+                datetime.now(tz=timezone.utc) + timedelta(seconds=exp_secs)
+            ).isoformat()
             signal["status"] = "pending"
             # Push to every connected dashboard client
             asyncio.create_task(broadcast_signal(dict(signal)))

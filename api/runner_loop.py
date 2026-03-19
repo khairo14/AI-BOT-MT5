@@ -8,7 +8,7 @@ The MT5 API is blocking/synchronous, so all strategy work runs via
 asyncio.to_thread() to avoid blocking the event loop.
 
 Intervals (seconds, start running immediately on first tick):
-  scalping:    10 s
+  scalping:    30 s  (M5 bars close every 300 s — 30 s is plenty reactive)
   day_trading: 60 s
   swing:       300 s (5 min)
 """
@@ -27,7 +27,7 @@ from loguru import logger
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 INTERVALS: dict[str, int] = {
-    "scalping":    10,
+    "scalping":    30,
     "day_trading": 60,
     "swing":       300,
 }

@@ -73,12 +73,31 @@ async def add_signal(signal: Signal):
 async def approve_signal(signal_id: str):
     """
     Manually approve a signal — places the order immediately.
+    Rejects with 410 if the signal has passed its expiry window.
     """
     signal = bus.queue.get(signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
     if signal["status"] not in ("pending",):
         raise HTTPException(status_code=400, detail=f"Signal is already '{signal['status']}'")
+    # Expiry check
+    if signal.get("expires_at"):
+        try:
+            exp = datetime.fromisoformat(signal["expires_at"].replace("Z", "+00:00"))
+            if datetime.now(tz=timezone.utc) >= exp:
+                signal["status"] = "expired"
+                signal["rejection_reason"] = "Signal expired — market conditions may have changed"
+                raise HTTPException(
+                    status_code=410,
+                    detail={
+                        "error": "signal_expired",
+                        "message": "This signal has expired. Market conditions at time of signal may no longer be valid.",
+                    },
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     try:
         return await bus.execute_signal(signal_id)
     except KeyError:
