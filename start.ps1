@@ -152,18 +152,18 @@ if (-not $ready) {
 # ── start Next.js dashboard ────────────────────────────────────────────────────
 Write-Step "Starting Next.js dashboard on http://localhost:3000 ..."
 
-# Resolve node.exe from PATH
-$nodeCmd  = Get-Command "node" -ErrorAction SilentlyContinue
-$nodePath = $null
-if ($nodeCmd) { $nodePath = $nodeCmd.Source }
-if (-not $nodePath) { Write-Fail "node.exe not found in PATH. Install Node.js 18+." }
+# Verify npm is available
+if (-not (Get-Command "npm" -ErrorAction SilentlyContinue)) {
+    Write-Fail "npm not found in PATH. Install Node.js 18+."
+}
 
 $dashLogOut = Join-Path $LogDir "dashboard_out.log"
 $dashLogErr = Join-Path $LogDir "dashboard_err.log"
 
+# Use cmd.exe /c npm run start to avoid path-with-spaces issue on Windows
 $dashProc = Start-Process `
-    -FilePath $nodePath `
-    -ArgumentList (Join-Path $Dashboard "node_modules\.bin\next"), "start" `
+    -FilePath "cmd.exe" `
+    -ArgumentList "/c", "npm run start" `
     -WorkingDirectory $Dashboard `
     -RedirectStandardOutput $dashLogOut `
     -RedirectStandardError  $dashLogErr `
