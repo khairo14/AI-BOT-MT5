@@ -6,11 +6,11 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 
 // all symbols that could be streamed across all modes (must match XM broker names)
 const ALL_SYMBOLS = [
-  "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
-  "EURJPY","GBPJPY","EURCAD","EURGBP",
-  "GOLD","OILCash",
-  "US30Cash",
-  "BTCUSD",
+  "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD","EURJPY","GBPJPY",
+  "GOLD","SILVER","OILCash","BRENTCash","NGASCash",
+  "US30Cash","US100Cash","US500Cash","GER40Cash","UK100Cash",
+  "BTCUSD","ETHUSD","XRPUSD","SOLUSD",
+  "TSLA.OQ","NVDA.OQ","AAPL.OQ","MSFT.OQ","AMZN.OQ","GOOGL.OQ","META.OQ","NFLX.OQ","AMD.OQ",
 ];
 
 export default function AppBootstrap() {
