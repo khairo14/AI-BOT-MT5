@@ -34,15 +34,15 @@ _event_loop: Optional[asyncio.AbstractEventLoop] = None
 _SIGNAL_TTL_SECONDS = 3600  # 1 hour
 _TERMINAL_STATUSES = frozenset({"executed", "rejected", "failed"})
 
+from loguru import logger
+
+CONFIG_DIR = Path(__file__).parent.parent / "config"
+
 
 def _set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Called once at startup so the thread executor can schedule coroutines safely."""
     global _event_loop
     _event_loop = loop
-
-from loguru import logger
-
-CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 
 class SignalBus:
@@ -252,7 +252,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 continue
 
             deal       = closed[-1]
-            close_time = datetime.utcfromtimestamp(deal.time).isoformat()
+            close_time = datetime.fromtimestamp(deal.time, tz=timezone.utc).isoformat()
             profit     = deal.profit
             close_px   = deal.price
             entry_px   = float(signal.get("fill_price") or signal.get("entry_price", 0))
@@ -272,8 +272,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 outcome_type = "manual_close"
 
             open_dt  = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
-            close_dt = datetime.utcfromtimestamp(deal.time)
-            dur_mins = (close_dt - open_dt.replace(tzinfo=None)).total_seconds() / 60
+            close_dt = datetime.fromtimestamp(deal.time, tz=timezone.utc)
+            dur_mins = (close_dt - open_dt).total_seconds() / 60
 
             outcome = TradeOutcome(
                 ticket=ticket,

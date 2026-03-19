@@ -107,8 +107,17 @@ def delete_signal(signal_id: str):
 
 
 @router.delete("/")
-def delete_all_terminal_signals():
-    """Remove all signals in a terminal state (executed, rejected, failed)."""
+def clear_signals(trading_mode: Optional[str] = None):
+    """
+    Remove signals from the queue.
+    - trading_mode param: removes ALL signals for that specific mode.
+    - No param: removes only terminal-state signals (executed/rejected/failed).
+    """
+    if trading_mode:
+        to_remove = [k for k, v in bus.queue.items() if v.get("trading_mode") == trading_mode]
+        for k in to_remove:
+            bus.queue.pop(k, None)
+        return {"status": "cleared", "removed": len(to_remove)}
     removed = _purge_all_terminal()
     return {"status": "ok", "removed": removed}
 
@@ -119,24 +128,3 @@ def _purge_all_terminal() -> int:
     for sid in ids:
         bus.queue.pop(sid, None)
     return len(ids)
-
-
-@router.delete("/{signal_id}")
-def delete_signal(signal_id: str):
-    """Remove a signal from the queue."""
-    if signal_id not in bus.queue:
-        raise HTTPException(status_code=404, detail="Signal not found")
-    bus.queue.pop(signal_id)
-    return {"status": "deleted", "id": signal_id}
-
-
-@router.delete("/")
-def clear_signals(trading_mode: Optional[str] = None):
-    """Clear all signals, optionally filtered by mode."""
-    if trading_mode:
-        to_remove = [k for k, v in bus.queue.items() if v.get("trading_mode") == trading_mode]
-        for k in to_remove:
-            bus.queue.pop(k)
-    else:
-        bus.queue.clear()
-    return {"status": "cleared"}
