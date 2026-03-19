@@ -148,5 +148,41 @@ class TradeJournal:
         }
 
 
+    def get_unclosed_tickets(self) -> list[dict]:
+        """
+        Return a list of journal "open" entry dicts that have no matching
+        "close" entry for the same ticket.  Used at startup to recover
+        close events that were lost when the server restarted.
+        """
+        if not self._path.exists():
+            return []
+
+        with self._lock:
+            try:
+                lines = self._path.read_text(encoding="utf-8").splitlines()
+            except Exception:
+                return []
+
+        opened: dict[int, dict] = {}
+        closed_tickets: set[int] = set()
+
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ticket = record.get("ticket")
+            if ticket is None:
+                continue
+            if record.get("event") == "close":
+                closed_tickets.add(ticket)
+            elif record.get("event") == "open":
+                opened[ticket] = record   # last open wins if somehow duplicated
+
+        return [v for k, v in opened.items() if k not in closed_tickets]
+
+
 # Application-level singleton
 trade_journal = TradeJournal()

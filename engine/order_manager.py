@@ -100,10 +100,19 @@ class OrderManager:
         else:
             filling = mt5.ORDER_FILLING_RETURN
 
+        # Clamp volume to broker-allowed range and round to volume_step
+        vol = req.volume
+        vol = max(sym_info.volume_min, min(vol, sym_info.volume_max))
+        step = sym_info.volume_step
+        if step > 0:
+            import math
+            vol = round(math.floor(vol / step) * step, 10)
+            vol = max(sym_info.volume_min, vol)
+
         request = {
             "action":    mt5.TRADE_ACTION_DEAL,
             "symbol":    req.symbol,
-            "volume":    req.volume,
+            "volume":    vol,
             "type":      order_type,
             "price":     price,
             "sl":        req.sl,

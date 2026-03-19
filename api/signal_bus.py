@@ -401,6 +401,142 @@ class SignalBus:
 
 # ── outcome poller ────────────────────────────────────────────────────────────
 
+async def recover_unclosed_trades(client) -> None:
+    """
+    Called once at startup to backfill close journal entries and trade
+    memory records for positions that were closed while the server was
+    offline (i.e. their _poll_outcome task was lost on restart).
+    """
+    import MetaTrader5 as mt5
+    from engine.trade_journal import trade_journal
+    from ai.trade_memory import memory, TradeOutcome
+    from ai.rl_agent import rl_manager
+    from engine.account_store import current_mode
+
+    unclosed = trade_journal.get_unclosed_tickets()
+    if not unclosed:
+        return
+
+    logger.info(f"Recovery: found {len(unclosed)} unclosed journal ticket(s): "
+                f"{[e['ticket'] for e in unclosed]}")
+
+    # Check which are still live in MT5
+    live_positions = await asyncio.to_thread(mt5.positions_get)
+    live_tickets = {p.ticket for p in (live_positions or [])}
+
+    for entry in unclosed:
+        ticket = entry["ticket"]
+        if ticket in live_tickets:
+            continue  # still open — _poll_outcome will handle it (re-launched below)
+
+        # Position is gone — look it up in deal history
+        try:
+            open_dt  = datetime.fromisoformat(entry.get("open_time", "").replace("Z", "+00:00"))
+        except Exception:
+            open_dt = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0)
+
+        end_dt = datetime.now(tz=timezone.utc)
+        deals = await asyncio.to_thread(mt5.history_deals_get, open_dt, end_dt)
+        if not deals:
+            deals = []
+
+        closed = [d for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT]
+        if not closed:
+            logger.debug(f"Recovery: no close deal found for ticket #{ticket} — skipping")
+            continue
+
+        deal       = closed[-1]
+        close_time = datetime.fromtimestamp(deal.time, tz=timezone.utc).isoformat()
+        profit     = deal.profit
+        close_px   = deal.price
+        entry_px   = float(entry.get("entry") or 0)
+        symbol     = entry.get("symbol", "")
+        direction  = entry.get("direction", "buy").upper()
+        trading_type = entry.get("trading_mode") or entry.get("trading_type") or "day_trading"
+        pip_val    = 0.01 if "JPY" in symbol else 0.0001
+        pips       = ((close_px - entry_px) if direction == "BUY" else (entry_px - close_px)) / pip_val
+
+        sl = float(entry.get("sl") or 0)
+        tp = float(entry.get("tp") or 0)
+        tol = pip_val * 3
+        if tp and abs(close_px - tp) <= tol:
+            outcome_type = "tp_hit"
+        elif sl and abs(close_px - sl) <= tol:
+            outcome_type = "sl_hit"
+        else:
+            outcome_type = "manual_close"
+
+        open_dt2  = datetime.fromisoformat(entry.get("open_time", close_time).replace("Z", "+00:00"))
+        close_dt2 = datetime.fromtimestamp(deal.time, tz=timezone.utc)
+        dur_mins  = (close_dt2 - open_dt2).total_seconds() / 60
+
+        # Write close event to journal
+        trade_journal.log(
+            ticket=ticket,
+            symbol=symbol,
+            direction=entry.get("direction", "buy"),
+            volume=float(entry.get("volume") or 0.01),
+            entry=entry_px,
+            sl=sl,
+            tp=tp if tp else None,
+            profit=profit,
+            trading_type=trading_type,
+            account_mode=entry.get("account_mode") or current_mode(),
+            comment=entry.get("comment", ""),
+            event="close",
+            close_time=close_time,
+        )
+
+        # Feed to trade memory and RL
+        try:
+            outcome = TradeOutcome(
+                ticket=ticket,
+                symbol=symbol,
+                strategy=entry.get("comment", "unknown"),
+                trading_type=trading_type,
+                direction=direction,
+                confidence=0.5,
+                entry_price=entry_px,
+                close_price=close_px,
+                sl_price=sl,
+                tp_price=tp,
+                volume=float(entry.get("volume") or 0.01),
+                profit=profit,
+                profit_pips=round(pips, 1),
+                profit_pct=0.0,
+                outcome=outcome_type,
+                open_time=entry.get("open_time", ""),
+                close_time=close_time,
+                duration_mins=round(dur_mins, 1),
+            )
+            memory.record(outcome)
+            rl_manager.on_trade_closed(trading_type=trading_type, profit_pct=profit)
+        except Exception as _exc:
+            logger.debug(f"Recovery: trade memory record failed for #{ticket}: {_exc}")
+
+        logger.info(f"Recovery: backfilled close for #{ticket} {symbol} {direction} profit={profit:.2f}")
+
+    # Re-launch _poll_outcome for any tickets that are still live
+    still_open = [e for e in unclosed if e["ticket"] in live_tickets]
+    for entry in still_open:
+        fake_signal = {
+            "symbol":       entry.get("symbol"),
+            "direction":    entry.get("direction", "buy"),
+            "trading_mode": entry.get("trading_mode") or entry.get("trading_type") or "day_trading",
+            "strategy":     entry.get("comment", ""),
+            "fill_price":   entry.get("entry"),
+            "entry_price":  entry.get("entry"),
+            "sl":           entry.get("sl"),
+            "tp":           entry.get("tp"),
+            "lot_size":     entry.get("volume"),
+            "confidence":   0.5,
+        }
+        asyncio.create_task(
+            _poll_outcome(ticket=entry["ticket"], signal=fake_signal, client=client)
+        )
+        logger.info(f"Recovery: re-launched poll for still-open #{entry['ticket']} {entry.get('symbol')}")
+
+
 async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     """
     Poll MT5 every 30 s until the position is closed, then record

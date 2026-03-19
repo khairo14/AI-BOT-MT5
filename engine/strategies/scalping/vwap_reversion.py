@@ -105,6 +105,8 @@ class VWAPReversion(BaseStrategy):
         ):
             sl = round(curr["lower_sl"], 5)
             tp = round(curr["vwap"], 5)
+            if self._sl_too_close("BUY", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -128,6 +130,8 @@ class VWAPReversion(BaseStrategy):
         ):
             sl = round(curr["upper_sl"], 5)
             tp = round(curr["vwap"], 5)
+            if self._sl_too_close("SELL", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",

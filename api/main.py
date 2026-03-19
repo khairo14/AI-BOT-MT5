@@ -73,6 +73,12 @@ async def lifespan(app: FastAPI):
         bus.init(mt5_client, order_manager)
         # Start the strategy runner background loop (passes the same instance)
         start_runner_loop(mt5_client, order_manager, _risk_manager)
+        # Recover close events for any trades that closed while server was offline
+        try:
+            from api.signal_bus import recover_unclosed_trades
+            asyncio.create_task(recover_unclosed_trades(mt5_client))
+        except Exception as _rec_exc:
+            logger.warning(f"Startup recovery task failed to launch: {_rec_exc}")
     yield
     # Shutdown
     if mt5_client:

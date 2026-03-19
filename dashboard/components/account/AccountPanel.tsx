@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { fetchJournalStats, fetchTradeJournal } from "@/lib/api";
+import { fetchJournalStats, fetchTradeJournal, fetchPositions } from "@/lib/api";
 import type { JournalStatsResponse, JournalEntry } from "@/types";
 
 const MODE_LABELS = { paper: "Paper / Demo", live: "Live" } as const;
@@ -28,23 +28,37 @@ function StatCard({
 }
 
 export default function AccountPanel() {
-  const [stats, setStats]     = useState<JournalStatsResponse | null>(null);
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [account, setAccount] = useState<"paper" | "live" | "all">("all");
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats]         = useState<JournalStatsResponse | null>(null);
+  const [entries, setEntries]     = useState<JournalEntry[]>([]);
+  const [account, setAccount]     = useState<"paper" | "live" | "all">("all");
+  const [loading, setLoading]     = useState(true);
+  // ticket → current unrealized profit for open positions
+  const [liveProfit, setLiveProfit] = useState<Record<number, number>>({});
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchJournalStats(), fetchTradeJournal(account, undefined, 20)])
-      .then(([s, j]) => {
-        if (!cancelled) {
+
+    const doFetch = (initial = false) => {
+      Promise.all([
+        fetchJournalStats(),
+        fetchTradeJournal(account, undefined, 20),
+        fetchPositions(),
+      ])
+        .then(([s, j, positions]) => {
+          if (cancelled) return;
           setStats(s);
           setEntries(j.entries);
-        }
-      })
-      .catch(() => {})
-      .finally(() => !cancelled && setLoading(false));
-    return () => { cancelled = true; };
+          const map: Record<number, number> = {};
+          for (const p of positions) map[p.ticket] = p.profit;
+          setLiveProfit(map);
+        })
+        .catch(() => {})
+        .finally(() => { if (initial && !cancelled) setLoading(false); });
+    };
+
+    doFetch(true);
+    const id = setInterval(() => doFetch(false), 30_000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [account]);
 
   if (loading) {
@@ -131,12 +145,22 @@ export default function AccountPanel() {
                     </td>
                     <td className="py-2 pr-4">{e.volume}</td>
                     <td className="py-2 pr-4 font-mono">{e.entry}</td>
-                    <td className={`py-2 pr-4 font-mono ${
-                      e.profit == null ? "text-gray-500" :
-                      e.profit >= 0 ? "text-green-400" : "text-red-400"
-                    }`}>
-                      {e.profit == null ? "—" : `${e.profit >= 0 ? "+" : ""}${e.profit.toFixed(2)}`}
-                    </td>
+                    {(() => {
+                      const live = e.event === "open" ? liveProfit[e.ticket] : undefined;
+                      const pnl  = e.profit ?? live ?? null;
+                      const isLive = e.profit == null && live != null;
+                      return (
+                        <td className={`py-2 pr-4 font-mono ${
+                          pnl == null ? "text-gray-500" :
+                          pnl >= 0 ? "text-green-400" : "text-red-400"
+                        }`}>
+                          {pnl == null
+                            ? "—"
+                            : `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}${isLive ? " ~" : ""}`
+                          }
+                        </td>
+                      );
+                    })()}
                     <td className="py-2 pr-4 text-gray-500">{e.trading_type}</td>
                     <td className="py-2 pr-4">
                       <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${
