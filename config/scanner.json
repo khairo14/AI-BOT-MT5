@@ -1,17 +1,32 @@
 {
   "scalping": {
-    "enabled": false,
-    "symbols": ["EURUSD", "USDJPY"],
-    "timeframe": "M5"
+    "enabled": true,
+    "symbols": [
+      "EURUSD",
+      "USDJPY",
+      "GBPUSD",
+      "EURJPY",
+      "USDCHF"
+    ],
+    "timeframe": "M1/M5"
   },
   "day_trading": {
     "enabled": false,
-    "symbols": ["EURUSD", "GBPUSD"],
-    "timeframe": "H1"
+    "symbols": [
+      "EURUSD",
+      "GBPUSD",
+      "XAUUSD",
+      "OilCash",
+      "AUDUSD"
+    ],
+    "timeframe": "M15/H1"
   },
   "swing": {
     "enabled": false,
-    "symbols": ["EURUSD", "GOLD"],
+    "symbols": [
+      "EURUSD",
+      "XAUUSD"
+    ],
     "timeframe": "H4"
   }
 }

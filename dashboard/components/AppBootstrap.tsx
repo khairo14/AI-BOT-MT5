@@ -4,10 +4,13 @@ import { fetchAccount, fetchAppConfig, fetchSignals, fetchPositions } from "@/li
 import { useBotStore } from "@/lib/store";
 import { useWebSocket } from "@/hooks/useWebSocket";
 
-// all symbols that could be streamed across all modes
+// all symbols that could be streamed across all modes (must match XM broker names)
 const ALL_SYMBOLS = [
-  "EURUSD","GBPUSD","USDJPY","XAUUSD","BTCUSD",
-  "USOIL","GBPJPY","EURUSD","US30","SPX500",
+  "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
+  "EURJPY","GBPJPY","EURCAD","EURGBP",
+  "XAUUSD","XAGUSD","OilCash","BRENTCash","NGASCash",
+  "US30Cash","US100Cash","US500Cash","GER40Cash","UK100Cash",
+  "BTCUSD","ETHUSD","XRPUSD","SOLUSD",
 ];
 
 export default function AppBootstrap() {
