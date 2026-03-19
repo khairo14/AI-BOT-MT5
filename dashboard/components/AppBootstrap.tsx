@@ -8,7 +8,7 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 const ALL_SYMBOLS = [
   "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
   "EURJPY","GBPJPY","EURCAD","EURGBP",
-  "XAUUSD","XAGUSD","OilCash","BRENTCash","NGASCash",
+  "GOLD","SILVER","OilCash","BRENTCash","NGASCash",
   "US30Cash","US100Cash","US500Cash","GER40Cash","UK100Cash",
   "BTCUSD","ETHUSD","XRPUSD","SOLUSD",
 ];
