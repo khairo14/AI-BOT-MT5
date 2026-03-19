@@ -199,3 +199,4 @@ Write-Host "  Logs       -> $LogDir" -ForegroundColor DarkGray
 Write-Host "  Stop bot   -> .\stop.ps1" -ForegroundColor DarkGray
 Write-Host "================================================" -ForegroundColor DarkCyan
 Write-Host ""
+Read-Host "Press Enter to close this window"
