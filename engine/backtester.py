@@ -37,6 +37,24 @@ BT_TIMEFRAME: dict[str, str] = {
     "swing":       "H4",
 }
 
+# Per-strategy primary TF override (strategies whose entry TF differs from BT_TIMEFRAME)
+BT_STRATEGY_TIMEFRAME: dict[str, str] = {
+    "ema_scalp":       "M1",   # entry on M1, trend on M5
+    "macd_ema_trend":  "M15",  # entry on M15, trend on H1
+    "rsi_divergence":  "M30",  # entry on M30, trend on H1
+    "ema_trend_rider": "H1",   # entry on H1, bias on H4 + D1
+    "weekly_breakout": "H4",   # entry on H4, bias on D1
+}
+
+# Secondary timeframes required per strategy {kwarg_name: timeframe_string}
+BT_EXTRA_TIMEFRAMES: dict[str, dict[str, str]] = {
+    "ema_scalp":       {"df_m5":    "M5"},
+    "macd_ema_trend":  {"df_h1":    "H1"},
+    "rsi_divergence":  {"df_h1":    "H1"},
+    "ema_trend_rider": {"df_h4":    "H4", "df_d1": "D1"},
+    "weekly_breakout": {"df_daily": "D1"},
+}
+
 
 # ── Data models ──────────────────────────────────────────────────────────────
 
@@ -124,6 +142,7 @@ def run_backtest(
     trading_type: str,
     initial_balance: float = 10_000.0,
     risk_pct: float = 1.0,
+    extra_dfs: dict[str, pd.DataFrame] | None = None,
 ) -> Optional[BacktestResult]:
     """
     Walk-forward backtest a strategy on historical OHLCV data.
@@ -135,10 +154,12 @@ def run_backtest(
     Args:
         strategy_name:   key from PARAM_GRIDS / _DISPATCH (e.g. "ema_scalp")
         symbol:          MT5 symbol string
-        df:              OHLCV DataFrame, sorted oldest→newest
+        df:              OHLCV DataFrame (primary TF), sorted oldest→newest
         trading_type:    "scalping" | "day_trading" | "swing"
         initial_balance: starting equity for P&L calculations
         risk_pct:        percent of current equity risked per trade (e.g. 1.0 = 1%)
+        extra_dfs:       secondary TF dataframes keyed by strategy kwarg name,
+                         e.g. {"df_h1": h1_df} for macd_ema_trend
 
     Returns:
         BacktestResult or None if strategy_name is unknown.
@@ -149,12 +170,16 @@ def run_backtest(
         logger.warning(f"Backtester: unknown strategy {strategy_name!r}")
         return None
 
-    dispatch = _DISPATCH.get(strategy_name, lambda s, d: s.calculate(d))
+    dispatch = _DISPATCH.get(strategy_name, lambda s, d, e={}: s.calculate(d))
     cfg      = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
     step     = cfg["step"]
     max_hold = cfg["max_hold"]
     warmup   = cfg["warmup"]
-    tf_label = BT_TIMEFRAME.get(trading_type, "H1")
+    tf_label = BT_STRATEGY_TIMEFRAME.get(strategy_name) or BT_TIMEFRAME.get(trading_type, "H1")
+
+    _extra_dfs: dict[str, pd.DataFrame] = extra_dfs or {}
+    # Determine if primary df has a parseable time column for lookahead-safe slicing
+    _has_time = "time" in df.columns
 
     trades: list[BacktestTrade] = []
     equity   = initial_balance
@@ -162,10 +187,21 @@ def run_backtest(
     trade_num = 0
 
     while i < len(df) - 1:
+        # Slice secondary dataframes up to (and including) the current bar time
+        # to prevent lookahead bias.
+        if _extra_dfs and _has_time:
+            bar_time = df.iloc[i]["time"]
+            sliced_extra = {
+                k: v[v["time"] <= bar_time] if "time" in v.columns else v
+                for k, v in _extra_dfs.items()
+            }
+        else:
+            sliced_extra = _extra_dfs
+
         # Run strategy on bars 0..i
         try:
             strat  = strategy_cls(symbol=symbol, params={})
-            result = dispatch(strat, df.iloc[: i + 1])
+            result = dispatch(strat, df.iloc[: i + 1], sliced_extra)
             sig    = result.signal
         except Exception as exc:
             logger.debug(f"Backtester signal error at bar {i}: {exc}")

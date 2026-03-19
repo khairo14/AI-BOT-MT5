@@ -101,15 +101,18 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
 
 # Single-df dispatch for backtesting (secondary TFs not available during replay)
 _DISPATCH: dict[str, Callable] = {
-    "ema_scalp":       lambda s, df: s.calculate(df, df_m5=None),
-    "bb_squeeze":      lambda s, df: s.calculate(df),
-    "vwap_reversion":  lambda s, df: s.calculate(df),
-    "macd_ema_trend":  lambda s, df: s.calculate(df, df_h1=None),
-    "rsi_divergence":  lambda s, df: s.calculate(df, df_h1=None),
-    "ema_trend_rider": lambda s, df: s.calculate(df, df_h4=None, df_d1=None),
-    "fibonacci_rsi":   lambda s, df: s.calculate(df),
-    "weekly_breakout": lambda s, df: s.calculate(df, df_daily=None),
-    "sr_breakout":     lambda s, df: s.calculate(df),
+    # Each lambda accepts (strategy, primary_df, extra_dfs) where extra_dfs is a
+    # dict of secondary timeframe DataFrames keyed by kwarg name.
+    # Defaults to {} so old single-TF call sites still work.
+    "ema_scalp":       lambda s, df, e={}: s.calculate(df, df_m5=e.get("df_m5")),
+    "bb_squeeze":      lambda s, df, e={}: s.calculate(df),
+    "vwap_reversion":  lambda s, df, e={}: s.calculate(df),
+    "macd_ema_trend":  lambda s, df, e={}: s.calculate(df, df_h1=e.get("df_h1")),
+    "rsi_divergence":  lambda s, df, e={}: s.calculate(df, df_h1=e.get("df_h1")),
+    "ema_trend_rider": lambda s, df, e={}: s.calculate(df, df_h4=e.get("df_h4"), df_d1=e.get("df_d1")),
+    "fibonacci_rsi":   lambda s, df, e={}: s.calculate(df),
+    "weekly_breakout": lambda s, df, e={}: s.calculate(df, df_daily=e.get("df_daily")),
+    "sr_breakout":     lambda s, df, e={}: s.calculate(df),
 }
 
 _STRATEGY_MAP: Optional[dict] = None

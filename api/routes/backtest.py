@@ -20,7 +20,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from engine.backtester import run_backtest, BT_TIMEFRAME
+from engine.backtester import run_backtest, BT_TIMEFRAME, BT_STRATEGY_TIMEFRAME, BT_EXTRA_TIMEFRAMES
 
 router = APIRouter()
 
@@ -173,14 +173,22 @@ async def backtest_run(req: BacktestRequest):
     if client is None or not client.is_connected():
         raise HTTPException(status_code=503, detail="MT5 not connected")
 
-    tf_str = BT_TIMEFRAME.get(req.trading_type, "H1")
+    # Resolve primary TF — some strategies use a finer TF than the trading-type default
+    primary_tf = BT_STRATEGY_TIMEFRAME.get(req.strategy) or BT_TIMEFRAME.get(req.trading_type, "H1")
 
-    df = await asyncio.to_thread(client.get_ohlcv, req.symbol, tf_str, req.bars)
+    df = await asyncio.to_thread(client.get_ohlcv, req.symbol, primary_tf, req.bars)
     if df is None or df.empty:
         raise HTTPException(
             status_code=404,
-            detail=f"No OHLCV data for {req.symbol} ({tf_str}). Is the symbol available in MT5?",
+            detail=f"No OHLCV data for {req.symbol} ({primary_tf}). Is the symbol available in MT5?",
         )
+
+    # Fetch secondary timeframes for multi-TF strategies (e.g. H1 trend for macd_ema_trend)
+    extra_dfs: dict = {}
+    for kwarg, sec_tf in BT_EXTRA_TIMEFRAMES.get(req.strategy, {}).items():
+        sec_df = await asyncio.to_thread(client.get_ohlcv, req.symbol, sec_tf, req.bars)
+        if sec_df is not None and not sec_df.empty:
+            extra_dfs[kwarg] = sec_df
 
     result = await asyncio.to_thread(
         run_backtest,
@@ -190,6 +198,7 @@ async def backtest_run(req: BacktestRequest):
         req.trading_type,
         req.initial_balance,
         req.risk_pct,
+        extra_dfs if extra_dfs else None,
     )
 
     if result is None:

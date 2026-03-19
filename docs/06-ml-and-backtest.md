@@ -164,13 +164,39 @@ POST /backtest/run
         └── If total_trades ≥ 30 → trigger param optimizer  ← strategy params update
 ```
 
-### Timeframes used
+### Backtest strategy timeframe mapping
 
-| Mode | Backtest Timeframe |
-|---|---|
-| Scalping | M5 |
-| Day Trading | H1 |
-| Swing | H4 |
+Each strategy fetches data at **two** timeframes: a **primary** TF where entry signals are timed, and an optional **secondary** TF used for trend/bias confirmation. The secondary dataframe is sliced up to the current walk-forward bar at each step — no look-ahead bias.
+
+**Scalping**
+
+| Strategy | Primary | Secondary |
+|---|---|---|
+| `ema_scalp` | M1 | M5 |
+| `bb_squeeze` | M5 | — |
+| `vwap_reversion` | M5 | — |
+
+**Day Trading**
+
+| Strategy | Primary | Secondary |
+|---|---|---|
+| `macd_ema_trend` | M15 | H1 |
+| `rsi_divergence` | M30 | H1 |
+| `sr_breakout` | H1 | — |
+
+**Swing**
+
+| Strategy | Primary | Secondary |
+|---|---|---|
+| `ema_trend_rider` | H1 | H4 + D1 |
+| `fibonacci_rsi` | H4 | — |
+| `weekly_breakout` | H4 | D1 |
+
+The mapping is defined in `engine/backtester.py`:
+- `BT_STRATEGY_TIMEFRAME` — primary TF override per strategy
+- `BT_EXTRA_TIMEFRAMES` — secondary TF kwargs per strategy (e.g. `{"df_h1": "H1"}`)
+
+Strategies with no entry in these dicts fall back to the trading-type default (`M5` / `H1` / `H4`).
 
 ### Saved run schema (summary fields in index)
 
