@@ -32,8 +32,12 @@ dashboard/.env.local
 ai/models/*.pt
 ai/models/*.pkl
 ai/models/*.h5
+ai/data/
 data/raw/
 data/processed/
+
+# Optimizer & RL runtime outputs
+config/optimized_params.json
 
 # Logs — keep directory, exclude runtime files
 logs/*.log
