@@ -402,11 +402,15 @@ class StrategyRunner:
         return [s for s, cfg in symbols.items() if cfg.get("enabled", False)]
 
     def _active_strategies(self, trading_type: str) -> list[str]:
-        return self._strategies_cfg.get("active_strategies", {}).get(trading_type, [])
+        return self._strategies_cfg.get(trading_type, {}).get("active_strategies", [])
 
     def _per_symbol_overrides(self, trading_type: str, symbol: str) -> list[str] | None:
-        overrides = self._strategies_cfg.get("per_symbol_overrides", {})
-        return overrides.get(trading_type, {}).get(symbol)
+        return (
+            self._strategies_cfg
+            .get(trading_type, {})
+            .get("symbol_strategy_override", {})
+            .get(symbol)
+        )
 
     def _strategy_params(self, strat_name: str, symbol: str = "") -> dict:
         """Return merged params: strategies.json defaults + optimized overrides."""
