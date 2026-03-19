@@ -281,15 +281,26 @@ class StrategyRunner:
         active_strategies = self._active_strategies(trading_type)
         for symbol in symbols:
             per_symbol_strats = self._per_symbol_overrides(trading_type, symbol) or active_strategies
+            candidates: list[StrategySignal] = []
             for strat_name in per_symbol_strats:
                 sig = self._run_strategy(trading_type, symbol, strat_name)
                 if sig:
-                    new_signals.append(sig)
+                    candidates.append(sig)
+            if candidates:
+                # Pick highest-confidence signal; if tied, first one wins
+                best = max(candidates, key=lambda s: s.confidence)
+                logger.debug(
+                    f"Best signal for {trading_type}/{symbol}: {best.strategy} "
+                    f"(conf={best.confidence:.2f}, considered {len(candidates)})"
+                )
+                new_signals.append(best)
         return new_signals
 
     def _execute(self, sig: StrategySignal) -> bool:
         open_positions = self.client.get_open_positions()
-        allowed, _reason = self.risk_manager.check_concurrent_limit(sig.trading_type, open_positions)
+        allowed, _reason = self.risk_manager.check_concurrent_limit(
+            sig.trading_type, open_positions, symbol=sig.symbol
+        )
         if not allowed:
             logger.info(f"Concurrent limit reached for {sig.trading_type}/{sig.symbol}: {_reason}")
             return False

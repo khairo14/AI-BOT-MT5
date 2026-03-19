@@ -14,10 +14,10 @@ Strategies: EMA Scalp, BB Squeeze, VWAP Reversion.
 Execution: MQL5 EA on MT5 (sub-millisecond latency).`,
       },
       {
-        heading: "Day Trading (H1–H4)",
+        heading: "Day Trading (M15–H1)",
         body: `Day trading captures intraday trends and breakouts. SL 20–50 pips, TP 40–100 pips. All positions close before end of day.
 Ideal session: London + NY overlap (13:00–17:00 GMT).
-Risk per trade: 1% of balance. Max 3 concurrent trades.
+Risk per trade: 1% of balance. Max 5 concurrent trades.
 Strategies: MACD EMA Trend, S/R Breakout, RSI Divergence.`,
       },
       {
@@ -88,21 +88,24 @@ Note: XM does not guarantee trailing execution at exact level during gaps or low
     content: [
       {
         heading: "Scalping Symbols (7)",
-        body: `EURUSD, GBPUSD, USDJPY, XAUUSD, BTCUSD, USOIL, ETHUSD
-These have the tightest spreads and highest intraday volume on XM.`,
+        body: `EURUSD, GBPUSD, USDJPY, USDCHF, EURJPY, US100Cash, US30Cash
+Tightest spreads, highest intraday liquidity. Session: London (07–11 UTC) + New York (13–17 UTC).`,
       },
       {
         heading: "Day Trading Symbols (19)",
-        body: `Forex: EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, NZDUSD, USDCAD, GBPJPY, EURJPY
-Commodities: XAUUSD, XAGUSD, USOIL, UKOIL
-Indices: US30, SPX500, NAS100, GER40, UK100, HK50`,
+        body: `Forex: EURUSD, GBPUSD, USDJPY, AUDUSD, GBPJPY
+Commodities: GOLD, OilCash
+Indices: US100Cash, US30Cash, US500Cash, GER40Cash, UK100Cash
+Crypto: BTCUSD, ETHUSD
+Stocks: TSLA.OQ, NVDA.OQ, AAPL.OQ, MSFT.OQ, AMZN.OQ`,
       },
       {
         heading: "Swing Trading Symbols (23)",
-        body: `Forex: EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, NZDUSD, USDCAD, GBPJPY, EURJPY, EURGBP, AUDCAD
-Commodities: XAUUSD, XAGUSD, USOIL, UKOIL, NATGAS
-Crypto: BTCUSD, ETHUSD
-Indices: US30, SPX500, NAS100, GER40, UK100`,
+        body: `Forex: EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, NZDUSD
+Commodities: GOLD, SILVER, OilCash, BRENTCash, NGASCash
+Indices: US100Cash, US500Cash
+Crypto: BTCUSD, ETHUSD, XRPUSD, SOLUSD
+Stocks: TSLA.OQ, NVDA.OQ, GOOGL.OQ, META.OQ, NFLX.OQ, AMD.OQ`,
       },
     ],
   },

@@ -7,15 +7,16 @@ export default function DayTradingPage() {
       label="Day Trading"
       icon="☀"
       symbolGroups={[
-        { label: "Forex Majors",  symbols: ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "NZDUSD", "USDCAD"] },
-        { label: "Forex Minors",  symbols: ["GBPJPY", "EURJPY", "EURGBP"] },
-        { label: "Metals",        symbols: ["XAUUSD", "XAGUSD"] },
-        { label: "Energy",        symbols: ["USOIL", "UKOIL"] },
-        { label: "Indices",       symbols: ["US30", "SPX500", "NAS100", "GER40", "UK100", "HK50"] },
+        { label: "Forex Majors",  symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"] },
+        { label: "Forex Minors",  symbols: ["GBPJPY"] },
+        { label: "Commodities",   symbols: ["GOLD", "OilCash"] },
+        { label: "Indices",       symbols: ["US100Cash", "US30Cash", "US500Cash", "GER40Cash", "UK100Cash"] },
+        { label: "Crypto",        symbols: ["BTCUSD", "ETHUSD"] },
+        { label: "Stocks",        symbols: ["TSLA.OQ", "NVDA.OQ", "AAPL.OQ", "MSFT.OQ", "AMZN.OQ"] },
       ]}
       defaultSymbol="EURUSD"
       defaultTimeframe="H1"
-      timeframes={["M30", "H1", "H4"]}
+      timeframes={["M15", "M30", "H1"]}
       strategyNames={["MACD EMA Trend", "S/R Breakout", "RSI Divergence"]}
     />
   );

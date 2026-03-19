@@ -40,7 +40,7 @@ export interface Position {
 }
 
 // ── Signals ────────────────────────────────────────────────────────────────
-export type SignalStatus = "pending" | "approved" | "rejected" | "executed";
+export type SignalStatus = "pending" | "approved" | "rejected" | "executed" | "executing" | "failed";
 
 export interface Signal {
   id: string;
@@ -55,6 +55,7 @@ export interface Signal {
   timestamp: string;
   status: SignalStatus;
   reason?: string;
+  rejection_reason?: string;
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────

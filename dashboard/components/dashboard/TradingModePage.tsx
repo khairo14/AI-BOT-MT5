@@ -7,7 +7,9 @@ import AccountSummary from "@/components/dashboard/AccountSummary";
 import TradePanel from "@/components/trading/TradePanel";
 import PositionTable from "@/components/trading/PositionTable";
 import SignalQueue from "@/components/trading/SignalQueue";
+import { IND_DEFAULTS, IND_LABEL, IND_COLOR, IND_GROUPS } from "@/components/chart/TradingChart";
 import type { OHLCVBar, TradingMode, ExecutionMode } from "@/types";
+import type { AllKey, CustomMA } from "@/components/chart/TradingChart";
 
 // Dynamic import to prevent SSR for TradingView chart
 const TradingChart = dynamic(() => import("@/components/chart/TradingChart"), {
@@ -48,6 +50,21 @@ export default function TradingModePage({
   const [tab, setTab] = useState<"positions" | "signals">("signals");
   const [execMode, setExecMode] = useState<ExecutionMode>("manual");
   const [togglingExec, setTogglingExec] = useState(false);
+  const [ind, setInd] = useState<Record<AllKey, boolean>>(IND_DEFAULTS);
+  const [indPanelOpen, setIndPanelOpen] = useState(false);
+  const toggleInd = (k: AllKey) => setInd((p) => ({ ...p, [k]: !p[k] }));
+
+  const [customMAs, setCustomMAs] = useState<CustomMA[]>([]);
+  const [cmaForm, setCmaForm] = useState<{ period: string; type: "ema" | "sma" }>({ period: "20", type: "ema" });
+  const CMA_COLORS = ["#ec4899", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
+  const addCustomMA = () => {
+    const p = parseInt(cmaForm.period);
+    if (isNaN(p) || p < 1 || p > 500) return;
+    const usedColors = customMAs.map((m) => m.color);
+    const color = CMA_COLORS.find((c) => !usedColors.includes(c)) ?? CMA_COLORS[customMAs.length % CMA_COLORS.length];
+    setCustomMAs((prev) => [...prev, { id: `${cmaForm.type}_${p}_${Date.now()}`, period: p, type: cmaForm.type, color }]);
+  };
+  const removeCustomMA = (id: string) => setCustomMAs((prev) => prev.filter((m) => m.id !== id));
 
   const allSymbols = symbolGroups.flatMap((g) => g.symbols);
   const modePositions = positions.filter((p) => allSymbols.includes(p.symbol));
@@ -163,6 +180,36 @@ export default function TradingModePage({
           ))}
         </div>
 
+        {/* Indicator chips */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {(Object.keys(ind) as AllKey[]).filter((k) => ind[k]).map((k) => (
+            <button
+              key={k}
+              onClick={() => toggleInd(k)}
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors"
+              style={{ backgroundColor: IND_COLOR[k] + "20", borderColor: IND_COLOR[k] + "80", color: IND_COLOR[k] }}
+            >
+              {IND_LABEL[k]} <span className="opacity-50 ml-0.5">×</span>
+            </button>
+          ))}
+          {customMAs.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => removeCustomMA(m.id)}
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors"
+              style={{ backgroundColor: m.color + "20", borderColor: m.color + "80", color: m.color }}
+            >
+              {m.type.toUpperCase()}({m.period}) <span className="opacity-50 ml-0.5">×</span>
+            </button>
+          ))}
+          <button
+            onClick={() => setIndPanelOpen((v) => !v)}
+            className="px-1.5 py-0.5 rounded text-[10px] text-gray-500 border border-dashed border-gray-700 hover:text-white hover:border-gray-500 transition-colors"
+          >
+            + Add
+          </button>
+        </div>
+
         {tick && (
           <div className="ml-auto flex gap-4 text-sm">
             <span className="text-gray-500">Bid</span>
@@ -173,11 +220,77 @@ export default function TradingModePage({
         )}
       </div>
 
+      {/* Indicator selector panel */}
+      {indPanelOpen && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="grid grid-cols-2 md:grid-cols-4">
+            {IND_GROUPS.map((grp, gi) => (
+              <div key={grp.id} className={["px-4 py-4", gi < IND_GROUPS.length - 1 ? "border-r border-gray-800" : ""].join(" ")}>
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">{grp.label}</p>
+                <div className="space-y-2">
+                  {grp.keys.map((k) => (
+                    <button key={k} onClick={() => toggleInd(k)} className="flex items-center gap-2 w-full text-left group">
+                      <div
+                        className="w-3.5 h-3.5 rounded border-2 shrink-0 flex items-center justify-center transition-all"
+                        style={ind[k] ? { backgroundColor: IND_COLOR[k] + "cc", borderColor: IND_COLOR[k] } : { borderColor: "#475569" }}
+                      >
+                        {ind[k] && <span className="text-white leading-none font-black" style={{ fontSize: 8 }}>✓</span>}
+                      </div>
+                      <span className="text-xs transition-colors group-hover:text-white" style={ind[k] ? { color: IND_COLOR[k] } : { color: "#64748b" }}>
+                        {IND_LABEL[k]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Custom MA builder */}
+          <div className="border-t border-gray-800 px-4 py-3 flex items-center gap-3 flex-wrap">
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest shrink-0">Custom MA</p>
+            <input
+              type="number"
+              placeholder="Period"
+              value={cmaForm.period}
+              min={1} max={500}
+              onChange={(e) => setCmaForm((f) => ({ ...f, period: e.target.value }))}
+              className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+            />
+            <div className="flex rounded overflow-hidden border border-gray-700">
+              {(["ema", "sma"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setCmaForm((f) => ({ ...f, type: t }))}
+                  className={`px-2 py-1 text-[10px] font-medium transition-colors ${
+                    cmaForm.type === t ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-500 hover:text-white"
+                  }`}
+                >
+                  {t.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={addCustomMA}
+              className="px-2 py-1 text-[10px] rounded bg-blue-700 hover:bg-blue-600 text-white font-medium transition-colors"
+            >
+              + Add
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Chart + right panel */}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         {/* Chart */}
         <div className="xl:col-span-3 bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <TradingChart bars={bars} height={420} />
+          <TradingChart
+            bars={bars}
+            height={420}
+            positions={positions.filter((p) => p.symbol === symbol)}
+            ind={ind}
+            onToggle={toggleInd}
+            customMAs={customMAs}
+          />
         </div>
 
         {/* Trade panel */}

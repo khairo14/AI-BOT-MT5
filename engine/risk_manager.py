@@ -276,15 +276,18 @@ class RiskManager:
         self,
         trading_mode: str,
         open_positions: list[dict],
+        symbol: str | None = None,
     ) -> tuple[bool, str]:
         """
         Check if a new trade can be opened given current open position counts.
         `open_positions` should be the full list from MT5Client.get_open_positions().
+        Pass `symbol` to also enforce the per-symbol concurrent limit.
         """
         mode = trading_mode.lower()
         limits = self._config["max_concurrent_trades"]
         mode_limit = limits.get(mode, 999)
         total_limit = limits.get("total", 999)
+        per_symbol_limit = limits.get("per_symbol", 999)
 
         # Count positions tagged with bot magic per mode
         # Mode is stored in the comment prefix: "scalp|", "day|", "swing|"
@@ -299,6 +302,11 @@ class RiskManager:
             return False, f"{trading_mode} limit reached ({mode_count}/{mode_limit})"
         if total_count >= total_limit:
             return False, f"Total position limit reached ({total_count}/{total_limit})"
+
+        if symbol is not None:
+            symbol_count = sum(1 for p in open_positions if p.get("symbol") == symbol)
+            if symbol_count >= per_symbol_limit:
+                return False, f"Per-symbol limit reached for {symbol} ({symbol_count}/{per_symbol_limit})"
 
         return True, ""
 

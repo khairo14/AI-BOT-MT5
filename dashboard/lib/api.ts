@@ -61,11 +61,31 @@ export const modifyPosition = (
 ) => api.patch(`/trades/modify/${ticket}`, { sl, tp }).then((r) => r.data);
 
 // ── Signals ----------------------------------------------------------------
+function normalizeSignal(raw: Record<string, unknown>): Signal {
+  return {
+    id:               raw.id as string,
+    symbol:           raw.symbol as string,
+    direction:        ((raw.direction as string) ?? "buy").toLowerCase() as "buy" | "sell",
+    strategy:         (raw.strategy as string) ?? "",
+    mode:             ((raw.trading_mode ?? raw.mode) as Signal["mode"]),
+    entry:            ((raw.entry_price ?? raw.entry) as number) ?? 0,
+    sl:               (raw.sl as number) ?? 0,
+    tp:               (raw.tp as number) ?? 0,
+    confidence:       (raw.confidence as number) ?? 0,
+    timestamp:        ((raw.created_at ?? raw.timestamp) as string) ?? new Date().toISOString(),
+    status:           (raw.status as Signal["status"]) ?? "pending",
+    reason:           (raw.rejection_reason ?? raw.reason) as string | undefined,
+    rejection_reason: raw.rejection_reason as string | undefined,
+  };
+}
+
 export const fetchSignals = (mode?: TradingMode, status?: string): Promise<Signal[]> => {
   const params = new URLSearchParams();
-  if (mode) params.set("mode", mode);
+  if (mode) params.set("trading_mode", mode);
   if (status) params.set("status", status);
-  return api.get(`/signals/?${params.toString()}`).then((r) => r.data);
+  return api
+    .get(`/signals/?${params.toString()}`)
+    .then((r) => (r.data as Record<string, unknown>[]).map(normalizeSignal));
 };
 
 export const approveSignal = (id: string) =>
@@ -89,6 +109,9 @@ export const setExecutionMode = (mode: TradingMode, execution: ExecutionMode) =>
 
 export const patchRiskConfig = (patch: Partial<RiskConfig>) =>
   api.patch("/config/risk", { data: patch }).then((r) => r.data);
+
+export const patchAppConfig = (patch: Record<string, unknown>) =>
+  api.patch("/config/app", { data: patch }).then((r) => r.data);
 
 // ── Trade Journal (Phase 9) ------------------------------------------------
 export const fetchTradeJournal = (

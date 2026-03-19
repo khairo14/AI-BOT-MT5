@@ -1,5 +1,5 @@
 {
-  "trading_mode": "paper",
+  "trading_mode": "live",
   "accounts": {
     "paper": {
       "login": 168442709,

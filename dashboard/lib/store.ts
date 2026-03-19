@@ -34,6 +34,7 @@ interface BotStore {
   setSignals: (s: Signal[]) => void;
   addSignal: (s: Signal) => void;
   updateSignalStatus: (id: string, status: Signal["status"]) => void;
+  updateSignal: (id: string, fields: Partial<Signal>) => void;
 
   // App config
   config: AppConfig | null;
@@ -78,6 +79,10 @@ export const useBotStore = create<BotStore>((set) => ({
   updateSignalStatus: (id, status) =>
     set((state) => ({
       signals: state.signals.map((s) => (s.id === id ? { ...s, status } : s)),
+    })),
+  updateSignal: (id, fields) =>
+    set((state) => ({
+      signals: state.signals.map((s) => (s.id === id ? { ...s, ...fields } : s)),
     })),
 
   config: null,

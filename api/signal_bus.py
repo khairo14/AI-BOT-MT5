@@ -102,6 +102,8 @@ class SignalBus:
         exec_mode = self._get_exec_mode(signal.get("trading_mode", ""))
         if exec_mode == "auto" and self._order_manager is not None:
             signal["status"] = "executing"
+            # Broadcast immediately so the dashboard card appears before execution
+            asyncio.create_task(broadcast_signal(dict(signal)))
             asyncio.create_task(self._execute_async(signal))
         else:
             signal["status"] = "pending"
@@ -146,6 +148,27 @@ class SignalBus:
             return False
 
         from engine.order_manager import OrderRequest
+
+        # Concurrent + per-symbol limit check at execution time
+        try:
+            from engine.risk_manager import RiskManager
+            from engine.mt5_client import MT5Client
+            if isinstance(self._client, MT5Client):
+                open_positions = self._client.get_open_positions()
+                # Import the shared risk manager instance via the runner loop
+                from api.runner_loop import _risk_manager
+                if _risk_manager is not None:
+                    allowed, reason = _risk_manager.check_concurrent_limit(
+                        signal.get("trading_mode", "day_trading"),
+                        open_positions,
+                        symbol=signal.get("symbol"),
+                    )
+                    if not allowed:
+                        signal["rejection_reason"] = reason
+                        logger.info(f"SignalBus blocked execution: {reason}")
+                        return False
+        except Exception as _exc:
+            logger.debug(f"SignalBus: concurrent limit check skipped: {_exc}")
 
         try:
             req = OrderRequest(
