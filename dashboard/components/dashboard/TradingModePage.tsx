@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { fetchOHLCV, fetchPositions, fetchExecutionMode, setExecutionMode } from "@/lib/api";
+import { fetchOHLCV, fetchPositions, fetchExecutionMode, setExecutionMode, fetchScannerConfig, patchScannerConfig } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import AccountSummary from "@/components/dashboard/AccountSummary";
 import TradePanel from "@/components/trading/TradePanel";
@@ -50,6 +50,13 @@ export default function TradingModePage({
   const [tab, setTab] = useState<"positions" | "signals">("signals");
   const [execMode, setExecMode] = useState<ExecutionMode>("manual");
   const [togglingExec, setTogglingExec] = useState(false);
+
+  // Scanner state
+  const [scannerEnabled, setScannerEnabled] = useState(false);
+  const [scannerSymbols, setScannerSymbols] = useState<string[]>([]);
+  const [scannerSaving, setScannerSaving] = useState(false);
+  const [scannerSaved, setScannerSaved] = useState(false);
+
   const [ind, setInd] = useState<Record<AllKey, boolean>>(IND_DEFAULTS);
   const [indPanelOpen, setIndPanelOpen] = useState(false);
   const toggleInd = (k: AllKey) => setInd((p) => ({ ...p, [k]: !p[k] }));
@@ -87,6 +94,49 @@ export default function TradingModePage({
       .then((modes) => setExecMode((modes[mode] as ExecutionMode) ?? "manual"))
       .catch(() => {});
   }, [mode]);
+
+  // Load scanner config for this mode
+  useEffect(() => {
+    fetchScannerConfig()
+      .then((cfg) => {
+        const m = cfg[mode] ?? {};
+        setScannerEnabled(m.enabled ?? false);
+        setScannerSymbols(m.symbols ?? []);
+      })
+      .catch(() => {});
+  }, [mode]);
+
+  const SCANNER_TF: Record<string, string> = { scalping: "M1/M5", day_trading: "M15/H1", swing: "H4/D1" };
+
+  const toggleScannerSymbol = (sym: string) => {
+    setScannerSymbols((prev) => {
+      if (prev.includes(sym)) return prev.filter((s) => s !== sym);
+      if (prev.length >= 5) return prev; // max 5 symbols
+      return [...prev, sym];
+    });
+  };
+
+  const saveScannerConfig = async () => {
+    setScannerSaving(true);
+    try {
+      await patchScannerConfig({
+        [mode]: { enabled: scannerEnabled, symbols: scannerSymbols, timeframe: SCANNER_TF[mode] },
+      });
+      setScannerSaved(true);
+      setTimeout(() => setScannerSaved(false), 2500);
+      pushNotification({
+        type: "success",
+        title: `${label} scanner saved`,
+        message: scannerEnabled
+          ? `Scanning: ${scannerSymbols.join(", ") || "none"}`
+          : "Scanner paused.",
+      });
+    } catch {
+      pushNotification({ type: "error", title: "Save failed", message: "Could not update scanner config." });
+    } finally {
+      setScannerSaving(false);
+    }
+  };
 
   const toggleExecMode = async () => {
     setTogglingExec(true);
@@ -147,6 +197,77 @@ export default function TradingModePage({
       </div>
 
       <AccountSummary account={account} />
+
+      {/* ── Strategy Scanner ─────────────────────────────────────────── */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Strategy Scanner</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {SCANNER_TF[mode]}&nbsp;&middot;&nbsp;max 5 symbols
+              {scannerSymbols.length > 0
+                ? ` · scanning: ${scannerSymbols.join(", ")}`
+                : " · no symbols selected"}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className={`text-xs font-semibold ${
+                scannerEnabled ? "text-emerald-400" : "text-gray-500"
+              }`}
+            >
+              {scannerEnabled ? "ACTIVE" : "PAUSED"}
+            </span>
+            <button
+              onClick={() => setScannerEnabled((v) => !v)}
+              className={`relative w-11 h-6 rounded-full transition-colors ${
+                scannerEnabled ? "bg-emerald-600" : "bg-gray-700"
+              }`}
+            >
+              <span
+                className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                  scannerEnabled ? "translate-x-6" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-3">
+          {allSymbols.map((sym) => {
+            const selected = scannerSymbols.includes(sym);
+            const atMax = !selected && scannerSymbols.length >= 5;
+            return (
+              <button
+                key={sym}
+                disabled={atMax}
+                onClick={() => toggleScannerSymbol(sym)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
+                  selected
+                    ? "bg-blue-600 border-blue-500 text-white"
+                    : atMax
+                    ? "bg-gray-900 border-gray-800 text-gray-700 cursor-not-allowed"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-600"
+                }`}
+              >
+                {sym}
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          disabled={scannerSaving}
+          onClick={saveScannerConfig}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            scannerSaved
+              ? "bg-emerald-700 text-emerald-100"
+              : "bg-blue-600 hover:bg-blue-500 text-white"
+          } disabled:opacity-50`}
+        >
+          {scannerSaving ? "Saving…" : scannerSaved ? "✓ Saved" : "Save Scanner"}
+        </button>
+      </div>
 
       {/* Symbol + timeframe controls */}
       <div className="flex flex-wrap gap-3 items-center">

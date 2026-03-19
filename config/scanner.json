@@ -1,0 +1,17 @@
+{
+  "scalping": {
+    "enabled": false,
+    "symbols": ["EURUSD", "USDJPY"],
+    "timeframe": "M5"
+  },
+  "day_trading": {
+    "enabled": false,
+    "symbols": ["EURUSD", "GBPUSD"],
+    "timeframe": "H1"
+  },
+  "swing": {
+    "enabled": false,
+    "symbols": ["EURUSD", "GOLD"],
+    "timeframe": "H4"
+  }
+}

@@ -16,11 +16,15 @@ Intervals (seconds, start running immediately on first tick):
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from loguru import logger
+
+CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 INTERVALS: dict[str, int] = {
     "scalping":    10,
@@ -86,8 +90,20 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
             counters[mode] += 5
             if counters[mode] >= interval:
                 counters[mode] = 0
+                # Re-read scanner.json every tick so dashboard changes apply immediately
+                _sym_override = None
                 try:
-                    signals = await asyncio.to_thread(runner.run_mode, mode)
+                    _scan = json.loads((CONFIG_DIR / "scanner.json").read_text()).get(mode, {})
+                    if not _scan.get("enabled", False):
+                        logger.debug(f"Scanner [{mode}] is paused — skipping")
+                        continue  # scanner disabled for this mode
+                    _sym_override = [s for s in _scan.get("symbols", []) if s] or None
+                except FileNotFoundError:
+                    pass  # scanner.json missing — scan all enabled symbols
+                except Exception as _err:
+                    logger.debug(f"Scanner config read error [{mode}]: {_err}")
+                try:
+                    signals = await asyncio.to_thread(runner.run_mode, mode, _sym_override)
                     for sig in signals:
                         await bus.add_signal(_signal_to_dict(sig, mode))
                         logger.debug(

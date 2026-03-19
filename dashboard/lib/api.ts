@@ -184,3 +184,16 @@ export const fetchBacktestRun = (id: string) =>
 
 export const deleteBacktestRun = (id: string) =>
   api.delete(`/backtest/history/${id}`).then((r) => r.data);
+
+// ── Scanner ----------------------------------------------------------------
+export interface ScannerModeConfig {
+  enabled: boolean;
+  symbols: string[];
+  timeframe: string;
+}
+
+export const fetchScannerConfig = (): Promise<Record<string, ScannerModeConfig>> =>
+  api.get("/config/scanner").then((r) => r.data);
+
+export const patchScannerConfig = (patch: Record<string, unknown>) =>
+  api.patch("/config/scanner", { data: patch }).then((r) => r.data);

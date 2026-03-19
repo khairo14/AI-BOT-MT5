@@ -272,7 +272,20 @@ class StrategyRunner:
                 df=primary_df,
                 trading_type=trading_type,
             )
-            # Phase 7: RL gate — suppress low-confidence signals dynamically
+            # AI/ML confidence filter (enabled via Settings → AI → confidence_filter_enabled)
+            try:
+                _ai = json.loads((CONFIG_DIR / "app.json").read_text()).get("ai", {})
+                if _ai.get("confidence_filter_enabled"):
+                    _threshold = float(_ai.get("confidence_threshold", 60)) / 100.0
+                    if strat_sig.confidence < _threshold:
+                        logger.debug(
+                            f"AI confidence gate blocked {strat_name}/{symbol}: "
+                            f"{strat_sig.confidence:.2f} < {_threshold:.2f}"
+                        )
+                        return None
+            except Exception:
+                pass
+            # RL gate — suppress low-confidence signals dynamically
             if not scorer.is_tradeable(strat_sig.confidence, trading_type):
                 logger.debug(
                     f"RL gate blocked {strat_name}/{symbol}: "
@@ -284,13 +297,14 @@ class StrategyRunner:
 
         return strat_sig
 
-    def run_mode(self, trading_type: str) -> list[StrategySignal]:
-        """Run all enabled symbols for a single trading type. Used by the runner loop."""
+    def run_mode(self, trading_type: str, symbols_override: list[str] | None = None) -> list[StrategySignal]:
+        """Run all enabled symbols for a single trading type. Used by the runner loop.
+        If symbols_override is provided (from scanner config), only those symbols are scanned."""
         # Reload configs on each run so dashboard changes take effect without restart
         self._strategies_cfg = self._load_json("strategies.json")
         self._symbols_cfg    = self._load_json("symbols.json")
         new_signals: list[StrategySignal] = []
-        symbols = self._enabled_symbols(trading_type)
+        symbols = symbols_override if symbols_override is not None else self._enabled_symbols(trading_type)
         active_strategies = self._active_strategies(trading_type)
         for symbol in symbols:
             per_symbol_strats = self._per_symbol_overrides(trading_type, symbol) or active_strategies

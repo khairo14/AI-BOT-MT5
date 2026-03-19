@@ -141,6 +141,28 @@ def set_execution_mode(trading_mode: str, mode: str):
 
 
 # ---------------------------------------------------------------------------
+# Scanner config
+# ---------------------------------------------------------------------------
+
+@router.get("/scanner")
+def get_scanner_config():
+    """Return per-mode scanner settings (enabled, symbols, timeframe)."""
+    return _load("scanner.json")
+
+
+@router.patch("/scanner")
+def update_scanner_config(body: PatchRequest):
+    """Update scanner settings. Enforces max 5 symbols per mode."""
+    current = _load("scanner.json")
+    _deep_merge(current, body.data)
+    for m in ("scalping", "day_trading", "swing"):
+        if m in current and isinstance(current[m].get("symbols"), list):
+            current[m]["symbols"] = current[m]["symbols"][:5]
+    _save("scanner.json", current)
+    return current
+
+
+# ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
 
