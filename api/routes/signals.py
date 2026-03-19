@@ -148,7 +148,7 @@ def clear_signals(trading_mode: Optional[str] = None):
 
 
 def _purge_all_terminal() -> int:
-    terminal = frozenset({"executed", "rejected", "failed"})
+    terminal = frozenset({"executed", "rejected", "failed", "expired"})
     ids = [sid for sid, s in bus.queue.items() if s.get("status") in terminal]
     for sid in ids:
         bus.queue.pop(sid, None)

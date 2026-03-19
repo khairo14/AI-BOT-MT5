@@ -88,6 +88,7 @@ class StrategySignal:
     tp2_price: float | None
     lot_size: float
     comment: str
+    timeframe: str = ""  # primary timeframe from the strategy class (e.g. "M5", "H1")
     confidence: float = 0.0  # 0–1 score from AI scorer (Phase 6)
     indicators: dict[str, Any] = field(default_factory=dict)
     approved: bool = False  # set to True when user confirms (manual mode)
@@ -177,7 +178,7 @@ class StrategyRunner:
             logger.exception(f"Strategy {strat_name} raised on {symbol}: {exc}")
             return None
 
-        if result.signal is None:
+        if result.signal is None or not result.signal.is_actionable:
             return None
 
         sig = result.signal
@@ -255,6 +256,7 @@ class StrategyRunner:
             tp_price=sig.tp_price,
             tp2_price=sig.tp2_price,
             lot_size=lot,
+            timeframe=sig.timeframe,
             comment=sig.comment,
             indicators=result.indicators,
         )
