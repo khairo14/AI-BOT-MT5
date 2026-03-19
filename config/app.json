@@ -17,6 +17,7 @@
     "day_trading": "manual",
     "swing": "manual"
   },
+  "ea_enabled": false,
   "notifications": {
     "signal_alert": true,
     "trade_opened": true,

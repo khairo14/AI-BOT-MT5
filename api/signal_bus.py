@@ -241,6 +241,65 @@ class SignalBus:
         try:
             trading_mode = signal.get("trading_mode", "day_trading")
             mode_prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(trading_mode, "bot")
+
+            # ── MQL5 EA fast-path for scalping ────────────────────────────────
+            # If the AIBotScalper EA is running and ea_enabled=true in app.json,
+            # dispatch scalping orders through the EA (1–5 ms native execution).
+            # Falls back to Python (place_market_order) automatically if the EA
+            # is not active, times out, or returns an error.
+            ea_used = False
+            if trading_mode == "scalping" and self._is_ea_enabled():
+                try:
+                    from engine.ea_bridge import ea_bridge
+                    if ea_bridge.is_active():
+                        ea_used = ea_bridge.submit_and_wait(signal, timeout=5.0)
+                        if ea_used:
+                            logger.info(
+                                f"Signal executed via EA: {signal['symbol']} {signal['direction']} "
+                                f"lot={signal.get('lot_size')} ticket={signal.get('ticket')}"
+                            )
+                        else:
+                            logger.info(
+                                f"EA execution failed/timeout for {signal['symbol']} "
+                                "— falling back to Python order"
+                            )
+                    else:
+                        logger.debug("EABridge: EA not active — using Python execution")
+                except Exception as _ea_exc:
+                    logger.warning(f"EABridge: error during EA dispatch: {_ea_exc} — falling back")
+
+            if ea_used:
+                # EA already filled the order — journal and continue
+                req_volume = float(signal.get("lot_size") or 0.01)
+                ticket = signal.get("ticket")
+                fill_price = signal.get("fill_price")
+                try:
+                    from engine.trade_journal import trade_journal
+                    from engine.account_store import current_mode
+                    trade_journal.log(
+                        ticket=ticket or 0,
+                        symbol=signal["symbol"],
+                        direction=signal["direction"],
+                        volume=req_volume,
+                        entry=fill_price or 0.0,
+                        sl=float(signal.get("sl") or 0),
+                        tp=float(signal["tp"]) if signal.get("tp") else None,
+                        profit=None,
+                        trading_type=trading_mode,
+                        account_mode=current_mode(),
+                        comment=signal.get("strategy", ""),
+                        event="open",
+                    )
+                except Exception:
+                    pass
+                if ticket is not None and _event_loop is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        _poll_outcome(ticket=ticket, signal=signal, client=self._client),
+                        _event_loop,
+                    )
+                return True
+            # ── Standard Python execution (day_trading / swing / EA fallback) ─
+
             req = OrderRequest(
                 symbol=signal["symbol"],
                 direction=signal["direction"].upper(),
@@ -305,6 +364,15 @@ class SignalBus:
             return cfg.get("execution_mode", {}).get(trading_type, "manual")
         except Exception:
             return "manual"
+
+    @staticmethod
+    def _is_ea_enabled() -> bool:
+        """Return True if ea_enabled=true in app.json."""
+        try:
+            cfg = json.loads((CONFIG_DIR / "app.json").read_text())
+            return bool(cfg.get("ea_enabled", False))
+        except Exception:
+            return False
 
 
 # ── outcome poller ────────────────────────────────────────────────────────────
