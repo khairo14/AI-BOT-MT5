@@ -272,6 +272,10 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
 
     started, skipped = [], []
 
+    # Pre-fetch OHLCV once per (symbol, timeframe) — reuse across all strategies
+    # for that symbol. Reduces MT5 calls from strategy×symbol → just symbol.
+    ohlcv_cache: dict[tuple[str, str], object] = {}
+
     for trading_type in ("scalping", "day_trading", "swing"):
         active = strategies_cfg.get(trading_type, {}).get("active_strategies", [])
         tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
@@ -281,11 +285,22 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
             for e in sym_list
             if (e.get("enabled", False) if isinstance(e, dict) else True)
         ]
+
+        # Fetch each unique (symbol, tf) only once
+        for symbol in symbols:
+            if not symbol:
+                continue
+            cache_key = (symbol, tf_str)
+            if cache_key not in ohlcv_cache:
+                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
+                ohlcv_cache[cache_key] = df  # may be None
+
+        # Dispatch optimizer jobs using cached data
         for strat in active:
             for symbol in symbols:
                 if not symbol or strat not in PARAM_GRIDS:
                     continue
-                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
+                df = ohlcv_cache.get((symbol, tf_str))
                 if df is None or df.empty:
                     skipped.append(f"{strat}/{symbol}")
                     continue
