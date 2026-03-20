@@ -152,12 +152,13 @@ def get_scanner_config():
 
 @router.patch("/scanner")
 def update_scanner_config(body: PatchRequest):
-    """Update scanner settings. Enforces max 5 symbols per mode."""
+    """Update scanner settings. Enforces per-mode symbol limits."""
+    _SCANNER_MAX = {"scalping": 5, "day_trading": 10, "swing": 14}
     current = _load("scanner.json")
     _deep_merge(current, body.data)
-    for m in ("scalping", "day_trading", "swing"):
+    for m, limit in _SCANNER_MAX.items():
         if m in current and isinstance(current[m].get("symbols"), list):
-            current[m]["symbols"] = current[m]["symbols"][:5]
+            current[m]["symbols"] = current[m]["symbols"][:limit]
     _save("scanner.json", current)
     return current
 

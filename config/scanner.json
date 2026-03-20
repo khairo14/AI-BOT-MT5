@@ -22,11 +22,14 @@
     "timeframe": "M15/H1"
   },
   "swing": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "EURUSD",
-      "GOLD"
+      "GOLD",
+      "GBPUSD",
+      "USDJPY",
+      "AUDUSD"
     ],
-    "timeframe": "H4"
+    "timeframe": "H4/D1"
   }
 }
