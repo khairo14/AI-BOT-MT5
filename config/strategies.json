@@ -38,8 +38,8 @@
     "symbol_strategy_override": {
       "BTCUSD":  ["sr_breakout"],
       "ETHUSD":  ["sr_breakout"],
-      "TSLA.OQ": ["macd_ema_trend", "sr_breakout"],
-      "NVDA.OQ": ["macd_ema_trend", "sr_breakout"]
+      "Tesla":  ["macd_ema_trend", "sr_breakout"],
+      "Nvidia": ["macd_ema_trend", "sr_breakout"]
     },
     "params": {
       "macd_ema_trend": {
@@ -74,8 +74,8 @@
       "BTCUSD":   ["fibonacci_rsi", "weekly_breakout"],
       "ETHUSD":   ["fibonacci_rsi", "weekly_breakout"],
       "NGASCash": ["weekly_breakout"],
-      "NFLX.OQ":  ["weekly_breakout"],
-      "AMD.OQ":   ["weekly_breakout"]
+      "Netflix":     ["weekly_breakout"],
+      "AdvMicroDev": ["weekly_breakout"]
     },
     "params": {
       "ema_trend_rider": {
