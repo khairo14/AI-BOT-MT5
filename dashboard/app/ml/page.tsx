@@ -44,6 +44,7 @@ type OptimizerJob = {
   last_optimized_at?: string;
   best_params?: Record<string, unknown>;
   bars_used?: number;
+  running?: boolean;
 };
 type OptimizerStatus = {
   jobs?: Record<string, OptimizerJob>;
@@ -371,7 +372,13 @@ export default function MLPage() {
                         <tr key={bKey} className="border-b border-gray-800/50 hover:bg-gray-900/40">
                           <td className="py-2 pr-4 pl-2 font-medium text-white">{strategyName}</td>
                           <td className="py-2 pr-4">{symbolName}</td>
-                          <td className="py-2 pr-4">{job.best_score != null ? job.best_score.toFixed(3) : "—"}</td>
+                          <td className="py-2 pr-4">
+                            {job.running ? (
+                              <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-900 text-amber-300 animate-pulse">Running…</span>
+                            ) : (
+                              job.best_score != null ? job.best_score.toFixed(3) : "—"
+                            )}
+                          </td>
                           <td className="py-2 pr-4">{job.n_signals ?? "—"}</td>
                           <td className="py-2 pr-4 text-gray-500">{job.bars_used ?? "—"}</td>
                           <td className="py-2 pr-4 text-gray-400">{relTime(job.last_optimized_at)}</td>

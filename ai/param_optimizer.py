@@ -329,7 +329,22 @@ class ParamOptimizer:
 
     def status(self) -> dict:
         with self._lock:
-            return dict(self._status)
+            completed = dict(self._status)
+            running   = set(self._running)
+        # Merge: add a `running` flag to in-progress jobs
+        result = {k: {**v, "running": False} for k, v in completed.items()}
+        for key in running:
+            if key in result:
+                result[key]["running"] = True
+            else:
+                # Job started but no prior record — create a placeholder
+                parts = key.split("__", 1)
+                result[key] = {
+                    "strategy": parts[0] if parts else key,
+                    "symbol":   parts[1] if len(parts) > 1 else "",
+                    "running":  True,
+                }
+        return result
 
     # ── Internal ─────────────────────────────────────────────────────────────
 

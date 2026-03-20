@@ -90,6 +90,7 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
                 continue
             predictor.train_async(symbol, df, trading_type)
             started.append(f"{symbol}/{trading_type}")
+            await asyncio.sleep(0.05)  # yield so live bot can get MT5 lock
 
     return {"started": started, "skipped": skipped}
 
@@ -287,6 +288,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
         ]
 
         # Fetch each unique (symbol, tf) only once
+        # Small sleep between fetches lets live strategy threads acquire the MT5 lock
         for symbol in symbols:
             if not symbol:
                 continue
@@ -294,6 +296,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
             if cache_key not in ohlcv_cache:
                 df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
                 ohlcv_cache[cache_key] = df  # may be None
+                await asyncio.sleep(0.05)  # yield so live bot can get MT5 lock
 
         # Dispatch optimizer jobs using cached data
         for strat in active:
