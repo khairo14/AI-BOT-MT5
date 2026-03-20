@@ -673,7 +673,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 pass
 
             trading_type = signal.get("trading_mode", "day_trading")
-            stats = memory.stats(trading_type=trading_type)
+            stats = memory.stats(trading_type=trading_type, live_only=True)
 
             # Update consecutive win/loss counter in the risk manager
             try:
@@ -713,7 +713,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 _type  = trading_type
                 _key   = f"{_sym}_{_type}"
                 _total = len([
-                    o for o in _mem.recent(n=500)
+                    o for o in _mem.recent(n=500, live_only=True)
                     if o.get("symbol") == _sym and o.get("trading_type") == _type
                 ])
                 _meta  = predictor.status().get(_key, {})

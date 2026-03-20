@@ -76,17 +76,20 @@ class TradeMemory:
             with open(MEMORY_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
 
-    def recent(self, n: int = 200, trading_type: Optional[str] = None) -> list[dict]:
-        """Return the last N outcomes, optionally filtered by trading_type."""
+    def recent(self, n: int = 200, trading_type: Optional[str] = None, live_only: bool = False) -> list[dict]:
+        """Return the last N outcomes, optionally filtered by trading_type.
+        live_only=True excludes backtest entries so RL/optimizer aren't skewed by re-runs."""
         with self._lock:
             data = list(self._buffer)
         if trading_type:
             data = [d for d in data if d.get("trading_type") == trading_type]
+        if live_only:
+            data = [d for d in data if d.get("extra", {}).get("source") != "backtest"]
         return data[-n:]
 
-    def stats(self, trading_type: Optional[str] = None) -> dict:
+    def stats(self, trading_type: Optional[str] = None, live_only: bool = False) -> dict:
         """Aggregate stats used by the RL agent and dashboard."""
-        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type)
+        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only)
         if not outcomes:
             return {"total": 0}
         total   = len(outcomes)

@@ -318,7 +318,7 @@ class ParamOptimizer:
         # Check if live win_rate has fallen — if so, re-optimize despite cooldown
         from ai.trade_memory import memory
         outcomes = [
-            o for o in memory.recent(n=50)
+            o for o in memory.recent(n=50, live_only=True)
             if o.get("strategy") == strategy_name and o.get("symbol") == symbol
         ]
         if len(outcomes) >= MIN_TRADES_FOR_REFINEMENT:
