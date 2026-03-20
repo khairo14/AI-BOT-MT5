@@ -171,6 +171,12 @@ export const resetConsecutiveLosses = () =>
 export const toggleCircuitBreaker = (enabled: boolean) =>
   api.post("/risk/circuit-breaker", { enabled }).then((r) => r.data);
 
+export const fetchHealth = () =>
+  api.get("/health").then((r) => r.data as { status: string; mt5_connected: boolean });
+
+export const reconnectMT5 = () =>
+  api.post("/account/reconnect").then((r) => r.data);
+
 // ── Backtest ----------------------------------------------------------------
 export interface BacktestRequest {
   symbol:          string;

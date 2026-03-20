@@ -267,15 +267,16 @@ def _make_features(df: pd.DataFrame) -> Optional[np.ndarray]:
       col 3 — volume normalised by mean
       col 4 — upper wick (high - close) / close
     """
-    needed = {"open", "high", "low", "close", "tick_volume"}
-    if not needed.issubset(df.columns):
+    needed = {"open", "high", "low", "close"}
+    vol_col = "volume" if "volume" in df.columns else "tick_volume"
+    if not needed.issubset(df.columns) or vol_col not in df.columns:
         return None
 
     close = df["close"].values.astype(float)
     open_ = df["open"].values.astype(float)
     high  = df["high"].values.astype(float)
     low   = df["low"].values.astype(float)
-    vol   = df["tick_volume"].values.astype(float)
+    vol   = df[vol_col].values.astype(float)
 
     eps     = 1e-10
     ret_c   = np.diff(close, prepend=close[0]) / (close + eps)

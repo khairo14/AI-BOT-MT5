@@ -5,6 +5,7 @@ All interaction with the MetaTrader5 Python library goes through this module.
 
 import os
 import json
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -41,6 +42,7 @@ class MT5Client:
 
     def __init__(self):
         self._connected = False
+        self._lock = threading.Lock()  # MT5 API is not thread-safe — serialize all calls
         # account_store takes priority over env var so dashboard switches survive restarts
         self._trading_mode = load_mode()
         self._credentials = self._load_credentials()
@@ -106,6 +108,32 @@ class MT5Client:
     def is_connected(self) -> bool:
         return self._connected and mt5.terminal_info() is not None
 
+    def reconnect(self) -> bool:
+        """Re-initialize and log in after a dropped connection."""
+        if self.is_connected():
+            return True
+        logger.info("MT5 reconnecting...")
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+        if not mt5.initialize():
+            logger.error(f"MT5 reconnect initialize failed: {mt5.last_error()}")
+            return False
+        creds = self._credentials
+        authorized = mt5.login(
+            login=creds["login"],
+            password=creds["password"],
+            server=creds["server"],
+        )
+        if not authorized:
+            logger.error(f"MT5 reconnect login failed: {mt5.last_error()}")
+            mt5.shutdown()
+            return False
+        self._connected = True
+        logger.info("MT5 reconnected successfully.")
+        return True
+
     def switch_mode(self, mode: str) -> bool:
         """Switch between 'paper' and 'live' trading modes."""
         mode = mode.lower()
@@ -130,7 +158,8 @@ class MT5Client:
             logger.warning("get_account_info called while not connected.")
             return None
 
-        info = mt5.account_info()
+        with self._lock:
+            info = mt5.account_info()
         if info is None:
             logger.error(f"mt5.account_info() returned None: {mt5.last_error()}")
             return None
@@ -155,17 +184,20 @@ class MT5Client:
 
     def get_symbol_info(self, symbol: str) -> Optional[dict]:
         """Return tick size, pip value, spread, and trading constraints."""
-        info = mt5.symbol_info(symbol)
+        with self._lock:
+            info = mt5.symbol_info(symbol)
         if info is None:
             logger.warning(f"Symbol not found: {symbol}")
             return None
 
         # Ensure symbol is visible in Market Watch
         if not info.visible:
-            if not mt5.symbol_select(symbol, True):
-                logger.warning(f"symbol_select failed for {symbol}: {mt5.last_error()}")
+            with self._lock:
+                if not mt5.symbol_select(symbol, True):
+                    logger.warning(f"symbol_select failed for {symbol}: {mt5.last_error()}")
 
-        tick = mt5.symbol_info_tick(symbol)
+        with self._lock:
+            tick = mt5.symbol_info_tick(symbol)
         spread_pips = round(info.spread * info.point, 5)
 
         return {
@@ -185,7 +217,8 @@ class MT5Client:
 
     def get_current_price(self, symbol: str) -> Optional[dict]:
         """Return current bid/ask for a symbol."""
-        tick = mt5.symbol_info_tick(symbol)
+        with self._lock:
+            tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             return None
         return {
@@ -214,7 +247,8 @@ class MT5Client:
             logger.error(f"Unknown timeframe: {timeframe}")
             return None
 
-        rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
+        with self._lock:
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
         if rates is None or len(rates) == 0:
             logger.warning(
                 f"No OHLCV data for {symbol} {timeframe}: {mt5.last_error()}"
@@ -241,7 +275,8 @@ class MT5Client:
             logger.error(f"Unknown timeframe: {timeframe}")
             return None
 
-        rates = mt5.copy_rates_range(symbol, tf, date_from, date_to)
+        with self._lock:
+            rates = mt5.copy_rates_range(symbol, tf, date_from, date_to)
         if rates is None or len(rates) == 0:
             logger.warning(f"No range data for {symbol} {timeframe}: {mt5.last_error()}")
             return None
@@ -259,7 +294,8 @@ class MT5Client:
 
     def get_open_positions(self, symbol: Optional[str] = None) -> list[dict]:
         """Return all open positions, optionally filtered by symbol."""
-        positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+        with self._lock:
+            positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
         if positions is None:
             return []
 
@@ -293,7 +329,8 @@ class MT5Client:
         if date_to is None:
             date_to = datetime.now(tz=timezone.utc)
 
-        deals = mt5.history_deals_get(date_from, date_to)
+        with self._lock:
+            deals = mt5.history_deals_get(date_from, date_to)
         if deals is None:
             return []
 

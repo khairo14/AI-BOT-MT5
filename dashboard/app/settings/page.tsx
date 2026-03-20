@@ -13,6 +13,8 @@ import {
   resetDrawdown,
   resetConsecutiveLosses,
   toggleCircuitBreaker,
+  fetchHealth,
+  reconnectMT5,
 } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import type { TradingMode, ExecutionMode } from "@/types";
@@ -120,14 +122,19 @@ export default function SettingsPage() {
   } | null>(null);
   const [cbBusy, setCbBusy] = useState(false);
 
+  // MT5 connection
+  const [mt5Connected, setMt5Connected] = useState<boolean | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [exec, riskData, appData, modeData, cbData] = await Promise.all([
+      const [exec, riskData, appData, modeData, cbData, healthData] = await Promise.all([
         fetchExecutionMode(),
         fetchRiskConfig(),
         fetchAppConfig(),
         fetchAccountMode(),
         fetchRiskStatus(),
+        fetchHealth(),
       ]);
       setExecModes(exec);
       setRisk(riskData as unknown as Record<string, unknown>);
@@ -138,6 +145,7 @@ export default function SettingsPage() {
       setNewsFilter((nf?.enabled as boolean) ?? true);
       setSessionFilter((sf?.enabled as boolean) ?? true);
       setCbStatus(cbData);
+      setMt5Connected((healthData as { mt5_connected: boolean }).mt5_connected ?? false);
     } catch {
       pushNotification({ type: "error", title: "Settings load failed", message: "Could not reach the API." });
     }
@@ -242,6 +250,39 @@ export default function SettingsPage() {
           Runtime configuration — changes take effect immediately without restart.
         </p>
       </div>
+
+      {/* ── MT5 Connection ───────────────────────────────────────────── */}
+      <Section title="MT5 Connection">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className={`w-2.5 h-2.5 rounded-full ${mt5Connected === null ? "bg-gray-500" : mt5Connected ? "bg-emerald-400" : "bg-red-500"}`} />
+            <span className="text-sm text-gray-300">
+              {mt5Connected === null ? "Checking…" : mt5Connected ? "Connected" : "Disconnected"}
+            </span>
+          </div>
+          <button
+            disabled={reconnecting}
+            onClick={async () => {
+              setReconnecting(true);
+              try {
+                await reconnectMT5();
+                const h = await fetchHealth();
+                setMt5Connected(h.mt5_connected);
+                pushNotification({ type: "success", title: "MT5 reconnected", message: "" });
+              } catch {
+                const h = await fetchHealth().catch(() => ({ mt5_connected: false }));
+                setMt5Connected(h.mt5_connected);
+                pushNotification({ type: "error", title: "Reconnect failed", message: "Check the MT5 terminal is running." });
+              } finally {
+                setReconnecting(false);
+              }
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-40 transition-colors"
+          >
+            {reconnecting ? "Reconnecting…" : "Reconnect"}
+          </button>
+        </div>
+      </Section>
 
       {/* ── Circuit Breaker ──────────────────────────────────────────── */}
       <Section title="Circuit Breaker">

@@ -99,6 +99,19 @@ def get_symbol_info(symbol: str, client: MT5Client = Depends(get_client)):
     return info
 
 
+@router.post("/reconnect")
+def reconnect_mt5():
+    """Attempt to reconnect to MT5 after a dropped connection."""
+    from api.main import get_mt5_client
+    client = get_mt5_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="MT5 client not initialized — restart the bot.")
+    success = client.reconnect()
+    if not success:
+        raise HTTPException(status_code=503, detail="MT5 reconnect failed — check terminal is running.")
+    return {"status": "reconnected", "connected": True}
+
+
 @router.get("/price/{symbol}")
 def get_price(symbol: str, client: MT5Client = Depends(get_client)):
     """Return current bid/ask for a symbol."""
