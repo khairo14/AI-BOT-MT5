@@ -44,6 +44,56 @@ def ai_status():
     return predictor.status()
 
 
+# ───────────────────────────────────
+# Train-all (must be declared BEFORE /{symbol})
+# ───────────────────────────────────
+
+class TrainAllRequest(BaseModel):
+    bars: int = 1000
+
+
+@router.post("/train/all")
+async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
+    """
+    Trigger LSTM retraining for all enabled symbols × trading types.
+    Runs in background threads — poll GET /ai/status to track progress.
+    """
+    from api.main import get_mt5_client
+
+    client = get_mt5_client()
+    if client is None or not client.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 not connected")
+
+    CONFIG_PATH = Path(__file__).parent.parent.parent / "config"
+    try:
+        import json
+        symbols_cfg = json.loads((CONFIG_PATH / "symbols.json").read_text(encoding="utf-8-sig"))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Cannot read symbols.json")
+
+    started, skipped = [], []
+
+    for trading_type, sym_list in symbols_cfg.items():
+        if not isinstance(sym_list, list):
+            continue
+        tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
+        for entry in sym_list:
+            symbol = entry.get("symbol") if isinstance(entry, dict) else entry
+            if not symbol:
+                continue
+            if predictor.is_training(symbol, trading_type):
+                skipped.append(f"{symbol}/{trading_type}")
+                continue
+            df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
+            if df is None or df.empty:
+                skipped.append(f"{symbol}/{trading_type} (no data)")
+                continue
+            predictor.train_async(symbol, df, trading_type)
+            started.append(f"{symbol}/{trading_type}")
+
+    return {"started": started, "skipped": skipped}
+
+
 @router.post("/train/{symbol}")
 async def train_symbol(symbol: str, req: TrainRequest = TrainRequest()):
     """
@@ -144,59 +194,6 @@ def memory_stats(trading_type: Optional[TRADING_TYPE] = None):
 def memory_recent(n: int = 50, trading_type: Optional[TRADING_TYPE] = None):
     """Return the last N trade outcomes, newest last."""
     return memory.recent(n=min(n, 500), trading_type=trading_type)
-
-
-# ───────────────────────────────────
-# Train-all endpoint
-# ───────────────────────────────────
-
-class TrainAllRequest(BaseModel):
-    bars: int = 1000
-
-
-@router.post("/train/all")
-async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
-    """
-    Trigger LSTM retraining for all enabled symbols × trading types.
-    Runs in background threads — poll GET /ai/status to track progress.
-    """
-    from api.main import get_mt5_client
-    from engine.mt5_client import MT5Client
-    import MetaTrader5 as _mt5
-
-    client = get_mt5_client()
-    if client is None or not client.is_connected():
-        raise HTTPException(status_code=503, detail="MT5 not connected")
-
-    CONFIG_PATH = Path(__file__).parent.parent.parent / "config"
-    try:
-        import json
-        symbols_cfg = json.loads((CONFIG_PATH / "symbols.json").read_text(encoding="utf-8-sig"))
-    except Exception:
-        raise HTTPException(status_code=500, detail="Cannot read symbols.json")
-
-    tf_map = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
-    started, skipped = [], []
-
-    for trading_type, sym_list in symbols_cfg.items():
-        if not isinstance(sym_list, list):
-            continue
-        tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
-        for entry in sym_list:
-            symbol = entry.get("symbol") if isinstance(entry, dict) else entry
-            if not symbol:
-                continue
-            if predictor.is_training(symbol, trading_type):
-                skipped.append(f"{symbol}/{trading_type}")
-                continue
-            df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
-            if df is None or df.empty:
-                skipped.append(f"{symbol}/{trading_type} (no data)")
-                continue
-            predictor.train_async(symbol, df, trading_type)
-            started.append(f"{symbol}/{trading_type}")
-
-    return {"started": started, "skipped": skipped}
 
 
 # ───────────────────────────────────
