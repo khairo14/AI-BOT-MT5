@@ -225,12 +225,20 @@ class PricePredictor:
             self._models[key]   = model
             self._scalers[key]  = scaler
             self._metadata[key] = {
-                "trained_at":   datetime.utcnow().isoformat(),
+                "trained_at":   datetime.utcnow().isoformat() + "Z",
                 "accuracy":     round(accuracy, 4),
                 "bars_used":    len(df),
                 "trading_type": trading_type,
                 "timeframe":    tf,
             }
+
+        # Persist metadata so it survives restarts
+        import json as _json
+        meta_file = MODELS_DIR / f"{key}_meta.json"
+        try:
+            meta_file.write_text(_json.dumps(self._metadata[key]), encoding="utf-8")
+        except Exception:
+            pass
 
         logger.info(f"LSTM trained: {key} ({tf}) — val accuracy: {accuracy:.2%}")
 
@@ -239,6 +247,7 @@ class PricePredictor:
         if not _torch_available():
             return
         import torch
+        import json as _json
 
         for model_file in MODELS_DIR.glob("*_lstm.pt"):
             key         = model_file.stem.replace("_lstm", "")
@@ -253,6 +262,13 @@ class PricePredictor:
                     scaler = pickle.load(f)
                 self._models[key]  = model
                 self._scalers[key] = scaler
+                # Restore metadata sidecar if present
+                meta_file = MODELS_DIR / f"{key}_meta.json"
+                if meta_file.exists():
+                    try:
+                        self._metadata[key] = _json.loads(meta_file.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
                 logger.info(f"Loaded LSTM model: {key}")
             except Exception as exc:
                 logger.warning(f"Could not load model {key}: {exc}")
