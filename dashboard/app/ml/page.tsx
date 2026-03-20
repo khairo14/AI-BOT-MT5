@@ -32,7 +32,7 @@ function pct(v: number | undefined): string {
 }
 
 // ── types ──────────────────────────────────────────────────────────────────
-type AIStatus = Record<string, { accuracy?: number; bars_used?: number; last_trained?: string; is_training?: boolean }>;
+type AIStatus = Record<string, { accuracy?: number; bars_used?: number; trained_at?: string; training?: boolean }>;
 type RLStatus = Record<string, { confidence_threshold?: number; risk_factor?: number; q_states?: number; last_state?: string }>;
 type MemStats = { total?: number; wins?: number; win_rate?: number; avg_pnl?: number; tp_hits?: number; sl_hits?: number };
 type OptimizerJob = {
@@ -52,6 +52,19 @@ type OptimizerStatus = {
 
 const MODES = ["scalping", "day_trading", "swing"] as const;
 
+/** Optimizer job key helpers */
+const job_strat = (key: string, job: OptimizerJob) => job.strategy ?? key.split("__")[0];
+const job_sym   = (key: string, job: OptimizerJob) => job.symbol   ?? key.split("__")[1] ?? key;
+
+/** Safely split a model key like "US100Cash_day_trading" → ["US100Cash", "day_trading"] */
+function parseModelKey(key: string): [string, string] {
+  for (const tt of ["day_trading", "scalping", "swing"] as const) {
+    if (key.endsWith(`_${tt}`)) return [key.slice(0, -(tt.length + 1)), tt];
+  }
+  const idx = key.lastIndexOf("_");
+  return idx >= 0 ? [key.slice(0, idx), key.slice(idx + 1)] : [key, ""];
+}
+
 // ── component ─────────────────────────────────────────────────────────────
 export default function MLPage() {
   const [aiStatus, setAiStatus] = useState<AIStatus>({});
@@ -64,6 +77,16 @@ export default function MLPage() {
   const [gateEnabled, setGateEnabled] = useState(false);
   const [gateThreshold, setGateThreshold] = useState(60);
   const [gateSaving, setGateSaving] = useState(false);
+
+  // LSTM table filter/sort
+  const [lstmSearch, setLstmSearch] = useState("");
+  type LstmSortKey = "sym" | "accuracy" | "bars_used" | "status";
+  const [lstmSort, setLstmSort] = useState<{ key: LstmSortKey; dir: "asc" | "desc" }>({ key: "sym", dir: "asc" });
+
+  // Optimizer table filter/sort
+  const [optSearch, setOptSearch] = useState("");
+  type OptSortKey = "strategy" | "symbol" | "score" | "signals" | "last_run";
+  const [optSort, setOptSort] = useState<{ key: OptSortKey; dir: "asc" | "desc" }>({ key: "symbol", dir: "asc" });
 
   const load = useCallback(async () => {
     try {
@@ -123,6 +146,22 @@ export default function MLPage() {
     </span>
   );
 
+  // Sortable column header
+  function SortTh<K extends string>({
+    label, sortKey, current, onSort, className = "",
+  }: { label: string; sortKey: K; current: { key: K; dir: "asc" | "desc" }; onSort: (k: K) => void; className?: string }) {
+    const active = current.key === sortKey;
+    return (
+      <th
+        className={`pb-2 pt-2 pr-4 font-medium cursor-pointer select-none hover:text-gray-300 ${className}`}
+        onClick={() => onSort(sortKey)}
+      >
+        {label}
+        <span className="ml-1 text-gray-600">{active ? (current.dir === "asc" ? "↑" : "↓") : "↕"}</span>
+      </th>
+    );
+  }
+
   // ── render ─────────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-gray-950 text-gray-200 p-6 space-y-10">
@@ -135,7 +174,7 @@ export default function MLPage() {
 
       {/* ── 1. LSTM Models ─────────────────────────────────────────────── */}
       <section>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <SectionHeader title="LSTM Prediction Models" sub="One model per symbol × trading mode, trained on OHLCV + indicators." />
           <button
             disabled={busy["train_all"]}
@@ -148,51 +187,84 @@ export default function MLPage() {
 
         {Object.keys(aiStatus).length === 0 ? (
           <p className="text-sm text-gray-600">No models loaded (bot may be offline).</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-800">
-                  <th className="pb-2 pr-4 font-medium">Symbol / Mode</th>
-                  <th className="pb-2 pr-4 font-medium">Accuracy</th>
-                  <th className="pb-2 pr-4 font-medium">Bars Used</th>
-                  <th className="pb-2 pr-4 font-medium">Last Trained</th>
-                  <th className="pb-2 pr-4 font-medium">Status</th>
-                  <th className="pb-2 font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(aiStatus).map(([key, m]) => {
-                  const [sym, type] = key.split("_");
-                  const bKey = `train_${key}`;
-                  return (
-                    <tr key={key} className="border-b border-gray-800/50 hover:bg-gray-900/40">
-                      <td className="py-2 pr-4">
-                        <span className="font-semibold text-white">{sym}</span>
-                        <span className="ml-2 text-xs text-gray-500">{type}</span>
-                      </td>
-                      <td className="py-2 pr-4">{m.accuracy != null ? pct(m.accuracy) : "—"}</td>
-                      <td className="py-2 pr-4">{m.bars_used ?? "—"}</td>
-                      <td className="py-2 pr-4 text-gray-400">{relTime(m.last_trained)}</td>
-                      <td className="py-2 pr-4">
-                        <Badge ok={!m.is_training} label={m.is_training ? "Training" : "Ready"} />
-                      </td>
-                      <td className="py-2">
-                        <button
-                          disabled={busy[bKey] || m.is_training}
-                          onClick={() => doAction(bKey, () => trainSymbol(sym, type ?? "scalping"))}
-                          className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
-                        >
-                          {busy[bKey] ? "…" : "Retrain"}
-                        </button>
-                      </td>
+        ) : (() => {
+          // filter
+          const q = lstmSearch.trim().toLowerCase();
+          const filtered = Object.entries(aiStatus).filter(([key]) => {
+            const [sym, type] = parseModelKey(key);
+            return !q || sym.toLowerCase().includes(q) || type.toLowerCase().includes(q);
+          });
+          // sort
+          const sorted = [...filtered].sort(([ka, ma], [kb, mb]) => {
+            const [sa, ta] = parseModelKey(ka);
+            const [sb, tb] = parseModelKey(kb);
+            let cmp = 0;
+            if (lstmSort.key === "sym")       cmp = sa.localeCompare(sb) || ta.localeCompare(tb);
+            else if (lstmSort.key === "accuracy")  cmp = (ma.accuracy ?? -1) - (mb.accuracy ?? -1);
+            else if (lstmSort.key === "bars_used") cmp = (ma.bars_used ?? 0) - (mb.bars_used ?? 0);
+            else if (lstmSort.key === "status")    cmp = Number(ma.training) - Number(mb.training);
+            return lstmSort.dir === "asc" ? cmp : -cmp;
+          });
+          const toggleLstmSort = (k: LstmSortKey) =>
+            setLstmSort((s) => ({ key: k, dir: s.key === k && s.dir === "asc" ? "desc" : "asc" }));
+          return (
+            <>
+              <div className="mb-2">
+                <input
+                  type="text"
+                  placeholder="Search symbol or mode…"
+                  value={lstmSearch}
+                  onChange={(e) => setLstmSearch(e.target.value)}
+                  className="w-64 px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-600"
+                />
+                <span className="ml-3 text-xs text-gray-600">{sorted.length} / {Object.keys(aiStatus).length} models</span>
+              </div>
+              <div className="overflow-x-auto max-h-96 overflow-y-auto border border-gray-800 rounded-lg">
+                <table className="w-full text-sm border-collapse">
+                  <thead className="sticky top-0 bg-gray-950 z-10">
+                    <tr className="text-left text-gray-500 border-b border-gray-800">
+                      <SortTh label="Symbol / Mode" sortKey="sym"       current={lstmSort} onSort={toggleLstmSort} className="pl-2" />
+                      <SortTh label="Accuracy"      sortKey="accuracy"  current={lstmSort} onSort={toggleLstmSort} />
+                      <SortTh label="Bars Used"     sortKey="bars_used" current={lstmSort} onSort={toggleLstmSort} />
+                      <th className="pb-2 pt-2 pr-4 font-medium">Last Trained</th>
+                      <SortTh label="Status"        sortKey="status"    current={lstmSort} onSort={toggleLstmSort} />
+                      <th className="pb-2 pt-2 font-medium">Action</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+                  <tbody>
+                    {sorted.map(([key, m]) => {
+                      const [sym, type] = parseModelKey(key);
+                      const bKey = `train_${key}`;
+                      return (
+                        <tr key={key} className="border-b border-gray-800/50 hover:bg-gray-900/40">
+                          <td className="py-2 pl-2 pr-4">
+                            <span className="font-semibold text-white">{sym}</span>
+                            <span className="ml-2 text-xs text-gray-500">{type.replace("_", " ")}</span>
+                          </td>
+                          <td className="py-2 pr-4">{m.accuracy != null ? pct(m.accuracy) : "—"}</td>
+                          <td className="py-2 pr-4">{m.bars_used ?? "—"}</td>
+                          <td className="py-2 pr-4 text-gray-400">{relTime(m.trained_at)}</td>
+                          <td className="py-2 pr-4">
+                            <Badge ok={!m.training} label={m.training ? "Training" : "Ready"} />
+                          </td>
+                          <td className="py-2">
+                            <button
+                              disabled={busy[bKey] || m.training}
+                              onClick={() => doAction(bKey, () => trainSymbol(sym, type || "scalping"))}
+                              className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
+                            >
+                              {busy[bKey] ? "…" : "Retrain"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          );
+        })()}
       </section>
 
       {/* ── 2. RL Agents ───────────────────────────────────────────────── */}
@@ -230,7 +302,7 @@ export default function MLPage() {
 
       {/* ── 3. Parameter Optimizer ─────────────────────────────────────── */}
       <section>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <SectionHeader title="Parameter Optimizer" sub="Walk-forward backtest grid search — runs automatically when win-rate drops below 45 % (24 h cooldown)." />
           <button
             disabled={busy["opt_all"]}
@@ -243,55 +315,87 @@ export default function MLPage() {
 
         {(!optStatus.jobs || Object.keys(optStatus.jobs).length === 0) ? (
           <p className="text-sm text-gray-600">No optimization runs recorded yet.</p>
-        ) : (
-          <div className="overflow-x-auto max-h-96 overflow-y-auto border border-gray-800 rounded-lg">
-            <table className="w-full text-sm border-collapse">
-              <thead className="sticky top-0 bg-gray-950 z-10">
-                <tr className="text-left text-gray-500 border-b border-gray-800">
-                  <th className="pb-2 pt-2 pr-4 pl-2 font-medium">Strategy</th>
-                  <th className="pb-2 pt-2 pr-4 font-medium">Symbol</th>
-                  <th className="pb-2 pt-2 pr-4 font-medium">Score</th>
-                  <th className="pb-2 pt-2 pr-4 font-medium">Signals</th>
-                  <th className="pb-2 pt-2 pr-4 font-medium">Bars</th>
-                  <th className="pb-2 pt-2 pr-4 font-medium">Last Run</th>
-                  <th className="pb-2 pt-2 pr-4 font-medium">Best Params</th>
-                  <th className="pb-2 pt-2 font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(optStatus.jobs ?? {}).map(([key, job]) => {
-                  const bKey = `opt_${key}`;
-                  const strategyName = job.strategy ?? key.split("__")[0];
-                  const symbolName = job.symbol ?? key.split("__")[1] ?? key;
-                  return (
-                    <tr key={bKey} className="border-b border-gray-800/50 hover:bg-gray-900/40">
-                      <td className="py-2 pr-4 pl-2 font-medium text-white">{strategyName}</td>
-                      <td className="py-2 pr-4">{symbolName}</td>
-                      <td className="py-2 pr-4">
-                        {job.best_score != null ? job.best_score.toFixed(3) : "—"}
-                      </td>
-                      <td className="py-2 pr-4">{job.n_signals ?? "—"}</td>
-                      <td className="py-2 pr-4 text-gray-500">{job.bars_used ?? "—"}</td>
-                      <td className="py-2 pr-4 text-gray-400">{relTime(job.last_optimized_at)}</td>
-                      <td className="py-2 pr-4 text-gray-400 text-xs max-w-48 truncate">
-                        {job.best_params ? JSON.stringify(job.best_params) : "—"}
-                      </td>
-                      <td className="py-2">
-                        <button
-                          disabled={busy[bKey]}
-                          onClick={() => doAction(bKey, () => runOptimizer(strategyName, symbolName, job.trading_type ?? "day_trading"))}
-                          className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
-                        >
-                          {busy[bKey] ? "…" : "Run"}
-                        </button>
-                      </td>
+        ) : (() => {
+          const q = optSearch.trim().toLowerCase();
+          const allJobs = Object.entries(optStatus.jobs ?? {});
+          const filtered = allJobs.filter(([key, job]) => {
+            const strat = (job.strategy ?? key.split("__")[0]).toLowerCase();
+            const sym   = (job.symbol   ?? key.split("__")[1] ?? key).toLowerCase();
+            return !q || strat.includes(q) || sym.includes(q);
+          });
+          const sorted = [...filtered].sort(([ka, ja], [kb, jb]) => {
+            const sa = job_strat(ka, ja), sb = job_strat(kb, jb);
+            const sya = job_sym(ka, ja),   syb = job_sym(kb, jb);
+            let cmp = 0;
+            if (optSort.key === "strategy") cmp = sa.localeCompare(sb);
+            else if (optSort.key === "symbol")   cmp = sya.localeCompare(syb);
+            else if (optSort.key === "score")    cmp = (ja.best_score ?? -Infinity) - (jb.best_score ?? -Infinity);
+            else if (optSort.key === "signals")  cmp = (ja.n_signals ?? 0) - (jb.n_signals ?? 0);
+            else if (optSort.key === "last_run") cmp = (ja.last_optimized_at ?? "").localeCompare(jb.last_optimized_at ?? "");
+            return optSort.dir === "asc" ? cmp : -cmp;
+          });
+          const toggleOptSort = (k: OptSortKey) =>
+            setOptSort((s) => ({ key: k, dir: s.key === k && s.dir === "asc" ? "desc" : "asc" }));
+          return (
+            <>
+              <div className="mb-2">
+                <input
+                  type="text"
+                  placeholder="Search strategy or symbol…"
+                  value={optSearch}
+                  onChange={(e) => setOptSearch(e.target.value)}
+                  className="w-64 px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-600"
+                />
+                <span className="ml-3 text-xs text-gray-600">{filtered.length} / {allJobs.length} jobs</span>
+              </div>
+              <div className="overflow-x-auto max-h-96 overflow-y-auto border border-gray-800 rounded-lg">
+                <table className="w-full text-sm border-collapse">
+                  <thead className="sticky top-0 bg-gray-950 z-10">
+                    <tr className="text-left text-gray-500 border-b border-gray-800">
+                      <SortTh label="Strategy" sortKey="strategy" current={optSort} onSort={toggleOptSort} className="pl-2" />
+                      <SortTh label="Symbol"   sortKey="symbol"   current={optSort} onSort={toggleOptSort} />
+                      <SortTh label="Score"    sortKey="score"    current={optSort} onSort={toggleOptSort} />
+                      <SortTh label="Signals"  sortKey="signals"  current={optSort} onSort={toggleOptSort} />
+                      <th className="pb-2 pt-2 pr-4 font-medium">Bars</th>
+                      <SortTh label="Last Run" sortKey="last_run" current={optSort} onSort={toggleOptSort} />
+                      <th className="pb-2 pt-2 pr-4 font-medium">Best Params</th>
+                      <th className="pb-2 pt-2 font-medium">Action</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+                  <tbody>
+                    {sorted.map(([key, job]) => {
+                      const bKey = `opt_${key}`;
+                      const strategyName = job_strat(key, job);
+                      const symbolName   = job_sym(key, job);
+                      return (
+                        <tr key={bKey} className="border-b border-gray-800/50 hover:bg-gray-900/40">
+                          <td className="py-2 pr-4 pl-2 font-medium text-white">{strategyName}</td>
+                          <td className="py-2 pr-4">{symbolName}</td>
+                          <td className="py-2 pr-4">{job.best_score != null ? job.best_score.toFixed(3) : "—"}</td>
+                          <td className="py-2 pr-4">{job.n_signals ?? "—"}</td>
+                          <td className="py-2 pr-4 text-gray-500">{job.bars_used ?? "—"}</td>
+                          <td className="py-2 pr-4 text-gray-400">{relTime(job.last_optimized_at)}</td>
+                          <td className="py-2 pr-4 text-gray-400 text-xs max-w-48 truncate">
+                            {job.best_params ? JSON.stringify(job.best_params) : "—"}
+                          </td>
+                          <td className="py-2">
+                            <button
+                              disabled={busy[bKey]}
+                              onClick={() => doAction(bKey, () => runOptimizer(strategyName, symbolName, job.trading_type ?? "day_trading"))}
+                              className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
+                            >
+                              {busy[bKey] ? "…" : "Run"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          );
+        })()}
       </section>
 
       {/* ── 4. Trade Memory ────────────────────────────────────────────── */}

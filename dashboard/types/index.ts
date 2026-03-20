@@ -140,6 +140,7 @@ export interface JournalStats {
   losses: number;
   win_rate: number;
   total_profit: number;
+  by_mode?: Record<string, { wins: number; losses: number }>;
 }
 
 export interface JournalStatsResponse {

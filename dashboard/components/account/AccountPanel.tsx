@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { fetchJournalStats, fetchTradeJournal, fetchPositions } from "@/lib/api";
 import type { JournalStatsResponse, JournalEntry } from "@/types";
 
@@ -16,7 +16,7 @@ function StatCard({
 }: {
   label: string;
   value: string;
-  sub?: string;
+  sub?: ReactNode;
 }) {
   return (
     <div className="bg-gray-800 rounded-xl p-4 flex flex-col gap-1">
@@ -85,7 +85,22 @@ export default function AccountPanel() {
                 </h4>
                 <div className="grid grid-cols-2 gap-3">
                   <StatCard label="Trades"   value={String(s.total)} />
-                  <StatCard label="Win Rate" value={`${s.win_rate}%`} sub={`${s.wins}W / ${s.losses}L`} />
+                  <StatCard
+                    label="Win Rate"
+                    value={`${s.win_rate}%`}
+                    sub={
+                      s.by_mode && Object.keys(s.by_mode).length > 0 ? (
+                        <span className="flex flex-col gap-0.5">
+                          {(["scalping", "day_trading", "swing"] as const).map((tt) => {
+                            const m = s.by_mode?.[tt];
+                            if (!m) return null;
+                            const label = tt === "scalping" ? "scalp" : tt === "day_trading" ? "day" : "swing";
+                            return <span key={tt}>{label} — {m.wins}W/{m.losses}L</span>;
+                          })}
+                        </span>
+                      ) : `${s.wins}W / ${s.losses}L`
+                    }
+                  />
                   <StatCard
                     label="P&L"
                     value={`${s.total_profit >= 0 ? "+" : ""}${s.total_profit.toFixed(2)}`}

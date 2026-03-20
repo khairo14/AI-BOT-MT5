@@ -139,12 +139,19 @@ class TradeJournal:
 
         wins   = [e for e in closed if (e["profit"] or 0) > 0]
         losses = [e for e in closed if (e["profit"] or 0) <= 0]
+        by_mode: dict = {}
+        for tt in ("scalping", "day_trading", "swing"):
+            mc = [e for e in closed if e.get("trading_type") == tt]
+            if mc:
+                mw = sum(1 for e in mc if (e["profit"] or 0) > 0)
+                by_mode[tt] = {"wins": mw, "losses": len(mc) - mw}
         return {
             "total":        len(closed),
             "wins":         len(wins),
             "losses":       len(losses),
             "win_rate":     round(len(wins) / len(closed) * 100, 1),
             "total_profit": round(sum(e["profit"] or 0 for e in closed), 2),
+            "by_mode":      by_mode,
         }
 
 
