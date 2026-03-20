@@ -210,7 +210,7 @@ class RiskManager:
         if self._day_start_balance:
             daily_dd = (self._day_start_balance - current_balance) / self._day_start_balance * 100
             daily_limit = self._config["drawdown"]["daily_limit_pct"]
-            if daily_dd >= daily_limit and not self._daily_halted:
+            if self._cb_enabled and daily_dd >= daily_limit and not self._daily_halted:
                 self._daily_halted = True
                 logger.warning(
                     f"CIRCUIT BREAKER: Daily drawdown {daily_dd:.2f}% >= {daily_limit}%. "
@@ -221,7 +221,7 @@ class RiskManager:
         if self._week_start_balance:
             weekly_dd = (self._week_start_balance - current_balance) / self._week_start_balance * 100
             weekly_limit = self._config["drawdown"]["weekly_limit_pct"]
-            if weekly_dd >= weekly_limit and not self._weekly_halted:
+            if self._cb_enabled and weekly_dd >= weekly_limit and not self._weekly_halted:
                 self._weekly_halted = True
                 logger.warning(
                     f"CIRCUIT BREAKER: Weekly drawdown {weekly_dd:.2f}% >= {weekly_limit}%. "
@@ -232,6 +232,8 @@ class RiskManager:
         """Increment consecutive loss counter for a mode. Pauses mode if limit hit."""
         mode = trading_mode.lower()
         self._consecutive_losses[mode] = self._consecutive_losses.get(mode, 0) + 1
+        if not self._cb_enabled:
+            return
         limit = self._config["drawdown"]["max_consecutive_losses"]
         pause_hours = self._config["drawdown"]["consecutive_loss_pause_hours"]
 
