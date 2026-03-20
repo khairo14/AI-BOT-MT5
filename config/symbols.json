@@ -23,11 +23,11 @@
     { "symbol": "UK100Cash", "enabled": true,  "category": "eu_index" },
     { "symbol": "BTCUSD",    "enabled": true,  "category": "crypto" },
     { "symbol": "ETHUSD",    "enabled": true,  "category": "crypto" },
-    { "symbol": "TSLA.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "NVDA.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "AAPL.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "MSFT.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "AMZN.OQ",   "enabled": true,  "category": "stock" }
+    { "symbol": "Tesla",       "enabled": true,  "category": "stock" },
+    { "symbol": "Nvidia",      "enabled": true,  "category": "stock" },
+    { "symbol": "Apple",       "enabled": true,  "category": "stock" },
+    { "symbol": "Microsoft",   "enabled": true,  "category": "stock" },
+    { "symbol": "Amazon",      "enabled": true,  "category": "stock" }
   ],
   "swing": [
     { "symbol": "EURUSD",    "enabled": true,  "category": "forex" },
@@ -47,11 +47,11 @@
     { "symbol": "ETHUSD",    "enabled": true,  "category": "crypto" },
     { "symbol": "XRPUSD",    "enabled": true,  "category": "crypto" },
     { "symbol": "SOLUSD",    "enabled": true,  "category": "crypto" },
-    { "symbol": "TSLA.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "NVDA.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "GOOGL.OQ",  "enabled": true,  "category": "stock" },
-    { "symbol": "META.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "NFLX.OQ",   "enabled": true,  "category": "stock" },
-    { "symbol": "AMD.OQ",    "enabled": true,  "category": "stock" }
+    { "symbol": "Tesla",       "enabled": true,  "category": "stock" },
+    { "symbol": "Nvidia",      "enabled": true,  "category": "stock" },
+    { "symbol": "Google",      "enabled": true,  "category": "stock" },
+    { "symbol": "Facebook",    "enabled": true,  "category": "stock" },
+    { "symbol": "Netflix",     "enabled": true,  "category": "stock" },
+    { "symbol": "AdvMicroDev", "enabled": true,  "category": "stock" }
   ]
 }
