@@ -158,6 +158,19 @@ export const runOptimizer = (strategy: string, symbol: string, tradingType: stri
 export const runOptimizerAll = (bars = 1500) =>
   api.post("/ai/optimizer/run/all", { bars }).then((r) => r.data);
 
+// ── Risk / Circuit Breaker -------------------------------------------------
+export const fetchRiskStatus = () =>
+  api.get("/risk/status").then((r) => r.data);
+
+export const resetDrawdown = () =>
+  api.post("/risk/reset-drawdown").then((r) => r.data);
+
+export const resetConsecutiveLosses = () =>
+  api.post("/risk/reset-consecutive-losses").then((r) => r.data);
+
+export const toggleCircuitBreaker = (enabled: boolean) =>
+  api.post("/risk/circuit-breaker", { enabled }).then((r) => r.data);
+
 // ── Backtest ----------------------------------------------------------------
 export interface BacktestRequest {
   symbol:          string;

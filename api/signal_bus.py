@@ -239,17 +239,25 @@ class SignalBus:
 
         from engine.order_manager import OrderRequest
 
-        # Concurrent + per-symbol limit check at execution time
+        # Circuit-breaker + concurrent/per-symbol limit check at execution time
         try:
-            from engine.risk_manager import RiskManager
             from engine.mt5_client import MT5Client
-            if isinstance(self._client, MT5Client):
-                open_positions = self._client.get_open_positions()
-                # Import the shared risk manager instance via the runner loop
-                from api.runner_loop import _risk_manager
-                if _risk_manager is not None:
+            from api.runner_loop import _risk_manager
+            if _risk_manager is not None:
+                trading_mode_check = signal.get("trading_mode", "day_trading")
+
+                # ── Circuit breaker check (enabled flag + drawdown halts) ──────
+                cb_allowed, cb_reason = _risk_manager.is_trading_allowed(trading_mode_check)
+                if not cb_allowed:
+                    signal["rejection_reason"] = cb_reason
+                    logger.info(f"SignalBus blocked by circuit breaker: {cb_reason}")
+                    return False
+
+                # ── Concurrent + per-symbol limit check ───────────────────────
+                if isinstance(self._client, MT5Client):
+                    open_positions = self._client.get_open_positions()
                     allowed, reason = _risk_manager.check_concurrent_limit(
-                        signal.get("trading_mode", "day_trading"),
+                        trading_mode_check,
                         open_positions,
                         symbol=signal.get("symbol"),
                     )
@@ -258,7 +266,7 @@ class SignalBus:
                         logger.info(f"SignalBus blocked execution: {reason}")
                         return False
         except Exception as _exc:
-            logger.debug(f"SignalBus: concurrent limit check skipped: {_exc}")
+            logger.debug(f"SignalBus: risk checks skipped: {_exc}")
 
         try:
             trading_mode = signal.get("trading_mode", "day_trading")

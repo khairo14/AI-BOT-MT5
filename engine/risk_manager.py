@@ -52,6 +52,7 @@ class RiskManager:
         # Global circuit breaker
         self._daily_halted = False
         self._weekly_halted = False
+        self._cb_enabled = True   # can be toggled via API
 
     # ------------------------------------------------------------------
     # Position Sizing
@@ -245,8 +246,32 @@ class RiskManager:
         """Reset consecutive loss counter on a win."""
         self._consecutive_losses[trading_mode.lower()] = 0
 
+    def reset_drawdown(self, current_balance: Optional[float] = None) -> None:
+        """Manually clear daily/weekly circuit-breaker halts."""
+        self._daily_halted = False
+        self._weekly_halted = False
+        if current_balance is not None:
+            self._day_start_balance = current_balance
+            self._week_start_balance = current_balance
+        logger.info("Circuit breaker: drawdown halts manually cleared.")
+
+    def reset_consecutive_losses(self) -> None:
+        """Clear all consecutive-loss counters and mode pauses."""
+        for mode in self._consecutive_losses:
+            self._consecutive_losses[mode] = 0
+            self._paused_modes[mode] = None
+        logger.info("Circuit breaker: consecutive-loss counters reset.")
+
+    def set_circuit_breaker_enabled(self, enabled: bool) -> None:
+        """Enable or disable the circuit breaker globally."""
+        self._cb_enabled = enabled
+        logger.info(f"Circuit breaker {'enabled' if enabled else 'DISABLED'} via API.")
+
     def is_trading_allowed(self, trading_mode: str) -> tuple[bool, str]:
         """Returns (allowed, reason). Check before opening any new trade."""
+        if not self._cb_enabled:
+            return True, ""
+
         if self._daily_halted:
             return False, "Daily drawdown circuit breaker active — no new trades today"
 
@@ -329,6 +354,7 @@ class RiskManager:
 
     def get_status(self) -> dict:
         return {
+            "circuit_breaker_enabled": self._cb_enabled,
             "daily_halted":          self._daily_halted,
             "weekly_halted":         self._weekly_halted,
             "day_start_balance":     self._day_start_balance,

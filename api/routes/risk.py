@@ -129,3 +129,89 @@ def sessions_status():
         })
 
     return {"sessions": result, "count": len(result)}
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/reset-drawdown
+# ---------------------------------------------------------------------------
+
+@router.post("/reset-drawdown")
+def reset_drawdown():
+    """
+    Manually clear the daily and weekly drawdown circuit-breaker halts.
+    The drawdown start-balance anchors are reset to the current balance.
+    """
+    from engine.risk_manager import RiskManager
+    try:
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is None:
+            raise AttributeError
+    except (ImportError, AttributeError):
+        rm = RiskManager()
+
+    # Try to get current balance to anchor the new drawdown baseline
+    current_balance: float | None = None
+    try:
+        from api.main import mt5_client
+        if mt5_client is not None:
+            info = mt5_client.get_account_info()
+            if info:
+                current_balance = info.get("balance")
+    except Exception:
+        pass
+
+    rm.reset_drawdown(current_balance)
+    return {"ok": True, "message": "Drawdown halts cleared", "new_balance_anchor": current_balance}
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/reset-consecutive-losses
+# ---------------------------------------------------------------------------
+
+@router.post("/reset-consecutive-losses")
+def reset_consecutive_losses():
+    """Clear all consecutive-loss counters and mode pauses."""
+    from engine.risk_manager import RiskManager
+    try:
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is None:
+            raise AttributeError
+    except (ImportError, AttributeError):
+        rm = RiskManager()
+
+    rm.reset_consecutive_losses()
+    return {"ok": True, "message": "Consecutive-loss counters and mode pauses cleared"}
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/circuit-breaker
+# ---------------------------------------------------------------------------
+
+class CircuitBreakerToggle(dict):
+    pass
+
+@router.post("/circuit-breaker")
+def set_circuit_breaker(body: dict):
+    """
+    Enable or disable the circuit breaker globally.
+
+    Body: { "enabled": true | false }
+    """
+    from engine.risk_manager import RiskManager
+    try:
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is None:
+            raise AttributeError
+    except (ImportError, AttributeError):
+        rm = RiskManager()
+
+    enabled = body.get("enabled")
+    if not isinstance(enabled, bool):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="'enabled' must be a boolean")
+
+    rm.set_circuit_breaker_enabled(enabled)
+    return {"ok": True, "circuit_breaker_enabled": enabled}

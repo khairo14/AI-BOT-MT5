@@ -9,6 +9,10 @@ import {
   patchRiskConfig,
   patchAppConfig,
   switchMode,
+  fetchRiskStatus,
+  resetDrawdown,
+  resetConsecutiveLosses,
+  toggleCircuitBreaker,
 } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import type { TradingMode, ExecutionMode } from "@/types";
@@ -106,13 +110,24 @@ export default function SettingsPage() {
   const [appSaving, setAppSaving] = useState(false);
   const [appSaved, setAppSaved] = useState(false);
 
+  // Circuit breaker live status
+  const [cbStatus, setCbStatus] = useState<{
+    circuit_breaker_enabled: boolean;
+    daily_halted: boolean;
+    weekly_halted: boolean;
+    consecutive_losses: Record<string, number>;
+    paused_modes: Record<string, string | null>;
+  } | null>(null);
+  const [cbBusy, setCbBusy] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [exec, riskData, appData, modeData] = await Promise.all([
+      const [exec, riskData, appData, modeData, cbData] = await Promise.all([
         fetchExecutionMode(),
         fetchRiskConfig(),
         fetchAppConfig(),
         fetchAccountMode(),
+        fetchRiskStatus(),
       ]);
       setExecModes(exec);
       setRisk(riskData as unknown as Record<string, unknown>);
@@ -122,6 +137,7 @@ export default function SettingsPage() {
       const sf = (riskData as unknown as Record<string, unknown>).session_filter as Record<string, unknown> | undefined;
       setNewsFilter((nf?.enabled as boolean) ?? true);
       setSessionFilter((sf?.enabled as boolean) ?? true);
+      setCbStatus(cbData);
     } catch {
       pushNotification({ type: "error", title: "Settings load failed", message: "Could not reach the API." });
     }
@@ -226,6 +242,108 @@ export default function SettingsPage() {
           Runtime configuration — changes take effect immediately without restart.
         </p>
       </div>
+
+      {/* ── Circuit Breaker ──────────────────────────────────────────── */}
+      <Section title="Circuit Breaker">
+        <p className="text-xs text-gray-500">
+          Reset halts manually or disable the circuit breaker entirely for testing.
+          Changes take effect immediately.
+        </p>
+
+        {/* Enable / Disable toggle */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-400">Circuit breaker enabled</span>
+          <button
+            disabled={cbBusy || cbStatus === null}
+            onClick={async () => {
+              setCbBusy(true);
+              try {
+                const next = !(cbStatus?.circuit_breaker_enabled ?? true);
+                await toggleCircuitBreaker(next);
+                setCbStatus((s) => s ? { ...s, circuit_breaker_enabled: next } : s);
+                pushNotification({ type: "success", title: `Circuit breaker ${next ? "enabled" : "disabled"}`, message: "" });
+              } catch {
+                pushNotification({ type: "error", title: "Failed", message: "Could not toggle circuit breaker." });
+              } finally {
+                setCbBusy(false);
+              }
+            }}
+            className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-40 ${
+              (cbStatus?.circuit_breaker_enabled ?? true) ? "bg-blue-600" : "bg-gray-700"
+            }`}
+          >
+            <span
+              className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                (cbStatus?.circuit_breaker_enabled ?? true) ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Status badges */}
+        {cbStatus && (
+          <div className="space-y-2 pt-1">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className={`px-2 py-1 rounded font-semibold ${cbStatus.daily_halted ? "bg-red-900/50 text-red-300" : "bg-gray-800 text-gray-500"}`}>
+                Daily halt: {cbStatus.daily_halted ? "ACTIVE" : "clear"}
+              </span>
+              <span className={`px-2 py-1 rounded font-semibold ${cbStatus.weekly_halted ? "bg-orange-900/50 text-orange-300" : "bg-gray-800 text-gray-500"}`}>
+                Weekly halt: {cbStatus.weekly_halted ? "ACTIVE" : "clear"}
+              </span>
+              {Object.entries(cbStatus.paused_modes).map(([mode, ts]) =>
+                ts ? (
+                  <span key={mode} className="px-2 py-1 rounded font-semibold bg-yellow-900/50 text-yellow-300">
+                    {mode} paused
+                  </span>
+                ) : null
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-gray-500">
+              {Object.entries(cbStatus.consecutive_losses).map(([mode, n]) => (
+                <span key={mode}>{mode}: {n} loss{n !== 1 ? "es" : ""}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex gap-3 pt-1 flex-wrap">
+          <button
+            disabled={cbBusy || cbStatus === null}
+            onClick={async () => {
+              setCbBusy(true);
+              try {
+                await resetDrawdown();
+                const updated = await fetchRiskStatus();
+                setCbStatus(updated);
+                pushNotification({ type: "success", title: "Drawdown reset", message: "Daily & weekly halts cleared." });
+              } catch {
+                pushNotification({ type: "error", title: "Reset failed", message: "" });
+              } finally { setCbBusy(false); }
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-amber-700 hover:bg-amber-600 text-white disabled:opacity-40 transition-colors"
+          >
+            Reset Drawdown Halts
+          </button>
+          <button
+            disabled={cbBusy || cbStatus === null}
+            onClick={async () => {
+              setCbBusy(true);
+              try {
+                await resetConsecutiveLosses();
+                const updated = await fetchRiskStatus();
+                setCbStatus(updated);
+                pushNotification({ type: "success", title: "Consecutive losses reset", message: "All mode pauses cleared." });
+              } catch {
+                pushNotification({ type: "error", title: "Reset failed", message: "" });
+              } finally { setCbBusy(false); }
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 transition-colors"
+          >
+            Reset Consecutive Losses
+          </button>
+        </div>
+      </Section>
 
       {/* ── Execution Modes ──────────────────────────────────────────── */}
       <Section title="Execution Mode">
