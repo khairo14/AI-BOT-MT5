@@ -10,7 +10,7 @@ const ALL_SYMBOLS = [
   "GOLD","SILVER","OILCash","BRENTCash","NGASCash",
   "US30Cash","US100Cash","US500Cash","GER40Cash","UK100Cash",
   "BTCUSD","ETHUSD","XRPUSD","SOLUSD",
-  "TSLA.OQ","NVDA.OQ","AAPL.OQ","MSFT.OQ","AMZN.OQ","GOOGL.OQ","META.OQ","NFLX.OQ","AMD.OQ",
+  "Tesla","Nvidia","Apple","Microsoft","Amazon","Google","Facebook","Netflix","AdvMicroDev",
 ];
 
 export default function AppBootstrap() {

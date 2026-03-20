@@ -97,7 +97,7 @@ Tightest spreads, highest intraday liquidity. Session: London (07–11 UTC) + Ne
 Commodities: GOLD, OilCash
 Indices: US100Cash, US30Cash, US500Cash, GER40Cash, UK100Cash
 Crypto: BTCUSD, ETHUSD
-Stocks: TSLA.OQ, NVDA.OQ, AAPL.OQ, MSFT.OQ, AMZN.OQ`,
+Stocks: Tesla, Nvidia, Apple, Microsoft, Amazon`,
       },
       {
         heading: "Swing Trading Symbols (23)",
@@ -105,7 +105,7 @@ Stocks: TSLA.OQ, NVDA.OQ, AAPL.OQ, MSFT.OQ, AMZN.OQ`,
 Commodities: GOLD, SILVER, OilCash, BRENTCash, NGASCash
 Indices: US100Cash, US500Cash
 Crypto: BTCUSD, ETHUSD, XRPUSD, SOLUSD
-Stocks: TSLA.OQ, NVDA.OQ, GOOGL.OQ, META.OQ, NFLX.OQ, AMD.OQ`,
+Stocks: Tesla, Nvidia, Google, Facebook, Netflix, AdvMicroDev`,
       },
     ],
   },
