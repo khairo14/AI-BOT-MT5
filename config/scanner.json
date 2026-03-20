@@ -17,7 +17,11 @@
       "BTCUSD",
       "EURUSD",
       "GBPUSD",
-      "USDJPY"
+      "USDJPY",
+      "AUDUSD",
+      "GBPJPY",
+      "GOLD",
+      "OILCash"
     ],
     "timeframe": "M15/H1"
   },
@@ -28,7 +32,16 @@
       "GOLD",
       "GBPUSD",
       "USDJPY",
-      "AUDUSD"
+      "AUDUSD",
+      "USDCAD",
+      "NZDUSD",
+      "OILCash",
+      "SILVER",
+      "BRENTCash",
+      "BTCUSD",
+      "ETHUSD",
+      "XRPUSD",
+      "SOLUSD"
     ],
     "timeframe": "H4/D1"
   }

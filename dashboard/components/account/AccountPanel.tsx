@@ -27,11 +27,16 @@ function StatCard({
   );
 }
 
+type SortKey = "ticket" | "open_time" | "close_time" | "symbol" | "direction" | "volume" | "entry" | "pnl" | "trading_type";
+type SortDir = "asc" | "desc";
+
 export default function AccountPanel() {
   const [stats, setStats]         = useState<JournalStatsResponse | null>(null);
   const [entries, setEntries]     = useState<JournalEntry[]>([]);
   const [account, setAccount]     = useState<"paper" | "live" | "all">("all");
   const [loading, setLoading]     = useState(true);
+  const [sortKey, setSortKey]     = useState<SortKey>("open_time");
+  const [sortDir, setSortDir]     = useState<SortDir>("desc");
   // ticket → current unrealized profit for open positions
   const [liveProfit, setLiveProfit] = useState<Record<number, number>>({});
 
@@ -134,35 +139,82 @@ export default function AccountPanel() {
               if (!existing.open_time) existing.open_time = e.open_time;
             }
           }
-          const rows = Array.from(merged.values()).reverse();
           const fmtTime = (iso: string | null | undefined) =>
             iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
+          const getPnl = (e: JournalEntry) =>
+            e.profit ?? (!( e.event === "close") ? (liveProfit[e.ticket] ?? null) : null);
+
+          const rows = Array.from(merged.values()).sort((a, b) => {
+            let av: string | number | null = null;
+            let bv: string | number | null = null;
+            if (sortKey === "ticket")       { av = a.ticket;     bv = b.ticket; }
+            else if (sortKey === "open_time")  { av = a.open_time ?? "";  bv = b.open_time ?? ""; }
+            else if (sortKey === "close_time") { av = a.close_time ?? ""; bv = b.close_time ?? ""; }
+            else if (sortKey === "symbol")     { av = a.symbol;   bv = b.symbol; }
+            else if (sortKey === "direction")  { av = a.direction; bv = b.direction; }
+            else if (sortKey === "volume")     { av = a.volume;   bv = b.volume; }
+            else if (sortKey === "entry")      { av = a.entry;    bv = b.entry; }
+            else if (sortKey === "pnl")        { av = getPnl(a) ?? -Infinity; bv = getPnl(b) ?? -Infinity; }
+            else if (sortKey === "trading_type") { av = a.trading_type ?? ""; bv = b.trading_type ?? ""; }
+            if (av === null) av = "";
+            if (bv === null) bv = "";
+            const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+            return sortDir === "asc" ? cmp : -cmp;
+          });
+
+          const handleSort = (key: SortKey) => {
+            if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+            else { setSortKey(key); setSortDir("desc"); }
+          };
+
+          const SortIcon = ({ col }: { col: SortKey }) => (
+            <span className="ml-1 inline-block text-gray-600">
+              {sortKey === col ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+            </span>
+          );
 
           return (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-gray-500 border-b border-gray-800">
-                  <th className="text-left py-2 pr-4">Ticket</th>
-                  <th className="text-left py-2 pr-4">Entry Time</th>
-                  <th className="text-left py-2 pr-4">Close Time</th>
-                  <th className="text-left py-2 pr-4">Symbol</th>
-                  <th className="text-left py-2 pr-4">Dir</th>
-                  <th className="text-left py-2 pr-4">Lots</th>
-                  <th className="text-left py-2 pr-4">Entry</th>
-                  <th className="text-left py-2 pr-4">SL</th>
-                  <th className="text-left py-2 pr-4">TP</th>
-                  <th className="text-left py-2 pr-4">P&L</th>
-                  <th className="text-left py-2 pr-4">Type</th>
-                  <th className="text-left py-2 pr-4">Account</th>
-                  <th className="text-left py-2">Status</th>
+                <tr className="text-gray-500 border-b border-gray-800 select-none">
+                  {(
+                    [
+                      ["ticket",       "Ticket"],
+                      ["open_time",    "Entry Time"],
+                      ["close_time",   "Close Time"],
+                      ["symbol",       "Symbol"],
+                      ["direction",    "Dir"],
+                      ["volume",       "Lots"],
+                      ["entry",        "Entry"],
+                      [null,           "SL"],
+                      [null,           "TP"],
+                      ["pnl",          "P&L"],
+                      ["trading_type", "Type"],
+                      [null,           "Account"],
+                      [null,           "Status"],
+                    ] as [SortKey | null, string][]
+                  ).map(([col, label]) =>
+                    col ? (
+                      <th
+                        key={label}
+                        className="text-left py-2 pr-4 cursor-pointer hover:text-gray-300 transition-colors whitespace-nowrap"
+                        onClick={() => handleSort(col)}
+                      >
+                        {label}<SortIcon col={col} />
+                      </th>
+                    ) : (
+                      <th key={label} className="text-left py-2 pr-4">{label}</th>
+                    )
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {rows.map((e, i) => {
                   const isClosed = e.event === "close";
                   const live = !isClosed ? liveProfit[e.ticket] : undefined;
-                  const pnl  = e.profit ?? live ?? null;
+                  const pnl  = getPnl(e);
                   const isLive = e.profit == null && live != null;
                   return (
                     <tr key={i} className="text-gray-300 hover:bg-gray-800/50 transition-colors">
