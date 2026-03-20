@@ -110,11 +110,12 @@ export default function TradingModePage({
   }, [mode]);
 
   const SCANNER_TF: Record<string, string> = { scalping: "M1/M5", day_trading: "M15/H1", swing: "H4/D1" };
+  const SCANNER_MAX: Record<string, number> = { scalping: 5, day_trading: 10, swing: 14 };
 
   const toggleScannerSymbol = (sym: string) => {
     setScannerSymbols((prev) => {
       if (prev.includes(sym)) return prev.filter((s) => s !== sym);
-      if (prev.length >= 5) return prev; // max 5 symbols
+      if (prev.length >= (SCANNER_MAX[mode] ?? 5)) return prev;
       return [...prev, sym];
     });
   };
@@ -207,7 +208,7 @@ export default function TradingModePage({
           <div>
             <p className="text-sm font-semibold text-white">Strategy Scanner</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              {SCANNER_TF[mode]}&nbsp;&middot;&nbsp;max 5 symbols
+              {SCANNER_TF[mode]}&nbsp;&middot;&nbsp;max {SCANNER_MAX[mode] ?? 5} symbols
               {scannerSymbols.length > 0
                 ? ` · scanning: ${scannerSymbols.join(", ")}`
                 : " · no symbols selected"}
@@ -239,7 +240,7 @@ export default function TradingModePage({
         <div className="flex flex-wrap gap-2 mb-3">
           {allSymbols.map((sym) => {
             const selected = scannerSymbols.includes(sym);
-            const atMax = !selected && scannerSymbols.length >= 5;
+            const atMax = !selected && scannerSymbols.length >= (SCANNER_MAX[mode] ?? 5);
             return (
               <button
                 key={sym}
