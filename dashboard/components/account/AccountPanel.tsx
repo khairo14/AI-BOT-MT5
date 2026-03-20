@@ -37,6 +37,7 @@ export default function AccountPanel() {
   const [loading, setLoading]     = useState(true);
   const [sortKey, setSortKey]     = useState<SortKey>("open_time");
   const [sortDir, setSortDir]     = useState<SortDir>("desc");
+  const [pageSize, setPageSize]   = useState<number | "all">(20);
   // ticket → current unrealized profit for open positions
   const [liveProfit, setLiveProfit] = useState<Record<number, number>>({});
 
@@ -46,7 +47,7 @@ export default function AccountPanel() {
     const doFetch = (initial = false) => {
       Promise.all([
         fetchJournalStats(),
-        fetchTradeJournal(account, undefined, 20),
+        fetchTradeJournal(account, undefined, pageSize === "all" ? 1000 : pageSize),
         fetchPositions(),
       ])
         .then(([s, j, positions]) => {
@@ -64,7 +65,7 @@ export default function AccountPanel() {
     doFetch(true);
     const id = setInterval(() => doFetch(false), 30_000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [account]);
+  }, [account, pageSize]);
 
   if (loading) {
     return <p className="text-sm text-gray-500">Loading journal…</p>;
@@ -104,21 +105,39 @@ export default function AccountPanel() {
           <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
             Bot Trade Journal
           </h4>
-          {/* Filter tabs */}
-          <div className="flex gap-1 text-xs">
-            {(["all", "paper", "live"] as const).map((a) => (
-              <button
-                key={a}
-                onClick={() => setAccount(a)}
-                className={`px-3 py-1 rounded-full transition-colors ${
-                  account === a
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-800 text-gray-400 hover:text-white"
-                }`}
-              >
-                {a === "all" ? "All" : a === "paper" ? "Paper" : "Live"}
-              </button>
-            ))}
+          <div className="flex items-center gap-3">
+            {/* Filter tabs */}
+            <div className="flex gap-1 text-xs">
+              {(["all", "paper", "live"] as const).map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setAccount(a)}
+                  className={`px-3 py-1 rounded-full transition-colors ${
+                    account === a
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-800 text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {a === "all" ? "All" : a === "paper" ? "Paper" : "Live"}
+                </button>
+              ))}
+            </div>
+            {/* Page-size selector */}
+            <div className="flex gap-1 text-xs">
+              {([10, 20, 50, "all"] as const).map((s) => (
+                <button
+                  key={String(s)}
+                  onClick={() => setPageSize(s)}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    pageSize === s
+                      ? "bg-gray-600 text-white"
+                      : "bg-gray-800 text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {s === "all" ? "All" : s}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
