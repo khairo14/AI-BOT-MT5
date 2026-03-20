@@ -18,6 +18,7 @@ Crypto is always open (00:00–23:59, all days).
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Optional
@@ -57,6 +58,7 @@ class SessionFilter:
 
     def __init__(self):
         self._sym_cat = _load_symbol_categories()
+        self._sym_cat_lock = threading.Lock()
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -120,8 +122,9 @@ class SessionFilter:
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _get_category(self, symbol: str) -> str:
-        if not self._sym_cat:
-            self._sym_cat = _load_symbol_categories()
+        with self._sym_cat_lock:
+            if not self._sym_cat:
+                self._sym_cat = _load_symbol_categories()
         return self._sym_cat.get(symbol.upper(), "forex")
 
     @staticmethod

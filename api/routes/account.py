@@ -82,6 +82,16 @@ def switch_mode(body: SwitchModeRequest, client: MT5Client = Depends(get_client)
     if not success:
         raise HTTPException(status_code=500, detail=f"Failed to connect to {mode} MT5 account")
 
+    # After a successful mode switch, clear any circuit-breakers that were set
+    # in the previous mode (e.g. drawdown losses on paper shouldn't block live)
+    try:
+        from api.main import get_risk_manager
+        _rm = get_risk_manager()
+        if _rm is not None:
+            _rm.reset_for_mode_switch()
+    except Exception:
+        pass
+
     info = client.get_account_info() or {}
     return {
         "status":  "switched",
@@ -109,6 +119,14 @@ def reconnect_mt5():
     success = client.reconnect()
     if not success:
         raise HTTPException(status_code=503, detail="MT5 reconnect failed — check terminal is running.")
+    # Re-wire SignalBus so order execution continues to work after reconnect
+    try:
+        from engine.order_manager import OrderManager
+        from api.signal_bus import bus
+        _om = OrderManager(client)
+        bus.init(client, _om)
+    except Exception as _e:
+        logger.warning(f"SignalBus re-init after reconnect failed: {_e}")
     return {"status": "reconnected", "connected": True}
 
 

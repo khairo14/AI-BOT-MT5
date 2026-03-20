@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 from typing import Literal, Optional
@@ -53,7 +54,18 @@ def save_mode(mode: str) -> None:
     if mode not in _VALID_MODES:
         raise ValueError(f"Invalid trading mode: {mode!r}. Must be 'paper' or 'live'.")
     _STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _STORE_PATH.write_text(json.dumps({"mode": mode}, indent=2))
+    data = json.dumps({"mode": mode}, indent=2)
+    fd, tmp = tempfile.mkstemp(dir=_STORE_PATH.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(tmp, _STORE_PATH)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     os.environ["TRADING_MODE"] = mode
     logger.info(f"Trading mode saved: {mode.upper()}")
 

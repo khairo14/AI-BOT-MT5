@@ -23,7 +23,7 @@ DEFAULT_PARAMS = {
     "rsi_bear_min": 40,
     "rsi_bear_max": 60,
     "atr_period": 14,
-    "sl_atr_mult": 0.5,
+    "sl_atr_mult": 1.5,
     "candle_confirm": True,
 }
 

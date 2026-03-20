@@ -58,10 +58,17 @@ class EABridge:
             return False
         try:
             mt5_ts = int(hb.read_text().strip())
-            # MT5 TimeCurrent() returns broker server time (≈ UTC).
-            # Compare against local UTC time — difference should be minimal.
-            local_ts = int(time.time())
-            age = abs(local_ts - mt5_ts)
+            # MT5 TimeCurrent() returns broker server time (e.g. EET = UTC+2/+3).
+            # Comparing to time.time() (UTC epoch) creates a ~7200 s false offset.
+            # Instead, get broker time from a live tick — same clock source as TimeCurrent().
+            import MetaTrader5 as _mt5
+            broker_now: int = int(time.time())   # fallback
+            for sym in ("EURUSD", "GBPUSD", "USDJPY"):
+                tick = _mt5.symbol_info_tick(sym)
+                if tick is not None:
+                    broker_now = int(tick.time)
+                    break
+            age = abs(broker_now - mt5_ts)
             return age < _HEARTBEAT_MAX_AGE
         except Exception:
             return False

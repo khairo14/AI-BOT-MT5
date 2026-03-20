@@ -15,22 +15,48 @@ Below 0.50 is low (gray).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from loguru import logger
 
 from ai.predictor import PricePredictor, predictor as _predictor_singleton
 
+_CONFIG_PATH = Path(__file__).parent.parent / "config" / "app.json"
+
 
 class SignalScorer:
 
-    W_LSTM   = 0.40
-    W_RR     = 0.25
-    W_TREND  = 0.20
-    W_VOLUME = 0.15
+    # Default weights (sum = 1.0)
+    _DEFAULT_W_LSTM   = 0.40
+    _DEFAULT_W_RR     = 0.25
+    _DEFAULT_W_TREND  = 0.20
+    _DEFAULT_W_VOLUME = 0.15
 
     def __init__(self, pred: PricePredictor):
         self.predictor = pred
+
+    def _weights(self) -> tuple[float, float, float, float]:
+        """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) from app.json or defaults."""
+        try:
+            cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            w = cfg.get("ai", {}).get("scorer_weights", {})
+            if w:
+                wl = float(w.get("lstm",   self._DEFAULT_W_LSTM))
+                wr = float(w.get("rr",     self._DEFAULT_W_RR))
+                wt = float(w.get("trend",  self._DEFAULT_W_TREND))
+                wv = float(w.get("volume", self._DEFAULT_W_VOLUME))
+                total = wl + wr + wt + wv
+                if total > 0:
+                    return wl / total, wr / total, wt / total, wv / total
+        except Exception:
+            pass
+        return (
+            self._DEFAULT_W_LSTM, self._DEFAULT_W_RR,
+            self._DEFAULT_W_TREND, self._DEFAULT_W_VOLUME
+        )
 
     def score(
         self,
@@ -52,11 +78,12 @@ class SignalScorer:
             trend  = self._trend_score(direction, df)
             volume = self._volume_score(df)
 
+            W_LSTM, W_RR, W_TREND, W_VOLUME = self._weights()
             score = (
-                self.W_LSTM   * lstm   +
-                self.W_RR     * rr     +
-                self.W_TREND  * trend  +
-                self.W_VOLUME * volume
+                W_LSTM   * lstm   +
+                W_RR     * rr     +
+                W_TREND  * trend  +
+                W_VOLUME * volume
             )
             return round(float(np.clip(score, 0.0, 1.0)), 4)
 

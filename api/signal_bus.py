@@ -103,9 +103,10 @@ class SignalBus:
                         logger.info(f"Signal expired: #{sid[:8]} {sig.get('symbol')} {sig.get('strategy')}")
                         # Broadcast expiry to dashboard
                         try:
-                            asyncio.get_event_loop().create_task(
-                                self._broadcast_expired(dict(sig))
-                            )
+                            if _event_loop and not _event_loop.is_closed():
+                                asyncio.run_coroutine_threadsafe(
+                                    self._broadcast_expired(dict(sig)), _event_loop
+                                )
                         except Exception:
                             pass
                 except Exception:
@@ -210,7 +211,10 @@ class SignalBus:
         signal = self.queue.get(signal_id)
         if signal is None:
             raise KeyError(signal_id)
-        signal["status"] = "executing"
+        # Status may already be "executing" if set by approve_signal under lock —
+        # only update if it is still "pending" (direct call path).
+        if signal.get("status") != "executing":
+            signal["status"] = "executing"
         asyncio.create_task(self._execute_async(signal))
         return signal
 
@@ -455,9 +459,9 @@ async def recover_unclosed_trades(client) -> None:
     logger.info(f"Recovery: found {len(unclosed)} unclosed journal ticket(s): "
                 f"{[e['ticket'] for e in unclosed]}")
 
-    # Check which are still live in MT5
-    live_positions = await asyncio.to_thread(mt5.positions_get)
-    live_tickets = {p.ticket for p in (live_positions or [])}
+    # Check which are still live in MT5 (use client method to respect MT5Client._lock)
+    live_raw = await asyncio.to_thread(client.get_open_positions)
+    live_tickets = {p["ticket"] for p in (live_raw or [])}
 
     # Detect server-clock UTC offset once (e.g. EET = +7200 s)
     server_offset = await asyncio.to_thread(_get_server_utc_offset_secs)
@@ -469,7 +473,8 @@ async def recover_unclosed_trades(client) -> None:
             continue  # still open — _poll_outcome will handle it (re-launched below)
 
         # Position is gone — look it up in deal history by position ID
-        deals = await asyncio.to_thread(mt5.history_deals_get, position=ticket)
+        # Use client method to respect MT5Client._lock
+        deals = await asyncio.to_thread(client.get_deals_by_position, ticket)
         if not deals:
             deals = []
 
@@ -611,18 +616,26 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             deal       = closed[-1]
             # Use Python clock for close_time — avoids broker server-clock offset issues.
             # deal.time can be in local server time (e.g. EET = UTC+2) on some brokers.
-            close_time = datetime.now(tz=timezone.utc).isoformat()
             profit     = deal.profit
             close_px   = deal.price
             entry_px   = float(signal.get("fill_price") or signal.get("entry_price", 0))
-            pip_val    = 0.0001 if "JPY" not in signal["symbol"] else 0.01
+            sym        = signal["symbol"]
+            pip_val    = 0.0001 if "JPY" not in sym else 0.01
+            # Use a symbol-aware pip tolerance: 3 pips for forex, 300 points for BTC/XAUUSD
+            _sym_upper = sym.upper()
+            if any(x in _sym_upper for x in ("BTC", "XAU", "GOLD", "US30", "US100", "DAX", "UK100")):
+                tol = abs(close_px) * 0.001   # 0.1% of price
+            else:
+                tol = pip_val * 3   # 3-pip tolerance for forex
             direction  = signal["direction"].upper()
             pips       = ((close_px - entry_px) if direction == "BUY" else (entry_px - close_px)) / pip_val
+            # Use deal.time corrected for broker server-clock offset to store true UTC
+            _srv_offset = await asyncio.to_thread(_get_server_utc_offset_secs, sym)
+            close_time = datetime.fromtimestamp(deal.time - _srv_offset, tz=timezone.utc).isoformat()
 
             # Determine outcome type
             sl = float(signal.get("sl", 0))
             tp = float(signal.get("tp") or 0)
-            tol = pip_val * 3   # 3-pip tolerance
             if tp and abs(close_px - tp) <= tol:
                 outcome_type = "tp_hit"
             elif sl and abs(close_px - sl) <= tol:
@@ -675,8 +688,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     event="close",
                     close_time=close_time,
                 )
-            except Exception:
-                pass
+            except Exception as _je:
+                logger.warning(f"Journal write failed for #{ticket}: {_je}")
 
             trading_type = signal.get("trading_mode", "day_trading")
             stats = memory.stats(trading_type=trading_type, live_only=True)
@@ -699,19 +712,35 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             except Exception:
                 pass
 
+            # Normalise reward: convert raw USD profit → % of account balance so
+            # the RL reward is scale-invariant across account sizes and lot sizes.
+            _profit_pct = profit
+            try:
+                from api.main import get_mt5_client as _gc
+                _c = _gc()
+                if _c and _c.is_connected():
+                    _acct = await asyncio.to_thread(_c.get_account_info)
+                    if _acct and _acct.get("balance", 0) > 0:
+                        _profit_pct = profit / _acct["balance"] * 100.0
+            except Exception:
+                pass
+
             rl_manager.on_trade_closed(
                 trading_type=trading_type,
-                profit_pct=profit,
+                profit_pct=_profit_pct,
                 win_rate=stats.get("win_rate", 0.5),
                 avg_conf=stats.get("avg_conf", 0.5),
             )
             logger.info(
                 f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "
-                f"profit={profit:+.2f} pips={pips:+.1f}"
+                f"profit={profit:+.2f} ({_profit_pct:+.4f}%) pips={pips:+.1f}"
             )
 
             # ── Auto LSTM retrain ─────────────────────────────────────────────
-            # Trigger background retrain once we have enough trades (every 20th)
+            # Trigger background retrain once we have enough trades (every 20th).
+            # Guard against burst: track which keys were already triggered this poll
+            # by checking whether a training job was just launched in this process
+            # session for this key (predictor.is_training() covers that window).
             try:
                 from ai.predictor import predictor, TRADING_TYPE_TF
                 from ai.trade_memory import memory as _mem
@@ -722,11 +751,12 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     o for o in _mem.recent(n=500, live_only=True)
                     if o.get("symbol") == _sym and o.get("trading_type") == _type
                 ])
-                _meta  = predictor.status().get(_key, {})
-                _last  = _meta.get("trained_at", "")
+                # Only fire once per 20-trade window: after hitting 20, 40, 60, …
+                # Avoid duplicate by checking predictor is not already training.
+                _prev_total = _total - 1   # this trade just closed
                 _retrain = (
                     not predictor.is_training(_sym, _type) and
-                    _total > 0 and _total % 20 == 0
+                    _total > 0 and _total % 20 == 0 and _prev_total % 20 != 0
                 )
                 if _retrain:
                     _tf_str = TRADING_TYPE_TF.get(_type, "H1")

@@ -120,8 +120,16 @@ class EMAScalp(BaseStrategy):
         return self._no_signal(indicators)
 
     def _pip_size(self) -> float:
-        """Return pip size based on symbol suffix."""
+        """Return pip size based on symbol — accounts for metals, crypto and indices."""
+        sym = self.symbol.upper()
         jpy_pairs = ("JPY", "HUF", "SEK", "NOK", "DKK")
-        if any(self.symbol.upper().endswith(s) for s in jpy_pairs):
+        if any(sym.endswith(s) for s in jpy_pairs):
             return 0.01
+        # Non-forex instruments have large nominal prices → use 0.1% of close price
+        non_forex = ("BTC", "ETH", "XAU", "GOLD", "SILVER", "XAG",
+                     "US30", "US100", "DE40", "UK100", "SPX", "NAS")
+        if any(sym.startswith(p) or sym.endswith(p) for p in non_forex):
+            # Not used for SL placement (strategies use ATR), but pip_size is kept
+            # consistent at 1.0 so old callers get a safe non-zero value.
+            return 1.0
         return 0.0001

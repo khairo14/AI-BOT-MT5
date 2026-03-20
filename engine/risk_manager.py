@@ -264,6 +264,20 @@ class RiskManager:
             self._paused_modes[mode] = None
         logger.info("Circuit breaker: consecutive-loss counters reset.")
 
+    def reset_for_mode_switch(self) -> None:
+        """Reset all state when switching between paper and live modes.
+        Prevents losses accumulated in one mode from blocking the other."""
+        self._daily_halted = False
+        self._weekly_halted = False
+        self._day_start_balance = None
+        self._week_start_balance = None
+        self._tracking_date = None
+        self._tracking_week = None
+        for mode in self._consecutive_losses:
+            self._consecutive_losses[mode] = 0
+            self._paused_modes[mode] = None
+        logger.info("RiskManager: all state reset for mode switch.")
+
     def set_circuit_breaker_enabled(self, enabled: bool) -> None:
         """Enable or disable the circuit breaker globally."""
         self._cb_enabled = enabled

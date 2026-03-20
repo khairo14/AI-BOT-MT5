@@ -55,7 +55,7 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
     "ema_scalp":       {"M1": 100, "M5": 100},
     "bb_squeeze":      {"M5": 100},
     "vwap_reversion":  {"M5": 200},
-    "macd_ema_trend":  {"H1": 200, "M15": 200},
+    "macd_ema_trend":  {"H1": 220, "M15": 200},
     "sr_breakout":     {"H1": 150},
     "rsi_divergence":  {"M30": 100, "H1": 100},
     "ema_trend_rider": {"H1": 250, "H4": 100, "D1": 60},
@@ -264,7 +264,22 @@ class StrategyRunner:
         # Phase 6: score signal confidence (safe — degrades to 0.5 if AI not ready)
         try:
             from ai.signal_scorer import scorer
-            primary_df = next(iter(tf_data.values()))
+            # Use the strategy's own primary TF for the scorer so EMA50/200 and
+            # LSTM signal are computed on the correct timeframe, not whichever TF
+            # happens to be first in the dict.
+            _PRIMARY_TF = {
+                "ema_scalp":       "M1",
+                "macd_ema_trend":  "M15",
+                "rsi_divergence":  "M30",
+                "ema_trend_rider": "H1",
+                "bb_squeeze":      "M5",
+                "vwap_reversion":  "M5",
+                "sr_breakout":     "H1",
+                "fibonacci_rsi":   "H4",
+                "weekly_breakout": "H4",
+            }
+            _ptf = _PRIMARY_TF.get(strat_name)
+            primary_df = tf_data.get(_ptf, next(iter(tf_data.values()))) if _ptf else next(iter(tf_data.values()))
             strat_sig.confidence = scorer.score(
                 symbol=symbol,
                 direction=sig.direction,
@@ -348,6 +363,25 @@ class StrategyRunner:
                 f"Order placed: {sig.strategy}/{sig.symbol} {sig.direction} "
                 f"lot={sig.lot_size} sl={sig.sl_price} tp={sig.tp_price} ticket={result.ticket}"
             )
+            try:
+                from engine.trade_journal import trade_journal
+                from engine.account_store import current_mode
+                trade_journal.log(
+                    ticket=result.ticket or 0,
+                    symbol=sig.symbol,
+                    direction=sig.direction,
+                    volume=sig.lot_size,
+                    entry=result.open_price or sig.entry_price,
+                    sl=sig.sl_price,
+                    tp=sig.tp_price,
+                    profit=None,
+                    trading_type=sig.trading_type,
+                    account_mode=current_mode(),
+                    comment=sig.comment,
+                    event="open",
+                )
+            except Exception as _je:
+                logger.warning(f"Journal write failed for {sig.strategy}/{sig.symbol}: {_je}")
             return True
         else:
             logger.warning(f"Order failed: {sig.strategy}/{sig.symbol} {sig.direction}")

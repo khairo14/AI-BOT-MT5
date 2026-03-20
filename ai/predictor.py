@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pickle
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +43,7 @@ HIDDEN_SIZE  = 64
 NUM_LAYERS   = 2
 EPOCHS       = 20
 BATCH_SIZE   = 32
+INPUT_SIZE   = 6    # OHLCV (5) × + is_near_news binary flag
 
 
 def _torch_available() -> bool:
@@ -61,7 +62,7 @@ def _build_lstm():
         def __init__(self):
             super().__init__()
             self.lstm = nn.LSTM(
-                input_size=5,
+                input_size=INPUT_SIZE,
                 hidden_size=HIDDEN_SIZE,
                 num_layers=NUM_LAYERS,
                 batch_first=True,
@@ -101,7 +102,7 @@ class PricePredictor:
 
         import torch
 
-        features = _make_features(df)
+        features = _make_features(df, symbol=symbol, trading_type=trading_type)
         if features is None or len(features) < SEQUENCE_LEN:
             return 0.5
 
@@ -171,7 +172,7 @@ class PricePredictor:
         key = _model_key(symbol, trading_type)
         tf  = TRADING_TYPE_TF.get(trading_type, "H1")
 
-        features = _make_features(df)
+        features = _make_features(df, symbol=symbol, trading_type=trading_type)
         if features is None or len(features) < SEQUENCE_LEN + 10:
             logger.warning(f"Insufficient data for {symbol} training ({len(df)} bars)")
             return
@@ -208,6 +209,7 @@ class PricePredictor:
                 yb = y_train[i: i + BATCH_SIZE]
                 optimizer.zero_grad()
                 criterion(model(xb), yb).backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
         # Validation accuracy
@@ -225,7 +227,7 @@ class PricePredictor:
             self._models[key]   = model
             self._scalers[key]  = scaler
             self._metadata[key] = {
-                "trained_at":   datetime.utcnow().isoformat() + "Z",
+                "trained_at":   datetime.now(timezone.utc).isoformat() + "Z",
                 "accuracy":     round(accuracy, 4),
                 "bars_used":    len(df),
                 "trading_type": trading_type,
@@ -274,14 +276,15 @@ class PricePredictor:
                 logger.warning(f"Could not load model {key}: {exc}")
 
 
-def _make_features(df: pd.DataFrame) -> Optional[np.ndarray]:
+def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_trading") -> Optional[np.ndarray]:
     """
-    Return (N, 5) feature array:
+    Return (N, 6) feature array:
       col 0 — close return (close[i] - close[i-1]) / close[i-1]
       col 1 — bar range (high - low) / close
       col 2 — open-close body (close - open) / open
       col 3 — volume normalised by mean
       col 4 — upper wick (high - close) / close
+      col 5 — is_near_news binary flag (1.0 within 30 min of high-impact event, else 0.0)
     """
     needed = {"open", "high", "low", "close"}
     vol_col = "volume" if "volume" in df.columns else "tick_volume"
@@ -301,7 +304,15 @@ def _make_features(df: pd.DataFrame) -> Optional[np.ndarray]:
     vol_n   = vol / (vol.mean() + eps)
     wick    = (high - close) / (close + eps)
 
-    return np.column_stack([ret_c, ret_hl, ret_oc, vol_n, wick])
+    # is_near_news: 1.0 if the symbol is currently in a news blackout window
+    try:
+        from engine.news_filter import news_filter
+        near_news, _ = news_filter.is_blocked(symbol, trading_type)
+        news_flag = np.full(len(close), 1.0 if near_news else 0.0)
+    except Exception:
+        news_flag = np.zeros(len(close))
+
+    return np.column_stack([ret_c, ret_hl, ret_oc, vol_n, wick, news_flag])
 
 
 def _model_key(symbol: str, trading_type: str) -> str:

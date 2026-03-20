@@ -175,6 +175,29 @@ def place_order(
     except Exception:
         pass
 
+    # Schedule outcome polling so ML/RL modules learn from manual trades
+    if result.ticket:
+        try:
+            import asyncio
+            from api.signal_bus import _poll_outcome, bus
+            _fake_signal = {
+                "symbol":       body.symbol,
+                "direction":    body.direction,
+                "trading_mode": body.trading_mode,
+                "strategy":     body.comment,
+                "fill_price":   result.open_price or entry,
+                "entry_price":  result.open_price or entry,
+                "sl":           body.sl,
+                "tp":           body.tp,
+                "lot_size":     lot,
+                "confidence":   0.5,
+            }
+            asyncio.get_running_loop().create_task(
+                _poll_outcome(ticket=result.ticket, signal=_fake_signal, client=client)
+            )
+        except Exception:
+            pass
+
     return {
         "ticket":     result.ticket,
         "open_price": result.open_price,

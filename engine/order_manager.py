@@ -220,7 +220,7 @@ class OrderManager:
             "magic":        pos.magic,
             "comment":      reason[:31],
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_RETURN,
+            "type_filling": self._filling_for(pos.symbol),
         }
 
         result = mt5.order_send(request)
@@ -234,6 +234,22 @@ class OrderManager:
             f"Reason: {reason} | Close price: {price}"
         )
         return True
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _filling_for(self, symbol: str) -> int:
+        """Return the broker-supported filling mode for a symbol (same logic as place_market_order)."""
+        sym_info = mt5.symbol_info(symbol)
+        if sym_info is None:
+            return mt5.ORDER_FILLING_RETURN
+        fm = sym_info.filling_mode
+        if fm & 1:
+            return mt5.ORDER_FILLING_FOK
+        if fm & 2:
+            return mt5.ORDER_FILLING_IOC
+        return mt5.ORDER_FILLING_RETURN
 
     def close_all_positions(self, symbol: Optional[str] = None) -> int:
         """Close all open positions. Optionally filter by symbol. Returns count closed."""
@@ -295,7 +311,7 @@ class OrderManager:
             "magic":        pos.magic,
             "comment":      reason[:31],
             "type_time":    mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_RETURN,
+            "type_filling": self._filling_for(pos.symbol),
         }
 
         result = mt5.order_send(request)

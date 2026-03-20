@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import random
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -72,8 +73,19 @@ def _conf_bucket(avg_conf: float) -> str:
     return "high"
 
 
+def _session_bucket() -> str:
+    """Return which Forex session the current UTC hour falls in."""
+    h = datetime.now(tz=timezone.utc).hour
+    if 12 <= h <= 17:
+        return "overlap"   # London/NY overlap (highest volume)
+    if 7 <= h < 22:
+        return "active"    # London or New York open
+    return "quiet"         # Asian / off-hours
+
+
 def _state(win_rate: float, avg_conf: float) -> str:
-    return f"{_wr_bucket(win_rate)}_{_conf_bucket(avg_conf)}"
+    """27-state space: win_rate_bucket x conf_bucket x session_bucket."""
+    return f"{_wr_bucket(win_rate)}_{_conf_bucket(avg_conf)}_{_session_bucket()}"
 
 
 # Joint actions: (conf_delta, risk_delta)
@@ -96,8 +108,9 @@ class RLAgent:
     and risk factor based on recent trade outcomes.
     """
 
-    def __init__(self, trading_type: str):
+    def __init__(self, trading_type: str, mode: str = "live"):
         self.trading_type = trading_type
+        self._mode        = mode   # "live" or "paper"
         self._lock        = threading.Lock()
 
         self._q: dict[str, list[float]] = {}   # state → Q-values for each action
@@ -150,6 +163,7 @@ class RLAgent:
     def status(self) -> dict:
         return {
             "trading_type":        self.trading_type,
+            "mode":                self._mode,
             "confidence_threshold": round(self._conf_thresh, 4),
             "risk_factor":          round(self._risk_factor, 4),
             "q_states":             len(self._q),
@@ -176,7 +190,7 @@ class RLAgent:
         )
 
     def _save(self) -> None:
-        path = DATA_DIR / f"rl_qtable_{self.trading_type}.json"
+        path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
         payload = {
             "q":            self._q,
             "conf_thresh":  self._conf_thresh,
@@ -188,7 +202,16 @@ class RLAgent:
             json.dump(payload, f)
 
     def _load(self) -> None:
-        path = DATA_DIR / f"rl_qtable_{self.trading_type}.json"
+        path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
+        # Migrate old filename (no mode suffix) to new name on first run
+        if not path.exists():
+            legacy = DATA_DIR / f"rl_qtable_{self.trading_type}.json"
+            if legacy.exists():
+                try:
+                    legacy.rename(path)
+                    logger.info(f"RL: migrated {legacy.name} -> {path.name}")
+                except Exception:
+                    pass
         if not path.exists():
             return
         try:
@@ -200,23 +223,30 @@ class RLAgent:
             self._last_state  = data.get("last_state")
             self._last_action = data.get("last_action")
             logger.info(
-                f"RL agent loaded [{self.trading_type}]: "
+                f"RL agent loaded [{self.trading_type}/{self._mode}]: "
                 f"conf_thresh={self._conf_thresh:.2f} "
                 f"risk_factor={self._risk_factor:.2f}"
             )
         except Exception as exc:
-            logger.warning(f"RL agent could not load [{self.trading_type}]: {exc}")
+            logger.warning(f"RL agent could not load [{self.trading_type}/{self._mode}]: {exc}")
 
 
 class RLAgentManager:
     """
-    Holds one RLAgent per trading type and provides trade-outcome-driven
-    learning across all three modes from a single API.
+    Holds one RLAgent per trading type. Each account mode (live/paper)
+    gets its own Q-tables so they learn independently.
     """
 
     def __init__(self):
+        # Read current account mode at startup so the right Q-tables are loaded
+        try:
+            from engine.account_store import current_mode as _cm
+            _mode = _cm()
+        except Exception:
+            _mode = "live"
+        self._mode = _mode
         self._agents = {
-            tt: RLAgent(tt)
+            tt: RLAgent(tt, mode=_mode)
             for tt in ("scalping", "day_trading", "swing")
         }
 

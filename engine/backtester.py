@@ -122,11 +122,11 @@ def _sim_trade(
         high = float(df.iloc[j]["high"])
         low  = float(df.iloc[j]["low"])
         if direction == "BUY":
+            if high >= tp: return "tp_hit", tp, j   # check TP first (benefit-of-doubt on gap open)
             if low  <= sl: return "sl_hit", sl, j
-            if high >= tp: return "tp_hit", tp, j
         else:
+            if low  <= tp: return "tp_hit", tp, j   # check TP first for SELL
             if high >= sl: return "sl_hit", sl, j
-            if low  <= tp: return "tp_hit", tp, j
 
     # Max hold reached — exit at close of last bar
     exit_price = float(df.iloc[end - 1]["close"])
@@ -192,7 +192,7 @@ def run_backtest(
         if _extra_dfs and _has_time:
             bar_time = df.iloc[i]["time"]
             sliced_extra = {
-                k: v[v["time"] <= bar_time] if "time" in v.columns else v
+                k: v[v["time"] < bar_time] if "time" in v.columns else v
                 for k, v in _extra_dfs.items()
             }
         else:
@@ -301,10 +301,16 @@ def run_backtest(
         if dd > max_dd:
             max_dd = dd
 
-    # Annualised Sharpe
+    # Annualised Sharpe — factor per timeframe so H4/D1 strategies aren't unfairly penalised
+    _ANN_FACTOR: dict[str, float] = {
+        "M1": 252 * 1440, "M5": 252 * 288, "M15": 252 * 96,
+        "M30": 252 * 48, "H1": 252 * 24, "H4": 252 * 6,
+        "D1": 252, "W1": 52,
+    }
+    _ann = _ANN_FACTOR.get(tf_label, 252)
     arr    = np.array(pnls)
     sharpe = float(
-        (arr.mean() / (arr.std() + 1e-9)) * np.sqrt(252)
+        (arr.mean() / (arr.std() + 1e-9)) * np.sqrt(_ann)
         if n > 1 else 0.0
     )
 

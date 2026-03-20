@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -47,6 +47,7 @@ class TradeOutcome:
     open_time:       str          # ISO datetime
     close_time:      str          # ISO datetime
     duration_mins:   float
+    mode:            str  = "live"   # "live" or "paper" — used to separate RL/stats per mode
     extra:           dict = field(default_factory=dict)
 
 
@@ -68,7 +69,7 @@ class TradeMemory:
     def record(self, outcome: TradeOutcome) -> None:
         """Append a closed trade outcome to memory."""
         entry = asdict(outcome)
-        entry["recorded_at"] = datetime.utcnow().isoformat()
+        entry["recorded_at"] = datetime.now(timezone.utc).isoformat() + "Z"
         with self._lock:
             self._buffer.append(entry)
             if len(self._buffer) > self.MAX_BUFFER:
@@ -76,20 +77,22 @@ class TradeMemory:
             with open(MEMORY_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
 
-    def recent(self, n: int = 200, trading_type: Optional[str] = None, live_only: bool = False) -> list[dict]:
-        """Return the last N outcomes, optionally filtered by trading_type.
+    def recent(self, n: int = 200, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None) -> list[dict]:
+        """Return the last N outcomes, optionally filtered by trading_type and/or mode.
         live_only=True excludes backtest entries so RL/optimizer aren't skewed by re-runs."""
         with self._lock:
             data = list(self._buffer)
         if trading_type:
             data = [d for d in data if d.get("trading_type") == trading_type]
+        if mode:
+            data = [d for d in data if d.get("mode", "live") == mode]
         if live_only:
             data = [d for d in data if d.get("extra", {}).get("source") != "backtest"]
         return data[-n:]
 
-    def stats(self, trading_type: Optional[str] = None, live_only: bool = False) -> dict:
+    def stats(self, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None) -> dict:
         """Aggregate stats used by the RL agent and dashboard."""
-        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only)
+        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, mode=mode)
         if not outcomes:
             return {"total": 0}
         total   = len(outcomes)

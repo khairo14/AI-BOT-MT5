@@ -23,7 +23,10 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:  # Python < 3.9
+    from backports.zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # type: ignore
 
 from loguru import logger
 
@@ -61,10 +64,13 @@ class NewsFilter:
     """Polls Forex Factory, caches events, checks symbol impact windows."""
 
     def __init__(self):
-        self._events:     list[dict] = []
-        self._fetched_at: Optional[datetime] = None
-        self._lock        = threading.Lock()
-        self._cfg         = self._load_cfg()
+        self._events:              list[dict]         = []
+        self._fetched_at:          Optional[datetime] = None
+        self._lock                 = threading.Lock()
+        self._refresh_in_progress: bool               = False
+        self._cfg_cache:           Optional[dict]     = None
+        self._cfg_loaded_at:       Optional[datetime] = None
+        self._cfg = self._load_cfg()
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -143,7 +149,7 @@ class NewsFilter:
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _refresh(self) -> None:
-        """Re-fetch from Forex Factory if cache is stale."""
+        """Re-fetch from Forex Factory if cache is stale. Thread-safe, no duplicate fetches."""
         cfg       = self._reload_cfg()
         cache_min = cfg.get("cache_minutes", 60)
         now       = datetime.now(tz=UTC)
@@ -153,6 +159,9 @@ class NewsFilter:
                 and (now - self._fetched_at).total_seconds() < cache_min * 60
             ):
                 return   # cache still fresh
+            if self._refresh_in_progress:
+                return   # another thread is already fetching
+            self._refresh_in_progress = True
 
         threading.Thread(target=self._fetch, daemon=True).start()
 
@@ -173,6 +182,9 @@ class NewsFilter:
             logger.info(f"NewsFilter: fetched {len(events)} events from Forex Factory")
         except Exception as exc:
             logger.warning(f"NewsFilter fetch failed: {exc} — using cached data")
+        finally:
+            with self._lock:
+                self._refresh_in_progress = False
 
     @staticmethod
     def _parse_time(date_str: str, time_str: str) -> Optional[datetime]:
@@ -181,9 +193,15 @@ class NewsFilter:
             # FF format examples: date="03-17-2026", time="8:30am"
             dt_str = f"{date_str} {time_str}"
             dt = datetime.strptime(dt_str, "%m-%d-%Y %I:%M%p")
-            # FF times are US/Eastern — convert to UTC (+5h standard, +4h DST)
-            # Use a fixed offset approximation (EST = UTC-5)
-            return dt.replace(tzinfo=ZoneInfo("America/New_York")).astimezone(UTC)
+            # FF times are US/Eastern — convert to UTC
+            try:
+                tz: datetime.tzinfo = ZoneInfo("America/New_York")
+            except (KeyError, ZoneInfoNotFoundError):
+                # tzdata package not installed (common on Windows without tzdata)
+                # Fall back to UTC-5 (EST, close enough for news blackout purposes)
+                from datetime import timedelta
+                tz = timezone(timedelta(hours=-5))
+            return dt.replace(tzinfo=tz).astimezone(UTC)
         except Exception:
             return None
 
@@ -203,9 +221,17 @@ class NewsFilter:
             return {}
 
     def _reload_cfg(self) -> dict:
-        """Re-read config each call so live dashboard changes take effect."""
-        self._cfg = self._load_cfg()
-        return self._cfg
+        """Return config, re-reading from disk at most every 60 seconds."""
+        now = datetime.now(tz=UTC)
+        if (
+            self._cfg_cache is not None
+            and self._cfg_loaded_at is not None
+            and (now - self._cfg_loaded_at).total_seconds() < 60
+        ):
+            return self._cfg_cache
+        self._cfg_cache = self._load_cfg()
+        self._cfg_loaded_at = now
+        return self._cfg_cache
 
 
 # Application-level singleton

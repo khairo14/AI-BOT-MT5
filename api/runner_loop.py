@@ -104,13 +104,20 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                 # Re-read scanner.json every tick so dashboard changes apply immediately
                 _sym_override = None
                 try:
-                    _scan = json.loads((CONFIG_DIR / "scanner.json").read_text(encoding="utf-8-sig")).get(mode, {})
+                    _scan_raw = json.loads((CONFIG_DIR / "scanner.json").read_text(encoding="utf-8-sig"))
+                    if not isinstance(_scan_raw, dict):
+                        raise ValueError("scanner.json root must be a JSON object")
+                    _scan = _scan_raw.get(mode, {})
+                    if not isinstance(_scan, dict):
+                        raise ValueError(f"scanner.json[{mode!r}] must be an object")
                     if not _scan.get("enabled", False):
                         logger.debug(f"Scanner [{mode}] is paused — skipping")
                         continue  # scanner disabled for this mode
                     _sym_override = [s for s in _scan.get("symbols", []) if s] or None
                 except FileNotFoundError:
                     pass  # scanner.json missing — scan all enabled symbols
+                except (json.JSONDecodeError, ValueError) as _err:
+                    logger.warning(f"scanner.json corrupt/invalid [{mode}]: {_err} — scanning all symbols")
                 except Exception as _err:
                     logger.debug(f"Scanner config read error [{mode}]: {_err}")
                 asyncio.create_task(_run_one_mode(runner, bus, mode, _sym_override))

@@ -8,7 +8,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -16,6 +16,7 @@ from api.routes import account, trades, signals, config, ai as ai_routes, risk a
 from api.websocket.feed import router as ws_router
 from api.signal_bus import bus, _set_event_loop
 from api.runner_loop import start_runner_loop
+from api.dependencies import verify_api_key
 from engine.mt5_client import MT5Client
 from engine.order_manager import OrderManager
 from engine.risk_manager import RiskManager
@@ -53,7 +54,7 @@ async def lifespan(app: FastAPI):
     global mt5_client, _risk_manager
     logger.info("Starting EVOTRADE-AI API...")
     # Register the running event loop so thread executors can schedule coroutines safely
-    _set_event_loop(asyncio.get_event_loop())
+    _set_event_loop(asyncio.get_running_loop())
     mt5_client = MT5Client()
     connected = mt5_client.connect()
     if not connected:
@@ -94,6 +95,7 @@ app = FastAPI(
     version="1.0.0",
     description="Trading bot backend — XM MT5 via Python",
     lifespan=lifespan,
+    dependencies=[Depends(verify_api_key)],
 )
 
 # CORS — allow the Next.js dashboard (localhost:3000) during development

@@ -40,7 +40,7 @@ CONFIG_DIR = Path(__file__).parent.parent / "config"
 OPT_FILE   = CONFIG_DIR / "optimized_params.json"
 
 MIN_TRADES_FOR_REFINEMENT = 20   # closed trades before live refinement kicks in
-MIN_BACKTEST_SIGNALS      = 5    # discard combos that fired fewer signals
+MIN_BACKTEST_SIGNALS      = 10   # discard combos that fired fewer signals (raised from 5 to reduce noise)
 MAX_GRID_COMBOS           = 64   # cap to keep backtest fast
 BACKTEST_COOLDOWN_HOURS   = 24   # min hours between automatic re-backtests
 LIVE_REFINE_WIN_THRESH    = 0.45 # re-optimize when win_rate drops below this

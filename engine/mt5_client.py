@@ -352,6 +352,12 @@ class MT5Client:
             for d in deals
         ]
 
+    def get_deals_by_position(self, position_ticket: int) -> list:
+        """Return raw deal objects for a given position ticket (acquires SDK lock)."""
+        with self._lock:
+            deals = mt5.history_deals_get(position=position_ticket)
+        return list(deals) if deals else []
+
     # ------------------------------------------------------------------
     # Context manager support
     # ------------------------------------------------------------------

@@ -46,3 +46,6 @@ loguru==0.7.2
 # --- Utilities ---
 pydantic==2.7.1
 pydantic-settings==2.2.1
+
+# --- Timezone data (required for ZoneInfo on Windows; provides IANA databases) ---
+tzdata>=2024.1

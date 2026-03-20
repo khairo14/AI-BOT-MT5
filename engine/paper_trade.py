@@ -9,6 +9,7 @@ MT5Client already routes to demo when TRADING_MODE=paper — this layer adds:
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -65,8 +66,9 @@ class PaperTradeEngine:
         self.risk_manager  = risk_manager
         self.runner        = StrategyRunner(client, order_manager, risk_manager, execution_mode)
 
-        self._positions: dict[int, PaperPosition] = {}  # ticket → PaperPosition
-        self._history:   list[PaperPosition]       = []
+        self._lock:      threading.Lock                = threading.Lock()
+        self._positions: dict[int, PaperPosition]      = {}  # ticket → PaperPosition
+        self._history:   list[PaperPosition]           = []
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -110,7 +112,8 @@ class PaperTradeEngine:
             trading_type=sig.trading_type,
             current_price=result.open_price or 0.0,
         )
-        self._positions[result.ticket or 0] = pos
+        with self._lock:
+            self._positions[result.ticket or 0] = pos
         logger.info(
             f"Paper position opened: {sig.symbol} {sig.direction} "
             f"lot={sig.lot_size} ticket={result.ticket}"
@@ -122,7 +125,10 @@ class PaperTradeEngine:
         mt5_positions = self.client.get_open_positions()
         mt5_tickets   = {p["ticket"] for p in mt5_positions} if mt5_positions else set()
 
-        for ticket, pos in list(self._positions.items()):
+        with self._lock:
+            snapshot = list(self._positions.items())
+
+        for ticket, pos in snapshot:
             if pos.closed:
                 continue
             mt5_match = next((p for p in (mt5_positions or []) if p["ticket"] == ticket), None)
@@ -139,17 +145,43 @@ class PaperTradeEngine:
                     if pos.direction == "BUY"
                     else price_info.get("ask", pos.current_price)
                 ) if price_info else pos.current_price
-                self._history.append(pos)
+                with self._lock:
+                    self._history.append(pos)
+                try:
+                    from engine.trade_journal import trade_journal
+                    from engine.account_store import current_mode
+                    from datetime import datetime, timezone
+                    trade_journal.log(
+                        ticket=ticket,
+                        symbol=pos.symbol,
+                        direction=pos.direction,
+                        volume=pos.lot_size,
+                        entry=pos.open_price,
+                        sl=pos.sl_price,
+                        tp=pos.tp_price if pos.tp_price else None,
+                        profit=pos.profit,
+                        trading_type=pos.trading_type,
+                        account_mode=current_mode(),
+                        comment=pos.comment,
+                        event="close",
+                        close_time=datetime.fromtimestamp(
+                            pos.close_time, tz=timezone.utc
+                        ).isoformat(),
+                    )
+                except Exception as _je:
+                    logger.warning(f"Journal write failed for paper #{ticket}: {_je}")
                 logger.info(
                     f"Paper position closed: {pos.symbol} {pos.direction} "
                     f"ticket={ticket} profit={pos.profit:.2f}"
                 )
 
     def get_open_positions(self) -> list[dict]:
-        return [asdict(p) for p in self._positions.values() if not p.closed]
+        with self._lock:
+            return [asdict(p) for p in self._positions.values() if not p.closed]
 
     def get_history(self, limit: int = 100) -> list[dict]:
-        return [asdict(p) for p in self._history[-limit:]]
+        with self._lock:
+            return [asdict(p) for p in self._history[-limit:]]
 
     def get_stats(self) -> dict[str, Any]:
         closed = self._history
