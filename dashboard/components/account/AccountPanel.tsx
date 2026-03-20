@@ -89,16 +89,13 @@ export default function AccountPanel() {
                     label="Win Rate"
                     value={`${s.win_rate}%`}
                     sub={
-                      s.by_mode && Object.keys(s.by_mode).length > 0 ? (
-                        <span className="flex flex-col gap-0.5">
-                          {(["scalping", "day_trading", "swing"] as const).map((tt) => {
-                            const m = s.by_mode?.[tt];
-                            if (!m) return null;
-                            const label = tt === "scalping" ? "scalp" : tt === "day_trading" ? "day" : "swing";
-                            return <span key={tt}>{label} — {m.wins}W/{m.losses}L</span>;
-                          })}
-                        </span>
-                      ) : `${s.wins}W / ${s.losses}L`
+                      <span className="flex flex-col gap-0.5">
+                        {(["scalping", "day_trading", "swing"] as const).map((tt) => {
+                          const m = s.by_mode?.[tt];
+                          const label = tt === "scalping" ? "scalp" : tt === "day_trading" ? "day" : "swing";
+                          return <span key={tt}>{label} — {m ? `${m.wins}W/${m.losses}L` : "0W/0L"}</span>;
+                        })}
+                      </span>
                     }
                   />
                   <StatCard
