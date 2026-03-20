@@ -56,8 +56,8 @@ class OrderManager:
         if not self._client.is_connected():
             return OrderResult(success=False, error="MT5 not connected")
 
-        # Duplicate guard — reject if position already open in same symbol/direction
-        if self._has_open_position(req.symbol, req.direction):
+        # Duplicate guard — reject if position already open in same symbol/direction/mode
+        if self._has_open_position(req.symbol, req.direction, req.comment):
             return OrderResult(
                 success=False,
                 error=f"Duplicate rejected: {req.symbol} {req.direction} already open",
@@ -314,10 +314,25 @@ class OrderManager:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _has_open_position(self, symbol: str, direction: str) -> bool:
-        """Return True if a bot-placed position already exists for symbol+direction."""
+    def _has_open_position(self, symbol: str, direction: str, comment: str = "") -> bool:
+        """Return True if a bot-placed position already exists for symbol+direction+mode.
+        Mode is derived from the comment prefix (scalp|, day|, swing|).
+        An empty/unrecognised prefix falls back to matching any bot position on that symbol.
+        """
         positions = mt5.positions_get(symbol=symbol)
         if not positions:
             return False
         order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
-        return any(p.magic == BOT_MAGIC and p.type == order_type for p in positions)
+        # Derive the mode prefix from the comment (e.g. "scalp|EMAScalp" → "scalp")
+        mode_prefix = comment.split("|")[0] if "|" in comment else ""
+        for p in positions:
+            if p.magic != BOT_MAGIC or p.type != order_type:
+                continue
+            if mode_prefix:
+                # Only block if same mode
+                if p.comment.startswith(mode_prefix + "|") or p.comment == mode_prefix:
+                    return True
+            else:
+                # No mode info — fall back to blocking any bot position on this symbol/dir
+                return True
+        return False
