@@ -182,7 +182,6 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
         if not isinstance(sym_list, list):
             continue
         tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
-        tf_mt5 = tf_map.get(tf_str, _mt5.TIMEFRAME_H1)
         for entry in sym_list:
             symbol = entry.get("symbol") if isinstance(entry, dict) else entry
             if not symbol:
@@ -190,7 +189,7 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
             if predictor.is_training(symbol, trading_type):
                 skipped.append(f"{symbol}/{trading_type}")
                 continue
-            df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, req.bars)
+            df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
             if df is None or df.empty:
                 skipped.append(f"{symbol}/{trading_type} (no data)")
                 continue

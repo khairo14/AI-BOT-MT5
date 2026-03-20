@@ -96,6 +96,12 @@ export interface AppConfig {
     day_trading: ExecutionMode;
     swing: ExecutionMode;
   };
+  ai?: {
+    price_prediction_enabled?: boolean;
+    confidence_filter_enabled?: boolean;
+    confidence_threshold?: number;
+    rl_agent_enabled?: boolean;
+  };
 }
 
 export interface RiskConfig {

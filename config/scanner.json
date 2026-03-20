@@ -13,35 +13,36 @@
   "day_trading": {
     "enabled": true,
     "symbols": [
-      "ETHUSD",
-      "BTCUSD",
+      "GOLD",
+      "OILCash",
       "EURUSD",
       "GBPUSD",
       "USDJPY",
       "AUDUSD",
-      "GBPJPY",
-      "GOLD",
-      "OILCash"
+      "Tesla",
+      "Nvidia",
+      "Amazon",
+      "GBPJPY"
     ],
     "timeframe": "M15/H1"
   },
   "swing": {
     "enabled": true,
     "symbols": [
-      "EURUSD",
       "GOLD",
-      "GBPUSD",
-      "USDJPY",
-      "AUDUSD",
-      "USDCAD",
-      "NZDUSD",
       "OILCash",
       "SILVER",
       "BRENTCash",
       "BTCUSD",
       "ETHUSD",
       "XRPUSD",
-      "SOLUSD"
+      "SOLUSD",
+      "Tesla",
+      "Nvidia",
+      "Google",
+      "Facebook",
+      "Netflix",
+      "AdvMicroDev"
     ],
     "timeframe": "H4/D1"
   }

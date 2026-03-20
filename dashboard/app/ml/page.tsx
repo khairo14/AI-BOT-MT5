@@ -10,6 +10,8 @@ import {
   trainAllSymbols,
   runOptimizer,
   runOptimizerAll,
+  fetchAppConfig,
+  patchAppConfig,
 } from "@/lib/api";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -31,17 +33,20 @@ function pct(v: number | undefined): string {
 
 // ── types ──────────────────────────────────────────────────────────────────
 type AIStatus = Record<string, { accuracy?: number; bars_used?: number; last_trained?: string; is_training?: boolean }>;
-type RLStatus = Record<string, { conf_threshold?: number; risk_factor?: number; q_states?: number; last_state?: string }>;
+type RLStatus = Record<string, { confidence_threshold?: number; risk_factor?: number; q_states?: number; last_state?: string }>;
 type MemStats = { total?: number; wins?: number; win_rate?: number; avg_pnl?: number; tp_hits?: number; sl_hits?: number };
 type OptimizerJob = {
-  status?: string;
+  strategy?: string;
+  symbol?: string;
+  trading_type?: string;
   best_score?: number;
   n_signals?: number;
-  last_optimized?: string;
+  last_optimized_at?: string;
   best_params?: Record<string, unknown>;
+  bars_used?: number;
 };
 type OptimizerStatus = {
-  jobs?: Record<string, Record<string, OptimizerJob>>;
+  jobs?: Record<string, OptimizerJob>;
   available_strategies?: string[];
 };
 
@@ -55,17 +60,30 @@ export default function MLPage() {
   const [optStatus, setOptStatus] = useState<OptimizerStatus>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
+  // AI gate settings
+  const [gateEnabled, setGateEnabled] = useState(false);
+  const [gateThreshold, setGateThreshold] = useState(60);
+  const [gateSaving, setGateSaving] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [ai, rl, opt, ...mems] = await Promise.allSettled([
+      const [ai, rl, opt, appCfg, ...mems] = await Promise.allSettled([
         fetchAIStatus(),
         fetchRLStatus(),
         fetchOptimizerStatus(),
+        fetchAppConfig(),
         ...MODES.map((m) => fetchMemoryStats(m)),
       ]);
       if (ai.status === "fulfilled") setAiStatus(ai.value ?? {});
       if (rl.status === "fulfilled") setRlStatus(rl.value ?? {});
       if (opt.status === "fulfilled") setOptStatus(opt.value ?? {});
+      if (appCfg.status === "fulfilled") {
+        const ai_cfg = appCfg.value?.ai;
+        if (ai_cfg) {
+          setGateEnabled(Boolean(ai_cfg.confidence_filter_enabled));
+          setGateThreshold(Number(ai_cfg.confidence_threshold ?? 60));
+        }
+      }
       const statsMap: Record<string, MemStats> = {};
       MODES.forEach((m, i) => {
         const r = mems[i];
@@ -189,7 +207,7 @@ export default function MLPage() {
                 <div className="text-sm space-y-1 text-gray-400">
                   <div className="flex justify-between">
                     <span>Confidence threshold</span>
-                    <span className="text-white font-medium">{pct(agent.conf_threshold)}</span>
+                    <span className="text-white font-medium">{pct(agent.confidence_threshold)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Risk factor</span>
@@ -200,8 +218,8 @@ export default function MLPage() {
                     <span className="text-white font-medium">{agent.q_states ?? "—"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Last state seen</span>
-                    <span className="text-white font-medium">{relTime(agent.last_state)}</span>
+                    <span>Last state</span>
+                    <span className="text-white font-medium">{agent.last_state ?? "—"}</span>
                   </div>
                 </div>
               </div>
@@ -226,52 +244,50 @@ export default function MLPage() {
         {(!optStatus.jobs || Object.keys(optStatus.jobs).length === 0) ? (
           <p className="text-sm text-gray-600">No optimization runs recorded yet.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-96 overflow-y-auto border border-gray-800 rounded-lg">
             <table className="w-full text-sm border-collapse">
-              <thead>
+              <thead className="sticky top-0 bg-gray-950 z-10">
                 <tr className="text-left text-gray-500 border-b border-gray-800">
-                  <th className="pb-2 pr-4 font-medium">Strategy</th>
-                  <th className="pb-2 pr-4 font-medium">Symbol</th>
-                  <th className="pb-2 pr-4 font-medium">Status</th>
-                  <th className="pb-2 pr-4 font-medium">Best Score</th>
-                  <th className="pb-2 pr-4 font-medium">Signals</th>
-                  <th className="pb-2 pr-4 font-medium">Last Run</th>
-                  <th className="pb-2 pr-4 font-medium">Best Params</th>
-                  <th className="pb-2 font-medium">Action</th>
+                  <th className="pb-2 pt-2 pr-4 pl-2 font-medium">Strategy</th>
+                  <th className="pb-2 pt-2 pr-4 font-medium">Symbol</th>
+                  <th className="pb-2 pt-2 pr-4 font-medium">Score</th>
+                  <th className="pb-2 pt-2 pr-4 font-medium">Signals</th>
+                  <th className="pb-2 pt-2 pr-4 font-medium">Bars</th>
+                  <th className="pb-2 pt-2 pr-4 font-medium">Last Run</th>
+                  <th className="pb-2 pt-2 pr-4 font-medium">Best Params</th>
+                  <th className="pb-2 pt-2 font-medium">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(optStatus.jobs ?? {}).flatMap(([strategy, symbols]) =>
-                  Object.entries(symbols ?? {}).map(([symbol, job]) => {
-                    const bKey = `opt_${strategy}_${symbol}`;
-                    return (
-                      <tr key={bKey} className="border-b border-gray-800/50 hover:bg-gray-900/40">
-                        <td className="py-2 pr-4 font-medium text-white">{strategy}</td>
-                        <td className="py-2 pr-4">{symbol}</td>
-                        <td className="py-2 pr-4">
-                          <Badge ok={job.status === "done"} label={job.status ?? "—"} />
-                        </td>
-                        <td className="py-2 pr-4">
-                          {job.best_score != null ? job.best_score.toFixed(3) : "—"}
-                        </td>
-                        <td className="py-2 pr-4">{job.n_signals ?? "—"}</td>
-                        <td className="py-2 pr-4 text-gray-400">{relTime(job.last_optimized)}</td>
-                        <td className="py-2 pr-4 text-gray-400 text-xs max-w-48 truncate">
-                          {job.best_params ? JSON.stringify(job.best_params) : "—"}
-                        </td>
-                        <td className="py-2">
-                          <button
-                            disabled={busy[bKey] || job.status === "running"}
-                            onClick={() => doAction(bKey, () => runOptimizer(strategy, symbol, "day_trading"))}
-                            className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
-                          >
-                            {busy[bKey] ? "…" : "Run"}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                {Object.entries(optStatus.jobs ?? {}).map(([key, job]) => {
+                  const bKey = `opt_${key}`;
+                  const strategyName = job.strategy ?? key.split("__")[0];
+                  const symbolName = job.symbol ?? key.split("__")[1] ?? key;
+                  return (
+                    <tr key={bKey} className="border-b border-gray-800/50 hover:bg-gray-900/40">
+                      <td className="py-2 pr-4 pl-2 font-medium text-white">{strategyName}</td>
+                      <td className="py-2 pr-4">{symbolName}</td>
+                      <td className="py-2 pr-4">
+                        {job.best_score != null ? job.best_score.toFixed(3) : "—"}
+                      </td>
+                      <td className="py-2 pr-4">{job.n_signals ?? "—"}</td>
+                      <td className="py-2 pr-4 text-gray-500">{job.bars_used ?? "—"}</td>
+                      <td className="py-2 pr-4 text-gray-400">{relTime(job.last_optimized_at)}</td>
+                      <td className="py-2 pr-4 text-gray-400 text-xs max-w-48 truncate">
+                        {job.best_params ? JSON.stringify(job.best_params) : "—"}
+                      </td>
+                      <td className="py-2">
+                        <button
+                          disabled={busy[bKey]}
+                          onClick={() => doAction(bKey, () => runOptimizer(strategyName, symbolName, job.trading_type ?? "day_trading"))}
+                          className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded"
+                        >
+                          {busy[bKey] ? "…" : "Run"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -316,6 +332,90 @@ export default function MLPage() {
               </div>
             );
           })}
+        </div>
+      </section>
+
+      {/* ── 0. AI Confidence Gate ──────────────────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="AI Confidence Gate"
+          sub="Filter signals below a minimum confidence score. The RL agent always applies its own dynamic threshold regardless of this setting."
+        />
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-5">
+
+          {/* Toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white font-medium">Static confidence filter</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                When on, signals with confidence below the threshold are hard-blocked.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const next = !gateEnabled;
+                setGateEnabled(next);
+                setGateSaving(true);
+                try {
+                    await patchAppConfig({ ai: { confidence_filter_enabled: next } });
+                } catch (_) { setGateEnabled(!next); }
+                setGateSaving(false);
+              }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                gateEnabled ? "bg-blue-600" : "bg-gray-700"
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                gateEnabled ? "translate-x-6" : "translate-x-1"
+              }`} />
+            </button>
+          </div>
+
+          {/* Threshold slider — only shown when gate is on */}
+          {gateEnabled && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-white font-medium">Minimum confidence threshold</p>
+                <span className="text-blue-400 font-semibold text-sm">{gateThreshold}%</span>
+              </div>
+              <input
+                type="range"
+                min={40}
+                max={85}
+                step={1}
+                value={gateThreshold}
+                onChange={(e) => setGateThreshold(Number(e.target.value))}
+                onMouseUp={async () => {
+                  setGateSaving(true);
+                  try {
+                    await patchAppConfig({ ai: { confidence_threshold: gateThreshold } });
+                  } catch (_) {}
+                  setGateSaving(false);
+                }}
+                className="w-full accent-blue-500"
+              />
+              <div className="flex justify-between text-xs text-gray-600">
+                <span>40% — permissive</span>
+                <span>60% — balanced</span>
+                <span>85% — strict</span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Recommended: keep off while the LSTM is still learning (first 100 trades).
+                Enable at 60–65% once you have steady win-rate data.
+              </p>
+            </div>
+          )}
+
+          {gateSaving && <p className="text-xs text-gray-500">Saving…</p>}
+
+          {/* RL gate info — always active */}
+          <div className="border-t border-gray-800 pt-4">
+            <p className="text-sm text-white font-medium mb-1">RL dynamic gate</p>
+            <p className="text-xs text-gray-500">
+              Always active — starts at 55% and self-tunes between 40%–85% after each closed trade.
+              Current thresholds are shown in the RL Agents section below.
+            </p>
+          </div>
         </div>
       </section>
 
