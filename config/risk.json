@@ -40,8 +40,8 @@
     ],
     "sessions": {
       "forex": {
-        "open": "07:00",
-        "close": "21:00",
+        "open": "00:00",
+        "close": "22:00",
         "days": "mon-fri"
       },
       "us_stocks": {

@@ -11,13 +11,13 @@
     "timeframe": "M1/M5"
   },
   "day_trading": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
+      "ETHUSD",
+      "BTCUSD",
       "EURUSD",
       "GBPUSD",
-      "GOLD",
-      "OILCash",
-      "AUDUSD"
+      "USDJPY"
     ],
     "timeframe": "M15/H1"
   },
