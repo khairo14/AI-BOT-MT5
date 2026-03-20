@@ -723,14 +723,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     _total > 0 and _total % 20 == 0
                 )
                 if _retrain:
-                    import MetaTrader5 as _mt5
-                    _TF_MAP = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
                     _tf_str = TRADING_TYPE_TF.get(_type, "H1")
-                    _tf_mt5 = _TF_MAP.get(_tf_str, _mt5.TIMEFRAME_H1)
                     from api.main import get_mt5_client
                     _client = get_mt5_client()
                     if _client and _client.is_connected():
-                        _df = await asyncio.to_thread(_client.get_ohlcv, _sym, _tf_mt5, 1000)
+                        _df = await asyncio.to_thread(_client.get_ohlcv, _sym, _tf_str, 1000)
                         if _df is not None and not _df.empty:
                             predictor.train_async(_sym, _df, _type)
                             logger.info(f"Auto LSTM retrain triggered: {_key} ({_total} trades)")
@@ -744,14 +741,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 _strat = signal.get("strategy", "")
                 _sym   = signal["symbol"]
                 if _strat and _opt.should_reoptimize(_strat, _sym):
-                    import MetaTrader5 as _mt5b
-                    _TF_MAP2 = {"M5": _mt5b.TIMEFRAME_M5, "H1": _mt5b.TIMEFRAME_H1, "H4": _mt5b.TIMEFRAME_H4}
                     _tf_str2 = TRADING_TYPE_TF.get(trading_type, "H1")
-                    _tf_mt52 = _TF_MAP2.get(_tf_str2, _mt5b.TIMEFRAME_H1)
                     from api.main import get_mt5_client as _gclient
                     _client2 = _gclient()
                     if _client2 and _client2.is_connected():
-                        _df2 = await asyncio.to_thread(_client2.get_ohlcv, _sym, _tf_mt52, 1500)
+                        _df2 = await asyncio.to_thread(_client2.get_ohlcv, _sym, _tf_str2, 1500)
                         if _df2 is not None and not _df2.empty:
                             _opt.optimize_async(_strat, _sym, _df2, trading_type)
                             logger.info(f"Auto param optimizer triggered: {_strat}/{_sym}")

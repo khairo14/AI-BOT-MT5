@@ -21,7 +21,6 @@ import asyncio
 from pathlib import Path
 from typing import Literal, Optional
 
-import MetaTrader5 as mt5
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -32,12 +31,6 @@ from ai.trade_memory import memory
 router = APIRouter()
 
 TRADING_TYPE = Literal["scalping", "day_trading", "swing"]
-
-MT5_TF_MAP = {
-    "M5": mt5.TIMEFRAME_M5,
-    "H1": mt5.TIMEFRAME_H1,
-    "H4": mt5.TIMEFRAME_H4,
-}
 
 
 class TrainRequest(BaseModel):
@@ -69,8 +62,7 @@ async def train_symbol(symbol: str, req: TrainRequest = TrainRequest()):
         return {"status": "already_training", "symbol": symbol, "trading_type": req.trading_type}
 
     tf_str = TRADING_TYPE_TF.get(req.trading_type, "H1")
-    tf_mt5 = MT5_TF_MAP[tf_str]
-    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, req.bars)
+    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol} ({tf_str})")
 
@@ -97,8 +89,7 @@ async def get_confidence(symbol: str, trading_type: TRADING_TYPE = "day_trading"
         raise HTTPException(status_code=503, detail="MT5 not connected")
 
     tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
-    tf_mt5 = MT5_TF_MAP[tf_str]
-    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, 100)
+    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, 100)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No data for {symbol} ({tf_str})")
 
@@ -241,7 +232,6 @@ async def run_optimizer(
     Runs in background — poll GET /ai/optimizer/status to track progress.
     """
     from api.main import get_mt5_client
-    import MetaTrader5 as _mt5
 
     if strategy_name not in PARAM_GRIDS:
         raise HTTPException(status_code=400, detail=f"Unknown strategy: {strategy_name}")
@@ -251,10 +241,7 @@ async def run_optimizer(
         raise HTTPException(status_code=503, detail="MT5 not connected")
 
     tf_str = TRADING_TYPE_TF.get(req.trading_type, "H1")
-    tf_map = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
-    tf_mt5 = tf_map.get(tf_str, _mt5.TIMEFRAME_H1)
-
-    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, req.bars)
+    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol}/{tf_str}")
 
@@ -274,7 +261,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
     Trigger optimization for every (strategy, enabled-symbol) pair.
     """
     from api.main import get_mt5_client
-    import json, MetaTrader5 as _mt5
+    import json
 
     client = get_mt5_client()
     if client is None or not client.is_connected():
@@ -287,13 +274,11 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
     except Exception:
         raise HTTPException(status_code=500, detail="Cannot read config files")
 
-    tf_map = {"M5": _mt5.TIMEFRAME_M5, "H1": _mt5.TIMEFRAME_H1, "H4": _mt5.TIMEFRAME_H4}
     started, skipped = [], []
 
     for trading_type in ("scalping", "day_trading", "swing"):
         active = strategies_cfg.get(trading_type, {}).get("active_strategies", [])
         tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
-        tf_mt5 = tf_map.get(tf_str, _mt5.TIMEFRAME_H1)
         sym_list = symbols_cfg.get(trading_type, [])
         symbols  = [
             (e.get("symbol") if isinstance(e, dict) else e)
@@ -304,7 +289,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
             for symbol in symbols:
                 if not symbol or strat not in PARAM_GRIDS:
                     continue
-                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_mt5, req.bars)
+                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
                 if df is None or df.empty:
                     skipped.append(f"{strat}/{symbol}")
                     continue

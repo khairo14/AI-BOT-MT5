@@ -51,6 +51,17 @@ def resume_runner() -> None:
     logger.info("Strategy runner resumed.")
 
 
+async def _run_one_mode(runner, bus, mode: str, sym_override) -> None:
+    """Run a single mode scan as a fire-and-forget task — non-blocking."""
+    try:
+        signals = await asyncio.to_thread(runner.run_mode, mode, sym_override)
+        for sig in signals:
+            await bus.add_signal(_signal_to_dict(sig, mode))
+            logger.debug(f"Runner signal queued: {mode}/{sig.symbol}/{sig.strategy}")
+    except Exception as exc:
+        logger.exception(f"Runner loop error [{mode}]: {exc}")
+
+
 async def _runner_loop(client, order_manager, risk_manager) -> None:
     from api.signal_bus import bus
     from engine.strategy_runner import StrategyRunner
@@ -102,15 +113,7 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                     pass  # scanner.json missing — scan all enabled symbols
                 except Exception as _err:
                     logger.debug(f"Scanner config read error [{mode}]: {_err}")
-                try:
-                    signals = await asyncio.to_thread(runner.run_mode, mode, _sym_override)
-                    for sig in signals:
-                        await bus.add_signal(_signal_to_dict(sig, mode))
-                        logger.debug(
-                            f"Runner signal queued: {mode}/{sig.symbol}/{sig.strategy}"
-                        )
-                except Exception as exc:
-                    logger.exception(f"Runner loop error [{mode}]: {exc}")
+                asyncio.create_task(_run_one_mode(runner, bus, mode, _sym_override))
 
 
 def _signal_to_dict(sig, mode: str) -> dict:
