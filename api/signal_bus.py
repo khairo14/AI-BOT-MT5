@@ -544,7 +544,13 @@ async def recover_unclosed_trades(client) -> None:
                 duration_mins=round(dur_mins, 1),
             )
             memory.record(outcome)
-            rl_manager.on_trade_closed(trading_type=trading_type, profit_pct=profit)
+            _stats = memory.stats(trading_type=trading_type, live_only=True)
+            rl_manager.on_trade_closed(
+                trading_type=trading_type,
+                profit_pct=profit,
+                win_rate=_stats.get("win_rate", 0.5),
+                avg_conf=_stats.get("avg_conf", 0.5),
+            )
         except Exception as _exc:
             logger.debug(f"Recovery: trade memory record failed for #{ticket}: {_exc}")
 
