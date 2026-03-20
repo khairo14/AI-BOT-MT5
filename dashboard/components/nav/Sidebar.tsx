@@ -124,7 +124,7 @@ function ClockAndMarkets() {
   ];
 
   return (
-    <div className="px-2 pb-3 border-b border-gray-800 space-y-2">
+    <div className="px-2 pb-3 space-y-2">
       {/* Clock */}
       <div className="bg-gray-900 rounded-lg p-2 space-y-0.5">
         <div className="flex items-center justify-between text-xs">
@@ -203,9 +203,6 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Clock + market sessions */}
-      {!collapsed && <ClockAndMarkets />}
-
       {/* Nav links */}
       <nav className="flex-1 px-2 py-4 space-y-1">
         {NAV.map(({ href, label, icon }) => {
@@ -241,6 +238,9 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      {/* Clock + market sessions */}
+      {!collapsed && <ClockAndMarkets />}
 
       {/* Account status */}
       <div className="px-2 py-4 border-t border-gray-800 space-y-3">
