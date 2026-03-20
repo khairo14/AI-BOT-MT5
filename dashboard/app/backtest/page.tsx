@@ -77,14 +77,14 @@ const SYMBOL_GROUPS: Record<TradingType, SymbolGroup[]> = {
     { label: "Commodities",  symbols: ["GOLD", "OilCash"] },
     { label: "Indices",      symbols: ["US100Cash", "US30Cash", "US500Cash", "GER40Cash", "UK100Cash"] },
     { label: "Crypto",       symbols: ["BTCUSD", "ETHUSD"] },
-    { label: "Stocks",       symbols: ["TSLA.OQ", "NVDA.OQ", "AAPL.OQ", "MSFT.OQ", "AMZN.OQ"] },
+    { label: "Stocks",       symbols: ["Tesla", "Nvidia", "Apple", "Microsoft", "Amazon"] },
   ],
   swing: [
     { label: "Forex Majors", symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"] },
     { label: "Commodities",  symbols: ["GOLD", "SILVER", "OilCash", "BRENTCash", "NGASCash"] },
     { label: "Indices",      symbols: ["US100Cash", "US500Cash"] },
     { label: "Crypto",       symbols: ["BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD"] },
-    { label: "Stocks",       symbols: ["TSLA.OQ", "NVDA.OQ", "GOOGL.OQ", "META.OQ", "NFLX.OQ", "AMD.OQ"] },
+    { label: "Stocks",       symbols: ["Tesla", "Nvidia", "Google", "Facebook", "Netflix", "AdvMicroDev"] },
   ],
 };
 

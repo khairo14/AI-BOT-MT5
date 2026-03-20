@@ -11,7 +11,7 @@ export default function SwingPage() {
         { label: "Commodities",   symbols: ["GOLD", "SILVER", "OILCash", "BRENTCash", "NGASCash"] },
         { label: "Indices",       symbols: ["US100Cash", "US500Cash"] },
         { label: "Crypto",        symbols: ["BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD"] },
-        { label: "Stocks",        symbols: ["TSLA.OQ", "NVDA.OQ", "GOOGL.OQ", "META.OQ", "NFLX.OQ", "AMD.OQ"] },
+        { label: "Stocks",        symbols: ["Tesla", "Nvidia", "Google", "Facebook", "Netflix", "AdvMicroDev"] },
       ]}
       defaultSymbol="EURUSD"
       defaultTimeframe="D1"
