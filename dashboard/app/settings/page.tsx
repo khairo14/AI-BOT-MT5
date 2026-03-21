@@ -309,7 +309,7 @@ export default function SettingsPage() {
                 setCbBusy(false);
               }
             }}
-            className={`inline-flex w-11 h-6 items-center rounded-full transition-colors disabled:opacity-40 ${`
+            className={`inline-flex w-11 h-6 items-center rounded-full transition-colors disabled:opacity-40 ${
               (cbStatus?.circuit_breaker_enabled ?? true) ? "bg-blue-600" : "bg-gray-700"
             }`}
           >

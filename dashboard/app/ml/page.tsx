@@ -476,7 +476,7 @@ export default function MLPage() {
                 } catch (_) { setGateEnabled(!next); }
                 setGateSaving(false);
               }}
-              className={`inline-flex h-6 w-11 items-center rounded-full transition-colors ${`
+              className={`inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 gateEnabled ? "bg-blue-600" : "bg-gray-700"
               }`}
             >

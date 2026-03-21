@@ -224,7 +224,7 @@ export default function TradingModePage({
             </span>
             <button
               onClick={() => setScannerEnabled((v) => !v)}
-              className={`inline-flex w-11 h-6 items-center rounded-full transition-colors ${`
+              className={`inline-flex w-11 h-6 items-center rounded-full transition-colors ${
                 scannerEnabled ? "bg-emerald-600" : "bg-gray-700"
               }`}
             >
