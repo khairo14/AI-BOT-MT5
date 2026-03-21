@@ -314,8 +314,8 @@ export default function SettingsPage() {
             }`}
           >
             <span
-              className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                (cbStatus?.circuit_breaker_enabled ?? true) ? "translate-x-6" : "translate-x-1"
+              className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                (cbStatus?.circuit_breaker_enabled ?? true) ? "translate-x-5" : "translate-x-0"
               }`}
             />
           </button>
@@ -504,7 +504,7 @@ export default function SettingsPage() {
                 className={`relative w-11 h-6 rounded-full transition-colors ${value ? "bg-blue-600" : "bg-gray-700"}`}
               >
                 <span
-                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${value ? "translate-x-6" : "translate-x-1"}`}
+                  className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${value ? "translate-x-5" : "translate-x-0"}`}
                 />
               </button>
             </div>

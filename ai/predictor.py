@@ -227,7 +227,7 @@ class PricePredictor:
             self._models[key]   = model
             self._scalers[key]  = scaler
             self._metadata[key] = {
-                "trained_at":   datetime.now(timezone.utc).isoformat() + "Z",
+                "trained_at":   datetime.now(timezone.utc).isoformat(),
                 "accuracy":     round(accuracy, 4),
                 "bars_used":    len(df),
                 "trading_type": trading_type,

@@ -17,7 +17,11 @@ import {
 // ── helpers ────────────────────────────────────────────────────────────────
 function relTime(iso: string | undefined): string {
   if (!iso) return "—";
-  const diff = Date.now() - new Date(iso).getTime();
+  // Normalise malformed ISO strings like "2026-03-20T21:42:17+00:00Z" (extra Z after offset)
+  const normalised = iso.replace(/([+-]\d{2}:\d{2})Z$/, "$1");
+  const d = new Date(normalised);
+  if (isNaN(d.getTime())) return "—";
+  const diff = Date.now() - d.getTime();
   const m = Math.floor(diff / 60_000);
   if (m < 1) return "just now";
   if (m < 60) return `${m}m ago`;
@@ -476,8 +480,8 @@ export default function MLPage() {
                 gateEnabled ? "bg-blue-600" : "bg-gray-700"
               }`}
             >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                gateEnabled ? "translate-x-6" : "translate-x-1"
+              <span className={`absolute top-1 left-1 h-4 w-4 transform rounded-full bg-white transition-transform ${
+                gateEnabled ? "translate-x-5" : "translate-x-0"
               }`} />
             </button>
           </div>
