@@ -309,13 +309,13 @@ export default function SettingsPage() {
                 setCbBusy(false);
               }
             }}
-            className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-40 ${
+            className={`inline-flex w-11 h-6 items-center rounded-full transition-colors disabled:opacity-40 ${`
               (cbStatus?.circuit_breaker_enabled ?? true) ? "bg-blue-600" : "bg-gray-700"
             }`}
           >
             <span
-              className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                (cbStatus?.circuit_breaker_enabled ?? true) ? "translate-x-5" : "translate-x-0"
+              className={`inline-block w-4 h-4 rounded-full bg-white transition-transform transform ${
+                (cbStatus?.circuit_breaker_enabled ?? true) ? "translate-x-6" : "translate-x-1"
               }`}
             />
           </button>
@@ -501,10 +501,10 @@ export default function SettingsPage() {
               <span className="text-sm text-gray-400 flex-1">{label}</span>
               <button
                 onClick={() => set(!value)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${value ? "bg-blue-600" : "bg-gray-700"}`}
+                className={`inline-flex w-11 h-6 items-center rounded-full transition-colors ${value ? "bg-blue-600" : "bg-gray-700"}`}
               >
                 <span
-                  className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${value ? "translate-x-5" : "translate-x-0"}`}
+                  className={`inline-block w-4 h-4 rounded-full bg-white transition-transform transform ${value ? "translate-x-6" : "translate-x-1"}`}
                 />
               </button>
             </div>
