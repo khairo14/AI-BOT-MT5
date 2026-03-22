@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -50,6 +51,12 @@ _DEFAULT_EXPIRY: dict[str, int] = {
 from loguru import logger
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
+
+# Retrain dedup: track when each symbol×mode key last triggered an LSTM retrain.
+# Prevents a burst of simultaneous _poll_outcome completions from queuing redundant
+# OHLCV fetches and training jobs before predictor.is_training() is set.
+_retrain_last_triggered: dict[str, float] = {}
+_RETRAIN_DEDUP_SECS = 120   # 2-minute cooldown window per key
 
 
 def _set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -739,6 +746,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 win_rate=stats.get("win_rate", 0.5),
                 avg_conf=stats.get("avg_conf", 0.5),
                 drawdown_pct=_drawdown_pct,
+                vol_pct=abs(entry_px - sl) / max(abs(entry_px), 1e-8) * 100 if entry_px and sl else 0.0,
             )
             logger.info(
                 f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "
@@ -747,15 +755,19 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
             # ── Auto LSTM retrain ─────────────────────────────────────────────
             # Trigger background retrain once we have enough trades (every 20th).
-            # Guard against burst: track which keys were already triggered this poll
-            # by checking whether a training job was just launched in this process
-            # session for this key (predictor.is_training() covers that window).
+            # Dedup guard: if another poll for the same symbol×mode already fired a
+            # retrain within the last 2 minutes, skip — avoids double OHLCV fetches
+            # that can occur when multiple positions close in the same batch before
+            # predictor.is_training() is set.
             try:
                 from ai.predictor import predictor, TRADING_TYPE_TF
                 from ai.trade_memory import memory as _mem
                 _sym   = signal["symbol"]
                 _type  = trading_type
                 _key   = f"{_sym}_{_type}"
+                _now_ts = time.monotonic()
+                if (_now_ts - _retrain_last_triggered.get(_key, 0.0)) < _RETRAIN_DEDUP_SECS:
+                    raise Exception(f"retrain dedup cooldown active for {_key}")
                 _total = len([
                     o for o in _mem.recent(n=500, live_only=True)
                     if o.get("symbol") == _sym and o.get("trading_type") == _type
@@ -801,6 +813,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     if _client and _client.is_connected():
                         _df = await asyncio.to_thread(_client.get_ohlcv, _sym, _tf_str, 1000)
                         if _df is not None and not _df.empty:
+                            _retrain_last_triggered[_key] = time.monotonic()   # stamp dedup timer
                             predictor.train_async(_sym, _df, _type)
                             logger.info(f"Auto LSTM retrain triggered [{_retrain_reason}]: {_key} ({_total} trades)")
             except Exception as _exc:

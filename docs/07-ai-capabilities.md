@@ -148,9 +148,9 @@ As the RL agent learns from closed trades, it shifts the threshold up or down (�
 1. `confidence_threshold` — signals below this are suppressed (Gate 2 above)
 2. `risk_factor` — multiplier on the base risk% from `config/risk.json`
 
-**State space (81 states):**
+**State space (162 states):**
 
-State = `{win_rate_bucket}_{conf_bucket}_{session_bucket}_{drawdown_bucket}`
+State = `{win_rate_bucket}_{conf_bucket}_{session_bucket}_{drawdown_bucket}_{vol_bucket}`
 
 | Dimension | Buckets | Values |
 |---|---|---|
@@ -158,17 +158,24 @@ State = `{win_rate_bucket}_{conf_bucket}_{session_bucket}_{drawdown_bucket}`
 | Confidence | 3 | `low` (<0.55), `med` (0.55–0.70), `high` (>0.70) |
 | Session | 3 | `overlap` (12–18 UTC), `active` (07–22 UTC), `quiet` |
 | Drawdown | 3 | `low` (<1.5% daily DD), `med` (1.5–3%), `high` (≥3%) |
+| Volatility | 2 | `tight` (SL-dist < 1% of entry), `wide` (≥1%) |
 
-3 × 3 × 3 × 3 = **81 total states**.
+3 × 3 × 3 × 3 × 2 = **162 total states**.
 
-The **drawdown bucket** was added to give the RL agent awareness of its current risk exposure. As daily drawdown approaches the 5% circuit-breaker limit, the agent enters different state rows and can learn to become more conservative (lower confidence threshold, lower risk factor) independently of its win-rate and recent confidence levels.
+The **volatility bucket** uses SL-distance as a cheap ATR proxy — since every strategy sets SL as a multiple of ATR, `|entry − SL| / entry × 100` directly reflects the volatility regime at trade entry without an extra OHLCV fetch:
+- `tight` (≈1% of price) — calm forex pairs, equity indices
+- `wide` (≥1% of price) — crypto, gold, oil, or forex during volatile sessions
+
+The agent can learn to apply a higher confidence threshold and lower risk factor for wide-stop (high-volatility) trades, independently of whether those trades were profitable.
+
+The **drawdown bucket** was added to give the RL agent awareness of its current risk exposure. As daily drawdown approaches the 5% circuit-breaker limit, the agent enters different state rows and can learn to become more conservative independently of its win-rate and recent confidence levels.
 
 Drawdown is computed in `signal_bus._poll_outcome` after each closed trade:
 ```python
 drawdown_pct = max(0.0, (day_start_balance - balance) / day_start_balance * 100)
 ```
 
-Backward compatibility: existing 27-key Q-table entries (e.g. `"low_low_overlap"`) simply won't match the new 81-state keys and will be treated as unseen states, explored fresh with epsilon. No data migration is needed.
+Backward compatibility: existing 81-key Q-table entries won't match the new 162-state keys (missing `_{vol_bucket}` suffix) and will be treated as unseen states, explored fresh with epsilon. No data migration is needed.
 
 **Action space (9 joint actions):**
 Every combination of: `{decrease, hold, increase}` for `conf_threshold` × `{decrease, hold, increase}` for `risk_factor`.
@@ -185,7 +192,7 @@ Steps: `conf ±0.02`, `risk ±0.05`.
 
 **Hard limits:**
 - Operates only on the last ~50 trades from memory for win-rate calculation (inside `trade_memory.stats()`).
-- Does not consider news or volatility regime directly — state is built from win rate, avg confidence, session, and daily drawdown%.
+- Does not consider news directly — the `NewsFilter` already blocks trades during blackout windows so the RL never observes a near-news trade; adding it to state would be redundant.
 - Cannot increase `confidence_threshold` above `0.85` or `risk_factor` above `1.5`.
 - One agent per trading type — scalping/day_trading/swing RL tables are independent.
 
@@ -373,8 +380,9 @@ All AI flags live in `config/app.json` under the `"ai"` key:
 | Optimizer spread cost — crypto | 0.25–0.30R per trade (symbol override) |
 | Optimizer spread cost — gold/silver | 0.10–0.12R per trade (symbol override) |
 | Optimizer spread cost — indices | 0.08–0.10R per trade (symbol override) |
-| RL state space | 81 states (WR × conf × session × drawdown) |
+| RL state space | 162 states (WR × conf × session × drawdown × volatility) |
 | RL drawdown buckets | low (<1.5%), med (1.5–3%), high (≥3% daily DD) |
+| RL volatility buckets | tight (SL-dist <1%), wide (≥1%) — ATR proxy |
 | LSTM accuracy gate | Skip save if val accuracy < 52% |
 | LSTM news flag window | Per-bar tail window (45 min ÷ TF minutes) |
 | Backtester SL/TP same-bar | SL counted first (conservative) |

@@ -95,11 +95,24 @@ def _drawdown_bucket(drawdown_pct: float) -> str:
     return "low"        # < 1.5% — normal operating range
 
 
-def _state(win_rate: float, avg_conf: float, drawdown_pct: float = 0.0) -> str:
-    """81-state space: win_rate_bucket x conf_bucket x session_bucket x drawdown_bucket."""
+def _vol_bucket(vol_pct: float) -> str:
+    """
+    Volatility bucket derived from the SL-distance as a percentage of entry price.
+    Since SL is typically set as N×ATR from entry, this is a cheap ATR proxy
+    available at trade-close time without an extra OHLCV fetch.
+
+    Thresholds:
+      < 1.0%  → tight  (typical forex / index scalp in calm market)
+      ≥ 1.0%  → wide   (crypto, gold, oil, or a high-volatility forex session)
+    """
+    return "wide" if vol_pct >= 1.0 else "tight"
+
+
+def _state(win_rate: float, avg_conf: float, drawdown_pct: float = 0.0, vol_pct: float = 0.0) -> str:
+    """162-state space: wr × conf × session × drawdown × volatility (3×3×3×3×2)."""
     return (
         f"{_wr_bucket(win_rate)}_{_conf_bucket(avg_conf)}"
-        f"_{_session_bucket()}_{_drawdown_bucket(drawdown_pct)}"
+        f"_{_session_bucket()}_{_drawdown_bucket(drawdown_pct)}_{_vol_bucket(vol_pct)}"
     )
 
 
@@ -151,20 +164,20 @@ class RLAgent:
         """Return True if signal confidence meets the learned threshold."""
         return confidence >= self._conf_thresh
 
-    def observe(self, win_rate: float, avg_conf: float, reward: float, drawdown_pct: float = 0.0) -> None:
+    def observe(self, win_rate: float, avg_conf: float, reward: float, drawdown_pct: float = 0.0, vol_pct: float = 0.0) -> None:
         """
         Called after a trade closes. Updates Q-table based on outcome.
         reward = profit_pct (positive = win, negative = loss).
         Reward is clipped to [-0.10, 0.10] to prevent large single-trade
         spikes (e.g. news events, gold volatility) from distorting Q-values.
         drawdown_pct = current daily drawdown % (0.0 = fresh day, 4.0 = 4% down).
-        Used to expand state space so the agent de-risks when near the circuit-breaker.
+        vol_pct      = SL-distance as % of entry price (ATR proxy for volatility regime).
         """
         with self._lock:
             # Normalise reward: clip extreme values so Q-table stays stable
             reward = max(-0.10, min(0.10, float(reward)))
             self._n_updates += 1
-            new_state = _state(win_rate, avg_conf, drawdown_pct)
+            new_state = _state(win_rate, avg_conf, drawdown_pct, vol_pct)
             self._update_q(new_state, reward)
             action_idx = self._choose_action(new_state)
             conf_delta, risk_delta = ACTIONS[action_idx]
@@ -295,9 +308,10 @@ class RLAgentManager:
         win_rate:     float,
         avg_conf:     float,
         drawdown_pct: float = 0.0,
+        vol_pct:      float = 0.0,
     ) -> None:
         """Feed a closed trade result into the appropriate RL agent."""
-        self.agent(trading_type).observe(win_rate, avg_conf, profit_pct, drawdown_pct)
+        self.agent(trading_type).observe(win_rate, avg_conf, profit_pct, drawdown_pct, vol_pct)
 
     def status(self) -> dict:
         return {tt: ag.status() for tt, ag in self._agents.items()}
