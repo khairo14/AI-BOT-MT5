@@ -29,10 +29,10 @@
     "news_pause": true
   },
   "ai": {
-    "price_prediction_enabled": false,
+    "price_prediction_enabled": true,
     "confidence_filter_enabled": false,
     "confidence_threshold": 60,
-    "rl_agent_enabled": false
+    "rl_agent_enabled": true
   },
   "signal_expiry_seconds": {
     "M1": 60,

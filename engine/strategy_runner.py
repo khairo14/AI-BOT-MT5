@@ -237,12 +237,14 @@ class StrategyRunner:
         # The RL agent learns whether to scale position size up or down based on
         # recent win rate and confidence — this is how it feeds back into live sizing.
         try:
-            from ai.rl_agent import rl_manager as _rl
-            rf = _rl.risk_factor(trading_type)
-            if rf != 1.0:
-                min_lot = sym_info.get("min_lot", 0.01)
-                lot_step = sym_info.get("lot_step", 0.01)
-                lot = max(min_lot, round(round(lot * rf / lot_step) * lot_step, 2))
+            _rl_enabled = json.loads((CONFIG_DIR / "app.json").read_text()).get("ai", {}).get("rl_agent_enabled", True)
+            if _rl_enabled:
+                from ai.rl_agent import rl_manager as _rl
+                rf = _rl.risk_factor(trading_type)
+                if rf != 1.0:
+                    min_lot = sym_info.get("min_lot", 0.01)
+                    lot_step = sym_info.get("lot_step", 0.01)
+                    lot = max(min_lot, round(round(lot * rf / lot_step) * lot_step, 2))
         except Exception:
             pass  # RL not available — use raw lot as-is
 

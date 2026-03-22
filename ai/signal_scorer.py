@@ -95,8 +95,14 @@ class SignalScorer:
         """
         Ask the RL agent whether this signal's confidence clears the
         dynamically-learned threshold for the given trading type.
-        Defaults to True (pass-through) if rl_manager is unavailable.
+        Defaults to True (pass-through) if rl_agent_enabled=false or rl_manager unavailable.
         """
+        try:
+            cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            if not cfg.get("ai", {}).get("rl_agent_enabled", True):
+                return True  # RL gate disabled — let all signals through
+        except Exception:
+            pass
         try:
             from ai.rl_agent import rl_manager
             return rl_manager.should_take_signal(trading_type, confidence)
@@ -110,7 +116,14 @@ class SignalScorer:
         Align LSTM P(up) with signal direction.
         BUY: high P(up) → high score.
         SELL: low P(up) → high score.
+        Returns 0.5 (neutral) when price_prediction_enabled=false.
         """
+        try:
+            cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            if not cfg.get("ai", {}).get("price_prediction_enabled", True):
+                return 0.5  # LSTM disabled — contribute neutral score
+        except Exception:
+            pass
         prob = self.predictor.predict(symbol, df, trading_type)
         return prob if direction.upper() == "BUY" else (1.0 - prob)
 
