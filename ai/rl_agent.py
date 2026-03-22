@@ -244,19 +244,6 @@ class RLAgent:
             reward + GAMMA * next_max - prev[self._last_action]
         )
 
-    def _save(self) -> None:
-        path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
-        payload = {
-            "q":            self._q,
-            "conf_thresh":  self._conf_thresh,
-            "risk_factor":  self._risk_factor,
-            "last_state":   self._last_state,
-            "last_action":  self._last_action,
-            "n_updates":    self._n_updates,
-        }
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-
     def _load(self) -> None:
         path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
         # Migrate old filename (no mode suffix) to new name on first run

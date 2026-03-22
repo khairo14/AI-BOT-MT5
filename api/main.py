@@ -93,15 +93,16 @@ async def lifespan(app: FastAPI):
         # Wire the SignalBus so approve → execute works
         bus.init(mt5_client, order_manager)
         # G-3: wire circuit-breaker alert → WebSocket broadcast
+        # Capture the running loop reference NOW (we are inside the lifespan coroutine,
+        # so get_running_loop() is safe). The callback fires from a worker thread later,
+        # so we must NOT call get_event_loop() inside it — that is not thread-safe.
         from api.websocket.feed import manager as _ws_manager
+        _running_loop = asyncio.get_running_loop()
         def _on_cb(kind: str, message: str) -> None:
-            import asyncio as _asyncio
-            loop = _asyncio.get_event_loop()
-            if loop and loop.is_running():
-                _asyncio.run_coroutine_threadsafe(
-                    _ws_manager.broadcast_alert({"type": "circuit_breaker", "kind": kind, "message": message}),
-                    loop,
-                )
+            asyncio.run_coroutine_threadsafe(
+                _ws_manager.broadcast_alert({"type": "circuit_breaker", "kind": kind, "message": message}),
+                _running_loop,
+            )
         _risk_manager._on_circuit_breaker = _on_cb
         # Start the strategy runner background loop (passes the same instance)
         start_runner_loop(mt5_client, order_manager, _risk_manager)

@@ -16,6 +16,7 @@ Below 0.50 is low (gray).
 from __future__ import annotations
 
 import json
+import threading
 import time as _time
 from pathlib import Path
 
@@ -28,20 +29,26 @@ from ai.predictor import PricePredictor, predictor as _predictor_singleton
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "app.json"
 
 # TTL cache — re-read app.json at most once every 5 s
+# Protected by a lock because strategy runner calls this from multiple threads.
 _cfg_cache: dict = {}
 _cfg_loaded_at: float = 0.0
 _CFG_TTL = 5.0
+_cfg_lock = threading.Lock()
 
 def _get_app_cfg() -> dict:
     global _cfg_cache, _cfg_loaded_at
     now = _time.monotonic()
     if now - _cfg_loaded_at < _CFG_TTL:
-        return _cfg_cache
-    try:
-        _cfg_cache = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    _cfg_loaded_at = now
+        return _cfg_cache   # fast path — no lock needed (stale read is acceptable)
+    with _cfg_lock:
+        # Re-check after acquiring lock to avoid double reload
+        if now - _cfg_loaded_at < _CFG_TTL:
+            return _cfg_cache
+        try:
+            _cfg_cache = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        _cfg_loaded_at = now
     return _cfg_cache
 
 

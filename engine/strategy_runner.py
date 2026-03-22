@@ -407,7 +407,8 @@ class StrategyRunner:
             max_corr = 1
         mode_prefix = sig.comment.split("|")[0] if "|" in sig.comment else ""
         try:
-            positions = mt5.positions_get()
+            with self.client._lock:
+                positions = mt5.positions_get()
             if not positions:
                 return True
             count = 0
