@@ -28,6 +28,7 @@ from __future__ import annotations
 import itertools
 import json
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
@@ -44,6 +45,16 @@ MIN_BACKTEST_SIGNALS      = 10   # discard combos that fired fewer signals (rais
 MAX_GRID_COMBOS           = 64   # cap to keep backtest fast
 BACKTEST_COOLDOWN_HOURS   = 24   # min hours between automatic re-backtests
 LIVE_REFINE_WIN_THRESH    = 0.45 # re-optimize when win_rate drops below this
+MAX_CONCURRENT_OPT        = 2    # max simultaneous optimizer jobs (prevents CPU starvation / MT5 disconnect)
+
+# Spread cost in R-units (round-trip bid/ask spread + typical slippage per mode).
+# This is subtracted from each simulated trade so unrealistic tight-spread combos
+# are penalised during grid search.
+SPREAD_COST_R: dict[str, float] = {
+    "scalping":    0.15,   # tight stops → spread ~15% of 1R
+    "day_trading": 0.05,   # spread ~5% of 1R
+    "swing":       0.02,   # spread ~2% of 1R for wide swing targets
+}
 
 # Walk-forward step (every Nth bar) and max hold per mode
 _BACKTEST_CONFIG = {
@@ -218,8 +229,10 @@ def _backtest_combo(
     step: int,
     max_hold: int,
     warmup: int,
+    spread_r: float = 0.0,
 ) -> tuple[float, float, int]:
-    """Walk-forward backtest one param combo. Returns (win_rate, avg_rr, n_trades)."""
+    """Walk-forward backtest one param combo. Returns (win_rate, avg_rr, n_trades).
+    spread_r deducted from each trade result to simulate round-trip spread+slippage."""
     wins: list[float] = []
     rrs:  list[float] = []
     i = warmup
@@ -235,8 +248,10 @@ def _backtest_combo(
                     sig.entry_price, sig.sl_price, sig.tp_price or 0.0,
                     max_hold,
                 )
-                wins.append(float(won))
-                rrs.append(rr)
+                # Apply spread cost: reduces R:R of wins and deepens losses
+                rr_adj = rr - spread_r
+                wins.append(float(rr_adj > 0))
+                rrs.append(rr_adj)
                 i += max(max_hold // 4, step)
                 continue
         except Exception:
@@ -274,10 +289,15 @@ class ParamOptimizer:
         df: pd.DataFrame,
         trading_type: str,
     ) -> bool:
-        """Start background optimization. Returns False if already running."""
+        """Start background optimization. Returns False if already running or at concurrency limit."""
         key = f"{strategy_name}__{symbol}"
         with self._lock:
             if key in self._running:
+                return False
+            if len(self._running) >= MAX_CONCURRENT_OPT:
+                logger.info(
+                    f"Optimizer at max concurrency ({MAX_CONCURRENT_OPT}), skipping {key}"
+                )
                 return False
             self._running.add(key)
         t = threading.Thread(
@@ -408,10 +428,13 @@ class ParamOptimizer:
         best_score  = -1.0
         best_n      = 0
 
+        spread_r = SPREAD_COST_R.get(trading_type, 0.05)
+
         for combo in combos:
+            time.sleep(0)  # yield CPU between combos to prevent event-loop starvation
             wr, avg_rr, n = _backtest_combo(
                 strategy_cls, dispatch, df, combo,
-                cfg["step"], cfg["max_hold"], cfg["warmup"],
+                cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r,
             )
             # Score = win_rate weighted by quality of avg R:R
             # Zero-score combos with negative avg_rr

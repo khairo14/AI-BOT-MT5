@@ -79,9 +79,13 @@ export default function MLPage() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   // AI gate settings
-  const [gateEnabled, setGateEnabled] = useState(false);
+  const [lstmEnabled, setLstmEnabled]   = useState(true);
+  const [rlEnabled, setRlEnabled]       = useState(true);
+  const [gateEnabled, setGateEnabled]   = useState(false);
   const [gateThreshold, setGateThreshold] = useState(60);
-  const [gateSaving, setGateSaving] = useState(false);
+  const [gateSaving, setGateSaving]     = useState(false);
+  const [scorerWeights, setScorerWeights] = useState({ lstm: 40, rr: 25, trend: 20, volume: 15 });
+  const [scorerSaving, setScorerSaving] = useState(false);
 
   // LSTM table filter/sort
   const [lstmSearch, setLstmSearch] = useState("");
@@ -110,6 +114,17 @@ export default function MLPage() {
         if (ai_cfg) {
           setGateEnabled(Boolean(ai_cfg.confidence_filter_enabled));
           setGateThreshold(Number(ai_cfg.confidence_threshold ?? 60));
+          setLstmEnabled(Boolean(ai_cfg.price_prediction_enabled ?? true));
+          setRlEnabled(Boolean(ai_cfg.rl_agent_enabled ?? true));
+          const w = ai_cfg.scorer_weights;
+          if (w) {
+            setScorerWeights({
+              lstm:   Math.round((Number(w.lstm)   || 0.40) * 100),
+              rr:     Math.round((Number(w.rr)     || 0.25) * 100),
+              trend:  Math.round((Number(w.trend)  || 0.20) * 100),
+              volume: Math.round((Number(w.volume) || 0.15) * 100),
+            });
+          }
         }
       }
       const statsMap: Record<string, MemStats> = {};
@@ -450,20 +465,76 @@ export default function MLPage() {
         </div>
       </section>
 
-      {/* ── 0. AI Confidence Gate ──────────────────────────────────────── */}
+      {/* ── 0. AI Controls ─────────────────────────────────────────────── */}
       <section>
         <SectionHeader
-          title="AI Confidence Gate"
-          sub="Filter signals below a minimum confidence score. The RL agent always applies its own dynamic threshold regardless of this setting."
+          title="AI Controls"
+          sub="Master switches for each AI component. Changes take effect immediately — no restart needed."
         />
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-5">
 
-          {/* Toggle */}
+          {/* LSTM Prediction toggle */}
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-white font-medium">Static confidence filter</p>
+              <p className="text-sm text-white font-medium">LSTM Price Prediction</p>
               <p className="text-xs text-gray-500 mt-0.5">
-                When on, signals with confidence below the threshold are hard-blocked.
+                When off, the LSTM sub-score is replaced with 0.5 neutral (R:R, trend &amp; volume still score normally).
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const next = !lstmEnabled;
+                setLstmEnabled(next);
+                setGateSaving(true);
+                try {
+                  await patchAppConfig({ ai: { price_prediction_enabled: next } });
+                } catch (_) { setLstmEnabled(!next); }
+                setGateSaving(false);
+              }}
+              className={`inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                lstmEnabled ? "bg-blue-600" : "bg-gray-700"
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform transform ${
+                lstmEnabled ? "translate-x-6" : "translate-x-1"
+              }`} />
+            </button>
+          </div>
+
+          {/* RL Agent toggle */}
+          <div className="flex items-center justify-between border-t border-gray-800 pt-4">
+            <div>
+              <p className="text-sm text-white font-medium">RL Agent Gate</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                When off, RL confidence gate is bypassed and lot sizing uses the raw risk.json value with no RL multiplier.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const next = !rlEnabled;
+                setRlEnabled(next);
+                setGateSaving(true);
+                try {
+                  await patchAppConfig({ ai: { rl_agent_enabled: next } });
+                } catch (_) { setRlEnabled(!next); }
+                setGateSaving(false);
+              }}
+              className={`inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                rlEnabled ? "bg-blue-600" : "bg-gray-700"
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform transform ${
+                rlEnabled ? "translate-x-6" : "translate-x-1"
+              }`} />
+            </button>
+          </div>
+
+          {/* Static gate toggle */}
+          <div className="flex items-center justify-between border-t border-gray-800 pt-4">
+            <div>
+              <p className="text-sm text-white font-medium">Static Confidence Filter</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                When on, signals with confidence below the threshold are hard-blocked before the RL gate.
               </p>
             </div>
             <button
@@ -472,7 +543,7 @@ export default function MLPage() {
                 setGateEnabled(next);
                 setGateSaving(true);
                 try {
-                    await patchAppConfig({ ai: { confidence_filter_enabled: next } });
+                  await patchAppConfig({ ai: { confidence_filter_enabled: next } });
                 } catch (_) { setGateEnabled(!next); }
                 setGateSaving(false);
               }}
@@ -486,9 +557,9 @@ export default function MLPage() {
             </button>
           </div>
 
-          {/* Threshold slider — only shown when gate is on */}
+          {/* Threshold slider — only shown when static gate is on */}
           {gateEnabled && (
-            <div className="space-y-2">
+            <div className="space-y-2 pl-4 border-l-2 border-blue-800">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-white font-medium">Minimum confidence threshold</p>
                 <span className="text-blue-400 font-semibold text-sm">{gateThreshold}%</span>
@@ -514,22 +585,59 @@ export default function MLPage() {
                 <span>60% — balanced</span>
                 <span>85% — strict</span>
               </div>
-              <p className="text-xs text-gray-500">
-                Recommended: keep off while the LSTM is still learning (first 100 trades).
-                Enable at 60–65% once you have steady win-rate data.
-              </p>
             </div>
           )}
 
           {gateSaving && <p className="text-xs text-gray-500">Saving…</p>}
 
-          {/* RL gate info — always active */}
-          <div className="border-t border-gray-800 pt-4">
-            <p className="text-sm text-white font-medium mb-1">RL dynamic gate</p>
-            <p className="text-xs text-gray-500">
-              Always active — starts at 55% and self-tunes between 40%–85% after each closed trade.
-              Current thresholds are shown in the RL Agents section below.
-            </p>
+          {/* Scorer weights */}
+          <div className="border-t border-gray-800 pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-white font-medium">Signal Scorer Weights</p>
+              <p className="text-xs text-gray-500">Auto-normalised — any ratio works.</p>
+            </div>
+            {(["lstm", "rr", "trend", "volume"] as const).map((k) => {
+              const labels: Record<string, string> = {
+                lstm: "LSTM Prediction (40%)",
+                rr: "Risk:Reward Quality (25%)",
+                trend: "Trend Alignment (20%)",
+                volume: "Volume Confirmation (15%)",
+              };
+              return (
+                <div key={k} className="space-y-1">
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>{labels[k]}</span>
+                    <span className="text-white font-medium">{scorerWeights[k]}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={60}
+                    step={1}
+                    value={scorerWeights[k]}
+                    onChange={(e) => setScorerWeights((prev) => ({ ...prev, [k]: Number(e.target.value) }))}
+                    onMouseUp={async () => {
+                      setScorerSaving(true);
+                      try {
+                        await patchAppConfig({
+                          ai: {
+                            scorer_weights: {
+                              lstm:   scorerWeights.lstm   / 100,
+                              rr:     scorerWeights.rr     / 100,
+                              trend:  scorerWeights.trend  / 100,
+                              volume: scorerWeights.volume / 100,
+                            },
+                          },
+                        });
+                      } catch (_) {}
+                      setScorerSaving(false);
+                    }}
+                    className="w-full accent-purple-500"
+                  />
+                </div>
+              );
+            })}
+            {scorerSaving && <p className="text-xs text-gray-500">Saving weights…</p>}
           </div>
         </div>
       </section>
@@ -540,7 +648,7 @@ export default function MLPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-3 text-sm text-gray-400">
           <div className="flex gap-3">
             <span className="text-blue-400 font-semibold w-48 shrink-0">LSTM retrain</span>
-            <span>Every 20th closed trade per symbol × mode (runs in background thread, non-blocking).</span>
+            <span>Every 20th closed trade per symbol × mode. Also triggers on: model age &gt; 7 days (if ≥ 10 trades exist) or 5 consecutive losses (regime change indicator).</span>
           </div>
           <div className="flex gap-3">
             <span className="text-purple-400 font-semibold w-48 shrink-0">Param optimizer</span>

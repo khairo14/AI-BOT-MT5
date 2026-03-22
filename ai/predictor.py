@@ -43,7 +43,7 @@ HIDDEN_SIZE  = 64
 NUM_LAYERS   = 2
 EPOCHS       = 20
 BATCH_SIZE   = 32
-INPUT_SIZE   = 6    # OHLCV (5) × + is_near_news binary flag
+INPUT_SIZE   = 7    # close_return, hl_range, oc_body, volume_norm, upper_wick, is_near_news, atr_norm
 
 
 def _torch_available() -> bool:
@@ -52,6 +52,12 @@ def _torch_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def _get_device():
+    """Return CUDA device if available, otherwise CPU."""
+    import torch
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def _build_lstm():
@@ -106,11 +112,12 @@ class PricePredictor:
         if features is None or len(features) < SEQUENCE_LEN:
             return 0.5
 
-        scaler = self._scalers[key]
-        scaled = scaler.transform(features[-SEQUENCE_LEN:])
-        x      = torch.tensor(scaled, dtype=torch.float32).unsqueeze(0)
+        _device = _get_device()
+        scaler  = self._scalers[key]
+        scaled  = scaler.transform(features[-SEQUENCE_LEN:])
+        x       = torch.tensor(scaled, dtype=torch.float32).unsqueeze(0).to(_device)
 
-        model = self._models[key]
+        model = self._models[key].to(_device)
         model.eval()
         with torch.no_grad():
             prob = model(x).item()
@@ -169,6 +176,7 @@ class PricePredictor:
         import torch.nn as nn
         from sklearn.preprocessing import StandardScaler
 
+        _device = _get_device()
         key = _model_key(symbol, trading_type)
         tf  = TRADING_TYPE_TF.get(trading_type, "H1")
 
@@ -190,15 +198,15 @@ class PricePredictor:
                 else 0.0
             )
 
-        X = torch.tensor(np.array(X), dtype=torch.float32)
-        y = torch.tensor(np.array(y), dtype=torch.float32).unsqueeze(1)
+        X = torch.tensor(np.array(X), dtype=torch.float32).to(_device)
+        y = torch.tensor(np.array(y), dtype=torch.float32).unsqueeze(1).to(_device)
 
         # Train / val split (80/20)
         split   = int(len(X) * 0.8)
         X_train, X_val = X[:split], X[split:]
         y_train, y_val = y[:split], y[split:]
 
-        model     = _build_lstm()
+        model     = _build_lstm().to(_device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         criterion = nn.BCELoss()
 
@@ -257,8 +265,10 @@ class PricePredictor:
             if not scaler_file.exists():
                 continue
             try:
+                _load_device = _get_device()
                 model = _build_lstm()
-                model.load_state_dict(torch.load(model_file, map_location="cpu", weights_only=True))
+                model.load_state_dict(torch.load(model_file, map_location=_load_device, weights_only=True))
+                model.to(_load_device)
                 model.eval()
                 with open(scaler_file, "rb") as f:
                     scaler = pickle.load(f)
@@ -278,13 +288,14 @@ class PricePredictor:
 
 def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_trading") -> Optional[np.ndarray]:
     """
-    Return (N, 6) feature array:
+    Return (N, 7) feature array:
       col 0 — close return (close[i] - close[i-1]) / close[i-1]
       col 1 — bar range (high - low) / close
       col 2 — open-close body (close - open) / open
       col 3 — volume normalised by mean
       col 4 — upper wick (high - close) / close
       col 5 — is_near_news binary flag (1.0 within 30 min of high-impact event, else 0.0)
+      col 6 — ATR(14) normalised by close (volatility regime indicator)
     """
     needed = {"open", "high", "low", "close"}
     vol_col = "volume" if "volume" in df.columns else "tick_volume"
@@ -312,7 +323,16 @@ def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_
     except Exception:
         news_flag = np.zeros(len(close))
 
-    return np.column_stack([ret_c, ret_hl, ret_oc, vol_n, wick, news_flag])
+    # ATR(14) normalised by close — volatility regime indicator (7th feature)
+    prev_close = np.concatenate([[close[0]], close[:-1]])
+    tr = np.maximum(high - low, np.maximum(
+        np.abs(high - prev_close),
+        np.abs(low  - prev_close),
+    ))
+    atr14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
+    atr_n = atr14 / (close + eps)
+
+    return np.column_stack([ret_c, ret_hl, ret_oc, vol_n, wick, news_flag, atr_n])
 
 
 def _model_key(symbol: str, trading_type: str) -> str:

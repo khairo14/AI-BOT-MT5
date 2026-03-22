@@ -751,13 +751,40 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     o for o in _mem.recent(n=500, live_only=True)
                     if o.get("symbol") == _sym and o.get("trading_type") == _type
                 ])
-                # Only fire once per 20-trade window: after hitting 20, 40, 60, …
-                # Avoid duplicate by checking predictor is not already training.
+                # Trigger 1: every 20th closed trade (baseline)
                 _prev_total = _total - 1   # this trade just closed
                 _retrain = (
                     not predictor.is_training(_sym, _type) and
                     _total > 0 and _total % 20 == 0 and _prev_total % 20 != 0
                 )
+                _retrain_reason = "20-trade window" if _retrain else ""
+
+                # Trigger 2: model is stale (> 7 days since last training, ≥ 10 trades)
+                if not _retrain and _total >= 10 and not predictor.is_training(_sym, _type):
+                    _meta = predictor._metadata.get(_key, {})
+                    _trained_at_iso = _meta.get("trained_at")
+                    if _trained_at_iso:
+                        try:
+                            _age_h = (
+                                datetime.now(tz=timezone.utc) -
+                                datetime.fromisoformat(_trained_at_iso)
+                            ).total_seconds() / 3600
+                            if _age_h > 7 * 24:
+                                _retrain = True
+                                _retrain_reason = f"stale model ({_age_h:.0f}h old)"
+                        except Exception:
+                            pass
+
+                # Trigger 3: 5 consecutive losses (regime change indicator)
+                if not _retrain and not predictor.is_training(_sym, _type):
+                    _recent_5 = [
+                        o for o in _mem.recent(n=30, live_only=True)
+                        if o.get("symbol") == _sym and o.get("trading_type") == _type
+                    ][-5:]
+                    if len(_recent_5) == 5 and all(o.get("profit", 0) < 0 for o in _recent_5):
+                        _retrain = True
+                        _retrain_reason = "5 consecutive losses"
+
                 if _retrain:
                     _tf_str = TRADING_TYPE_TF.get(_type, "H1")
                     from api.main import get_mt5_client
@@ -766,7 +793,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         _df = await asyncio.to_thread(_client.get_ohlcv, _sym, _tf_str, 1000)
                         if _df is not None and not _df.empty:
                             predictor.train_async(_sym, _df, _type)
-                            logger.info(f"Auto LSTM retrain triggered: {_key} ({_total} trades)")
+                            logger.info(f"Auto LSTM retrain triggered [{_retrain_reason}]: {_key} ({_total} trades)")
             except Exception as _exc:
                 logger.debug(f"Auto LSTM retrain skipped: {_exc}")
 

@@ -36,7 +36,32 @@ from engine.strategies.swing.ema_trend_rider import EMATrendRider
 from engine.strategies.swing.fibonacci_rsi import FibonacciRSI
 from engine.strategies.swing.weekly_breakout import WeeklyBreakout
 
+from engine.order_manager import BOT_MAGIC
+
 CONFIG_DIR = Path(__file__).parent.parent / "config"
+
+# ── Correlation guard ─────────────────────────────────────────────────────────
+# USD polarity for each symbol when signal direction is BUY.
+# USD_SHORT = going long this pair is a bearish USD bet (e.g. EURUSD BUY)
+# USD_LONG  = going long this pair is a bullish USD bet  (e.g. USDJPY BUY)
+_USD_POLARITY_BUY: dict[str, str] = {
+    "EURUSD": "USD_SHORT", "GBPUSD": "USD_SHORT",
+    "AUDUSD": "USD_SHORT", "NZDUSD": "USD_SHORT",
+    "XAUUSD": "USD_SHORT", "XAGUSD": "USD_SHORT",
+    "USDJPY": "USD_LONG",  "USDCAD": "USD_LONG",
+    "USDCHF": "USD_LONG",  "USDSGD": "USD_LONG",
+    "USDMXN": "USD_LONG",  "USDZAR": "USD_LONG",
+}
+
+
+def _usd_direction(symbol: str, direction: str) -> str | None:
+    """Return 'USD_LONG' or 'USD_SHORT' for this trade, or None if not a USD pair."""
+    buy_polarity = _USD_POLARITY_BUY.get(symbol)
+    if buy_polarity is None:
+        return None
+    return buy_polarity if direction == "BUY" else (
+        "USD_SHORT" if buy_polarity == "USD_LONG" else "USD_LONG"
+    )
 
 STRATEGY_MAP = {
     "ema_scalp":        EMAScalp,
@@ -314,6 +339,10 @@ class StrategyRunner:
         except Exception as _exc:
             logger.debug(f"Signal scorer skipped for {symbol}: {_exc}")
 
+        # Correlation guard — prevent double USD-direction exposure within same mode
+        if not self._correlation_ok(strat_sig):
+            return None
+
         return strat_sig
 
     def run_mode(self, trading_type: str, symbols_override: list[str] | None = None) -> list[StrategySignal]:
@@ -341,6 +370,43 @@ class StrategyRunner:
                 )
                 new_signals.append(best)
         return new_signals
+
+    def _correlation_ok(self, sig: StrategySignal) -> bool:
+        """Return False if an open bot position in the same trading mode already
+        expresses the same USD directional bet — preventing double USD exposure."""
+        this_usd_dir = _usd_direction(sig.symbol, sig.direction)
+        if this_usd_dir is None:
+            return True  # non-USD pair — no correlation check
+        try:
+            cfg = json.loads((CONFIG_DIR / "app.json").read_text())
+            max_corr = int(cfg.get("max_correlated_positions", 1))
+        except Exception:
+            max_corr = 1
+        mode_prefix = sig.comment.split("|")[0] if "|" in sig.comment else ""
+        try:
+            positions = mt5.positions_get()
+            if not positions:
+                return True
+            count = 0
+            for p in positions:
+                if p.magic != BOT_MAGIC:
+                    continue
+                if mode_prefix and not (
+                    p.comment.startswith(mode_prefix + "|") or p.comment == mode_prefix
+                ):
+                    continue
+                p_dir = "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL"
+                if _usd_direction(p.symbol, p_dir) == this_usd_dir:
+                    count += 1
+            if count >= max_corr:
+                logger.debug(
+                    f"Correlation filter blocked {sig.strategy}/{sig.symbol}: "
+                    f"{count} open {this_usd_dir} position(s) in mode '{mode_prefix}'"
+                )
+                return False
+        except Exception:
+            pass  # if MT5 call fails, allow the signal through
+        return True
 
     def _execute(self, sig: StrategySignal) -> bool:
         open_positions = self.client.get_open_positions()

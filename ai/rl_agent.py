@@ -42,9 +42,12 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 # Q-learning hyper-parameters
-ALPHA       = 0.1    # learning rate
-GAMMA       = 0.9    # discount factor
-EPSILON     = 0.15   # exploration rate (fixed — no decay needed for this use)
+ALPHA         = 0.1    # learning rate
+GAMMA         = 0.9    # discount factor
+# Exploration: decays from EPSILON_START toward EPSILON_MIN as the agent gains experience
+EPSILON_START = 0.15   # initial exploration rate (15% random actions)
+EPSILON_MIN   = 0.02   # floor — always keep 2% exploration for non-stationarity
+EPSILON_DECAY = 0.995  # per-update multiplier (reaches ~5% after ~250 trades)
 
 # Parameter bounds
 CONF_MIN, CONF_MAX   = 0.40, 0.85
@@ -118,6 +121,7 @@ class RLAgent:
         self._risk_factor = DEFAULT_RISK_FACTOR
         self._last_state:  Optional[str] = None
         self._last_action: Optional[int] = None
+        self._n_updates:   int            = 0  # total observe() calls — drives epsilon decay
 
         self._load()
 
@@ -139,8 +143,13 @@ class RLAgent:
         """
         Called after a trade closes. Updates Q-table based on outcome.
         reward = profit_pct (positive = win, negative = loss).
+        Reward is clipped to [-0.10, 0.10] to prevent large single-trade
+        spikes (e.g. news events, gold volatility) from distorting Q-values.
         """
         with self._lock:
+            # Normalise reward: clip extreme values so Q-table stays stable
+            reward = max(-0.10, min(0.10, float(reward)))
+            self._n_updates += 1
             new_state = _state(win_rate, avg_conf)
             self._update_q(new_state, reward)
             action_idx = self._choose_action(new_state)
@@ -161,20 +170,24 @@ class RLAgent:
             )
 
     def status(self) -> dict:
+        current_eps = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self._n_updates))
         return {
-            "trading_type":        self.trading_type,
-            "mode":                self._mode,
+            "trading_type":         self.trading_type,
+            "mode":                 self._mode,
             "confidence_threshold": round(self._conf_thresh, 4),
             "risk_factor":          round(self._risk_factor, 4),
             "q_states":             len(self._q),
             "last_state":           self._last_state,
+            "n_updates":            self._n_updates,
+            "epsilon":              round(current_eps, 4),
         }
 
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _choose_action(self, state: str) -> int:
-        """Epsilon-greedy action selection."""
-        if random.random() < EPSILON:
+        """Epsilon-greedy action selection with exponential decay."""
+        current_eps = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self._n_updates))
+        if random.random() < current_eps:
             return random.randrange(len(ACTIONS))
         q_vals = self._q.get(state, [0.0] * len(ACTIONS))
         return int(max(range(len(ACTIONS)), key=lambda i: q_vals[i]))
@@ -197,6 +210,7 @@ class RLAgent:
             "risk_factor":  self._risk_factor,
             "last_state":   self._last_state,
             "last_action":  self._last_action,
+            "n_updates":    self._n_updates,
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f)
@@ -222,6 +236,7 @@ class RLAgent:
             self._risk_factor = data.get("risk_factor", DEFAULT_RISK_FACTOR)
             self._last_state  = data.get("last_state")
             self._last_action = data.get("last_action")
+            self._n_updates   = data.get("n_updates", 0)
             logger.info(
                 f"RL agent loaded [{self.trading_type}/{self._mode}]: "
                 f"conf_thresh={self._conf_thresh:.2f} "
