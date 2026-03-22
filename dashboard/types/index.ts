@@ -101,6 +101,12 @@ export interface AppConfig {
     confidence_filter_enabled?: boolean;
     confidence_threshold?: number;
     rl_agent_enabled?: boolean;
+    scorer_weights?: {
+      lstm?:   number;
+      rr?:     number;
+      trend?:  number;
+      volume?: number;
+    };
   };
 }
 
