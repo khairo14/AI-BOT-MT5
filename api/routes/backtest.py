@@ -36,6 +36,7 @@ STRATEGIES_BY_TYPE: dict[str, list[str]] = {
 _HISTORY_DIR = Path("data/backtest_history")
 _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 _INDEX_FILE  = _HISTORY_DIR / "_index.jsonl"
+_MAX_BACKTEST_RUNS = 200   # L-5: cap stored runs to prevent unbounded disk growth
 
 
 # ── Persistence helpers ───────────────────────────────────────────────────
@@ -84,6 +85,16 @@ def _delete_run(run_id: str) -> bool:
         path.unlink()
         return True
     return False
+
+
+def _prune_history() -> None:
+    """Delete oldest runs when total exceeds _MAX_BACKTEST_RUNS."""
+    index = _read_index()
+    if len(index) <= _MAX_BACKTEST_RUNS:
+        return
+    index.sort(key=lambda e: e.get("run_at", ""), reverse=True)
+    for old in index[_MAX_BACKTEST_RUNS:]:
+        _delete_run(old["id"])
 
 
 # ── Request model ─────────────────────────────────────────────────────────
@@ -236,6 +247,7 @@ async def backtest_run(req: BacktestRequest):
         "risk_pct":       req.risk_pct,
     }
     await asyncio.to_thread(_append_index, index_entry)
+    await asyncio.to_thread(_prune_history)
 
     # ── Feed simulated trades into trade memory ───────────────────────────
     # Each BacktestTrade becomes a TradeOutcome with source="backtest" so the
@@ -262,6 +274,7 @@ async def backtest_run(req: BacktestRequest):
                 open_time=t.entry_time,
                 close_time=t.exit_time,
                 duration_mins=0.0,
+                mode="backtest",
                 extra={"source": "backtest", "run_id": run_id, "rr": t.rr},
             )
             memory.record(outcome)

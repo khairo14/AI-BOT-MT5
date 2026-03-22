@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -77,6 +78,8 @@ class SignalBus:
     def __init__(self):
         # signal_id → signal dict  (shared with signals.py routes via bus.queue)
         self.queue: dict[str, dict] = {}
+        # G-5: rolling archive of completed/expired/rejected signals (last 500)
+        self.archive: deque[dict] = deque(maxlen=500)
         self._client = None
         self._order_manager = None
 
@@ -119,7 +122,9 @@ class SignalBus:
                 except Exception:
                     pass
         for sid in to_delete:
-            self.queue.pop(sid, None)
+            sig = self.queue.pop(sid, None)
+            if sig:
+                self.archive.append(dict(sig))
         if to_delete:
             logger.debug(f"SignalBus: purged {len(to_delete)} stale signals")
         return len(to_delete)
@@ -603,12 +608,52 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     MAX_POLLS  = 7 * 24 * 120   # 7 days at 30 s intervals
     open_time  = datetime.now(tz=timezone.utc).isoformat()
 
+    # H-6 fix: fetch broker server-clock UTC offset ONCE per trade (it's a session constant).
+    # Re-fetching it inside the 30 s poll loop wasted a live tick request per iteration.
+    _srv_offset = await asyncio.to_thread(_get_server_utc_offset_secs, signal.get("symbol", "EURUSD"))
+
+    # G-6: tp2 partial-close state — set to True after tp1 partial-close fires
+    _tp1_triggered = False
+
     for _ in range(MAX_POLLS):
         await asyncio.sleep(30)
         try:
             # Position still open?
             positions = await asyncio.to_thread(mt5.positions_get, ticket=ticket)
             if positions:
+                # G-6: check if price has reached tp1 and we have a tp2 target
+                tp2 = float(signal.get("tp2") or 0)
+                tp1 = float(signal.get("tp") or 0)
+                if tp2 and tp1 and not _tp1_triggered:
+                    pos = positions[0]
+                    direction = signal.get("direction", "").upper()
+                    hit_tp1 = (
+                        (direction == "BUY"  and pos.price_current >= tp1) or
+                        (direction == "SELL" and pos.price_current <= tp1)
+                    )
+                    if hit_tp1:
+                        _tp1_triggered = True
+                        # Partial close 50% + move SL to break-even
+                        try:
+                            from api.main import get_mt5_client as _gclient3
+                            from engine.order_manager import OrderManager as _OM
+                            _c3 = _gclient3()
+                            if _c3:
+                                _om3 = _OM(_c3)
+                                # 50% partial close — rounds down to broker min step
+                                _half_vol = round(pos.volume * 0.5, 2)
+                                if _half_vol >= 0.01:
+                                    _om3.partial_close(ticket, _half_vol)
+                                # Move SL to break-even
+                                _be = float(signal.get("fill_price") or signal.get("entry_price", 0))
+                                if _be:
+                                    _om3.modify_position(ticket, sl=_be, tp=tp2)
+                                logger.info(
+                                    f"TP1 partial-close fired: #{ticket} {signal.get('symbol')} "
+                                    f"vol={_half_vol} BE={_be} → now targeting TP2={tp2}"
+                                )
+                        except Exception as _pce:
+                            logger.warning(f"TP1 partial-close failed #{ticket}: {_pce}")
                 continue   # still open
 
             # Look in history by position ID — more reliable than time range
@@ -637,7 +682,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             direction  = signal["direction"].upper()
             pips       = ((close_px - entry_px) if direction == "BUY" else (entry_px - close_px)) / pip_val
             # Use deal.time corrected for broker server-clock offset to store true UTC
-            _srv_offset = await asyncio.to_thread(_get_server_utc_offset_secs, sym)
+            # _srv_offset was fetched once before the loop (H-6 fix)
             close_time = datetime.fromtimestamp(deal.time - _srv_offset, tz=timezone.utc).isoformat()
 
             # Determine outcome type
@@ -650,8 +695,10 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             else:
                 outcome_type = "manual_close"
 
+            # H-1 fix: derive close_dt from close_time (already broker-offset-corrected)
+            # rather than raw deal.time so both endpoints share the same UTC clock.
             open_dt  = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
-            close_dt = datetime.fromtimestamp(deal.time, tz=timezone.utc)
+            close_dt = datetime.fromisoformat(close_time)
             dur_mins = (close_dt - open_dt).total_seconds() / 60
 
             outcome = TradeOutcome(
@@ -699,44 +746,39 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 logger.warning(f"Journal write failed for #{ticket}: {_je}")
 
             trading_type = signal.get("trading_mode", "day_trading")
-            stats = memory.stats(trading_type=trading_type, live_only=True)
+            stats = memory.stats(trading_type=trading_type, live_only=True, exclude_manual=True)
 
-            # Update consecutive win/loss counter in the risk manager
+            # Update consecutive win/loss counter in the risk manager.
+            # M-6 fix: only update when the current account mode matches the trade's mode
+            # so paper losses don't trip the live circuit breaker and vice-versa.
             _drawdown_pct = 0.0
+            _profit_pct   = profit
             try:
                 from api.runner_loop import _risk_manager as _rm
-                if _rm is not None:
+                from engine.account_store import current_mode as _get_mode
+                _cur_mode = _get_mode()
+                if _rm is not None and _cur_mode == signal.get("account_mode", _cur_mode):
                     if profit > 0:
                         _rm.record_win(trading_type)
                     else:
                         _rm.record_loss(trading_type)
-                    # Update drawdown tracking with current account balance
+                    # H-3 fix: single account fetch reused for both drawdown tracking and RL reward.
                     from api.main import get_mt5_client as _gclient2
                     _c2 = _gclient2()
                     if _c2 and _c2.is_connected():
                         _acct = await asyncio.to_thread(_c2.get_account_info)
                         if _acct and _acct.get("balance"):
-                            _rm.update_balance(_acct["balance"])
+                            _bal = _acct["balance"]
+                            _rm.update_balance(_bal)
                             # Compute current daily drawdown % for RL state
                             if _rm._day_start_balance and _rm._day_start_balance > 0:
                                 _drawdown_pct = max(
                                     0.0,
-                                    (_rm._day_start_balance - _acct["balance"])
-                                    / _rm._day_start_balance * 100.0,
+                                    (_rm._day_start_balance - _bal) / _rm._day_start_balance * 100.0,
                                 )
-            except Exception:
-                pass
-
-            # Normalise reward: convert raw USD profit → % of account balance so
-            # the RL reward is scale-invariant across account sizes and lot sizes.
-            _profit_pct = profit
-            try:
-                from api.main import get_mt5_client as _gc
-                _c = _gc()
-                if _c and _c.is_connected():
-                    _acct = await asyncio.to_thread(_c.get_account_info)
-                    if _acct and _acct.get("balance", 0) > 0:
-                        _profit_pct = profit / _acct["balance"] * 100.0
+                            # Normalise profit → % of balance (scale-invariant RL reward)
+                            if _bal > 0:
+                                _profit_pct = profit / _bal * 100.0
             except Exception:
                 pass
 

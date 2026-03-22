@@ -189,12 +189,27 @@ class RLAgent:
             )
             self._last_state  = new_state
             self._last_action = action_idx
-            self._save()
-            logger.debug(
-                f"RL [{self.trading_type}] reward={reward:+.4f} "
-                f"conf_thresh={self._conf_thresh:.2f} "
-                f"risk_factor={self._risk_factor:.2f}"
-            )
+            # Snapshot payload to save outside the lock (avoid holding lock during I/O)
+            _save_payload = {
+                "q":            dict(self._q),
+                "conf_thresh":  self._conf_thresh,
+                "risk_factor":  self._risk_factor,
+                "last_state":   self._last_state,
+                "last_action":  self._last_action,
+                "n_updates":    self._n_updates,
+            }
+            _save_path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
+        # Disk write happens outside the lock to avoid blocking concurrent reads
+        try:
+            with open(_save_path, "w", encoding="utf-8") as f:
+                json.dump(_save_payload, f)
+        except Exception as exc:
+            logger.warning(f"RL save failed [{self.trading_type}]: {exc}")
+        logger.debug(
+            f"RL [{self.trading_type}] reward={reward:+.4f} "
+            f"conf_thresh={self._conf_thresh:.2f} "
+            f"risk_factor={self._risk_factor:.2f}"
+        )
 
     def status(self) -> dict:
         current_eps = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self._n_updates))
@@ -294,6 +309,18 @@ class RLAgentManager:
 
     def agent(self, trading_type: str) -> RLAgent:
         return self._agents.get(trading_type, self._agents["day_trading"])
+
+    def switch_mode(self, new_mode: str) -> None:
+        """Reload all RL agents for a new account mode (live ↔ paper).
+        Called by the account route after a successful mode switch so the correct
+        Q-tables are loaded and live/paper learning remains isolated.
+        """
+        self._mode = new_mode
+        self._agents = {
+            tt: RLAgent(tt, mode=new_mode)
+            for tt in ("scalping", "day_trading", "swing")
+        }
+        logger.info(f"RL agents reloaded for mode: {new_mode}")
 
     def should_take_signal(self, trading_type: str, confidence: float) -> bool:
         return self.agent(trading_type).should_take_signal(confidence)

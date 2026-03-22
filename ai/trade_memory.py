@@ -90,9 +90,11 @@ class TradeMemory:
             data = [d for d in data if d.get("extra", {}).get("source") != "backtest"]
         return data[-n:]
 
-    def stats(self, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None) -> dict:
+    def stats(self, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None, exclude_manual: bool = False) -> dict:
         """Aggregate stats used by the RL agent and dashboard."""
         outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, mode=mode)
+        if exclude_manual:
+            outcomes = [o for o in outcomes if o.get("outcome") in ("tp_hit", "sl_hit")]
         if not outcomes:
             return {"total": 0}
         total   = len(outcomes)

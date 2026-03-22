@@ -53,6 +53,8 @@ class RiskManager:
         self._daily_halted = False
         self._weekly_halted = False
         self._cb_enabled = True   # can be toggled via API
+        # G-3: optional callback — set from api/main.py to broadcast a WS alert
+        self._on_circuit_breaker = None   # Callable[[str, str], None] | None
 
     # ------------------------------------------------------------------
     # Position Sizing
@@ -229,6 +231,8 @@ class RiskManager:
                     f"CIRCUIT BREAKER: Daily drawdown {daily_dd:.2f}% >= {daily_limit}%. "
                     "All new trades halted for today."
                 )
+                if self._on_circuit_breaker:
+                    self._on_circuit_breaker("daily", f"Daily drawdown {daily_dd:.2f}% reached {daily_limit}% limit")
 
         # Check weekly drawdown
         if self._week_start_balance:
@@ -240,6 +244,8 @@ class RiskManager:
                     f"CIRCUIT BREAKER: Weekly drawdown {weekly_dd:.2f}% >= {weekly_limit}%. "
                     "All new trades halted until next Monday."
                 )
+                if self._on_circuit_breaker:
+                    self._on_circuit_breaker("weekly", f"Weekly drawdown {weekly_dd:.2f}% reached {weekly_limit}% limit")
 
     def record_loss(self, trading_mode: str) -> None:
         """Increment consecutive loss counter for a mode. Pauses mode if limit hit."""

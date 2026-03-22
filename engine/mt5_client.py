@@ -42,7 +42,7 @@ class MT5Client:
 
     def __init__(self):
         self._connected = False
-        self._lock = threading.Lock()  # MT5 API is not thread-safe — serialize all calls
+        self._lock = threading.RLock()  # RLock allows re-entrant acquisition (needed by OrderManager)
         # account_store takes priority over env var so dashboard switches survive restarts
         self._trading_mode = load_mode()
         self._credentials = self._load_credentials()
@@ -106,7 +106,11 @@ class MT5Client:
         logger.info("MT5 connection closed.")
 
     def is_connected(self) -> bool:
-        return self._connected and mt5.terminal_info() is not None
+        """H-4 fix: protect mt5.terminal_info() call with _lock (not thread-safe)."""
+        if not self._connected:
+            return False
+        with self._lock:
+            return mt5.terminal_info() is not None
 
     def reconnect(self) -> bool:
         """Re-initialize and log in after a dropped connection."""
@@ -184,20 +188,19 @@ class MT5Client:
 
     def get_symbol_info(self, symbol: str) -> Optional[dict]:
         """Return tick size, pip value, spread, and trading constraints."""
+        # M-11 fix: single lock acquisition covers all three MT5 calls, eliminating
+        # the thread-interleave window between symbol_info, symbol_select, and symbol_info_tick.
         with self._lock:
             info = mt5.symbol_info(symbol)
-        if info is None:
-            logger.warning(f"Symbol not found: {symbol}")
-            return None
-
-        # Ensure symbol is visible in Market Watch
-        if not info.visible:
-            with self._lock:
+            if info is None:
+                logger.warning(f"Symbol not found: {symbol}")
+                return None
+            # Ensure symbol is visible in Market Watch
+            if not info.visible:
                 if not mt5.symbol_select(symbol, True):
                     logger.warning(f"symbol_select failed for {symbol}: {mt5.last_error()}")
-
-        with self._lock:
             tick = mt5.symbol_info_tick(symbol)
+
         spread_pips = round(info.spread * info.point, 5)
 
         return {

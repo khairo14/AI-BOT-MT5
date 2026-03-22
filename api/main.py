@@ -4,6 +4,7 @@ Mounts all REST routes and the WebSocket live feed.
 """
 
 import asyncio
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -49,6 +50,25 @@ def get_risk_manager() -> "RiskManager | None":
     return _risk_manager
 
 
+async def _mt5_watchdog() -> None:
+    """G-1: Periodically verify MT5 connection and reconnect if it dropped."""
+    while True:
+        await asyncio.sleep(30)
+        if mt5_client is None:
+            continue
+        try:
+            connected = await asyncio.to_thread(mt5_client.is_connected)
+            if not connected:
+                logger.warning("MT5 watchdog: connection lost — attempting reconnect...")
+                ok = await asyncio.to_thread(mt5_client.reconnect)
+                if ok:
+                    logger.info("MT5 watchdog: reconnected successfully.")
+                else:
+                    logger.error("MT5 watchdog: reconnect failed — will retry in 30 s.")
+        except Exception as _exc:
+            logger.warning(f"MT5 watchdog error: {_exc}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global mt5_client, _risk_manager
@@ -72,6 +92,17 @@ async def lifespan(app: FastAPI):
         )
         # Wire the SignalBus so approve → execute works
         bus.init(mt5_client, order_manager)
+        # G-3: wire circuit-breaker alert → WebSocket broadcast
+        from api.websocket.feed import manager as _ws_manager
+        def _on_cb(kind: str, message: str) -> None:
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            if loop and loop.is_running():
+                _asyncio.run_coroutine_threadsafe(
+                    _ws_manager.broadcast_alert({"type": "circuit_breaker", "kind": kind, "message": message}),
+                    loop,
+                )
+        _risk_manager._on_circuit_breaker = _on_cb
         # Start the strategy runner background loop (passes the same instance)
         start_runner_loop(mt5_client, order_manager, _risk_manager)
         # Recover close events for any trades that closed while server was offline
@@ -80,6 +111,8 @@ async def lifespan(app: FastAPI):
             asyncio.create_task(recover_unclosed_trades(mt5_client))
         except Exception as _rec_exc:
             logger.warning(f"Startup recovery task failed to launch: {_rec_exc}")
+        # G-1: MT5 watchdog — reconnect automatically if the terminal drops
+        asyncio.create_task(_mt5_watchdog())
     yield
     # Shutdown
     if mt5_client:
@@ -98,10 +131,13 @@ app = FastAPI(
     dependencies=[Depends(verify_api_key)],
 )
 
-# CORS — allow the Next.js dashboard (localhost:3000) during development
+# CORS — allow the Next.js dashboard during development; override via CORS_ORIGINS env var
+_cors_origins = os.getenv(
+    "CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

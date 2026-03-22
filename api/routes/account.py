@@ -3,6 +3,7 @@ Account routes — balance, equity, margin, mode switching.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 from pydantic import BaseModel
 
 from api.dependencies import get_client
@@ -89,6 +90,13 @@ def switch_mode(body: SwitchModeRequest, client: MT5Client = Depends(get_client)
         _rm = get_risk_manager()
         if _rm is not None:
             _rm.reset_for_mode_switch()
+    except Exception:
+        pass
+
+    # Reload RL agents for the new account mode (C-2 fix)
+    try:
+        from ai.rl_agent import rl_manager
+        rl_manager.switch_mode(mode)
     except Exception:
         pass
 

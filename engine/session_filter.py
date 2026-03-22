@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time as _time
 from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -129,6 +130,7 @@ class SessionFilter:
     def __init__(self):
         self._sym_cat = _load_symbol_categories()
         self._sym_cat_lock = threading.Lock()
+        self._sym_cat_loaded_at: float = _time.monotonic()
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -193,8 +195,9 @@ class SessionFilter:
 
     def _get_category(self, symbol: str) -> str:
         with self._sym_cat_lock:
-            if not self._sym_cat:
+            if not self._sym_cat or _time.monotonic() - self._sym_cat_loaded_at > 300:
                 self._sym_cat = _load_symbol_categories()
+                self._sym_cat_loaded_at = _time.monotonic()
         return self._sym_cat.get(symbol.upper(), "forex")
 
     @staticmethod

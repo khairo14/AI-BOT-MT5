@@ -84,6 +84,22 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
         if _paused:
             continue
 
+        # Auto-reconnect: if MT5 dropped, attempt reconnection before proceeding.
+        # This handles terminal restarts, network hiccups, and broker disconnections.
+        if not client.is_connected():
+            logger.warning("Strategy runner: MT5 disconnected — attempting reconnect...")
+            try:
+                reconnected = await asyncio.to_thread(client.reconnect)
+                if not reconnected:
+                    logger.error("Strategy runner: MT5 reconnect failed — skipping tick")
+                    await asyncio.sleep(30)
+                    continue
+                logger.info("Strategy runner: MT5 reconnected successfully")
+            except Exception as _rc_exc:
+                logger.error(f"Strategy runner: MT5 reconnect error: {_rc_exc}")
+                await asyncio.sleep(30)
+                continue
+
         # Sync paper trade ledger every 60 s when in paper mode
         _paper_sync_counter += 5
         if _paper_sync_counter >= 60:
@@ -150,6 +166,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
         "timeframe":    sig.timeframe,
         "note":         sig.comment,
         "rr":           rr,
+        "tp2":          sig.tp2_price if hasattr(sig, "tp2_price") else None,
     }
 
 

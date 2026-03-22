@@ -60,6 +60,20 @@ class ConnectionManager:
         for ws in dead:
             self.disconnect(ws)
 
+    async def broadcast_alert(self, alert: dict) -> None:
+        """Send an alert (e.g. circuit_breaker) to ALL connected clients."""
+        if not self._connections:
+            return
+        payload = json.dumps(alert)
+        dead = []
+        for ws in list(self._connections.keys()):
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
     @property
     def active_symbols(self) -> set[str]:
         """All symbols currently subscribed to across all connections."""
@@ -87,6 +101,7 @@ _poller_task: Optional[asyncio.Task] = None
 _no_tick_counts: dict[str, int] = {}
 _no_tick_logged:  set[str]       = set()   # symbols already warned once
 _NO_TICK_SUPPRESS_AFTER = 3  # suppress after 3 failed polls
+_tick_counter: int = 0       # module-level counter for position broadcast throttle
 
 
 async def _tick_poller():
@@ -132,10 +147,9 @@ async def _tick_poller():
             await manager.broadcast_tick(symbol, payload)
 
         # Broadcast open positions every 5 seconds (not every tick)
-        # Use a counter stored in the task itself
-        counter = getattr(_tick_poller, "_counter", 0) + 1
-        _tick_poller._counter = counter
-        if counter % 5 == 0:
+        global _tick_counter
+        _tick_counter += 1
+        if _tick_counter % 5 == 0:
             positions = client.get_open_positions()
             # Serialise datetime objects
             for p in positions:

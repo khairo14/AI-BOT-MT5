@@ -63,11 +63,15 @@ class OrderManager:
                 error=f"Duplicate rejected: {req.symbol} {req.direction} already open",
             )
 
-        tick = mt5.symbol_info_tick(req.symbol)
+        # L-1 fix: acquire client lock for all raw MT5 calls so they don't race
+        # with MT5Client's own lock-protected calls (tick feed, OHLCV fetches, etc.).
+        with self._client._lock:
+            tick = mt5.symbol_info_tick(req.symbol)
         if tick is None:
             return OrderResult(success=False, error=f"No tick data for {req.symbol}")
 
-        sym_info = mt5.symbol_info(req.symbol)
+        with self._client._lock:
+            sym_info = mt5.symbol_info(req.symbol)
         if sym_info is None:
             return OrderResult(success=False, error=f"Symbol info unavailable for {req.symbol}")
 
@@ -124,7 +128,8 @@ class OrderManager:
             "type_filling": filling,
         }
 
-        result = mt5.order_send(request)
+        with self._client._lock:
+            result = mt5.order_send(request)
 
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment if result else str(mt5.last_error())
@@ -156,7 +161,8 @@ class OrderManager:
     ) -> bool:
         """Move SL and/or TP on an existing open position."""
 
-        positions = mt5.positions_get(ticket=ticket)
+        with self._client._lock:
+            positions = mt5.positions_get(ticket=ticket)
         if not positions:
             logger.warning(f"modify_position: ticket #{ticket} not found")
             return False
@@ -174,7 +180,8 @@ class OrderManager:
             "magic":    pos.magic,
         }
 
-        result = mt5.order_send(request)
+        with self._client._lock:
+            result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment if result else str(mt5.last_error())
             logger.error(f"modify_position #{ticket} failed: {err}")
@@ -190,13 +197,15 @@ class OrderManager:
     def close_position(self, ticket: int, reason: str = "manual") -> bool:
         """Close an open position by ticket number."""
 
-        positions = mt5.positions_get(ticket=ticket)
+        with self._client._lock:
+            positions = mt5.positions_get(ticket=ticket)
         if not positions:
             logger.warning(f"close_position: ticket #{ticket} not found")
             return False
 
         pos = positions[0]
-        tick = mt5.symbol_info_tick(pos.symbol)
+        with self._client._lock:
+            tick = mt5.symbol_info_tick(pos.symbol)
         if tick is None:
             logger.error(f"close_position: no tick for {pos.symbol}")
             return False
@@ -223,7 +232,8 @@ class OrderManager:
             "type_filling": self._filling_for(pos.symbol),
         }
 
-        result = mt5.order_send(request)
+        with self._client._lock:
+            result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment if result else str(mt5.last_error())
             logger.error(f"close_position #{ticket} failed: {err}")
@@ -241,7 +251,8 @@ class OrderManager:
 
     def _filling_for(self, symbol: str) -> int:
         """Return the broker-supported filling mode for a symbol (same logic as place_market_order)."""
-        sym_info = mt5.symbol_info(symbol)
+        with self._client._lock:
+            sym_info = mt5.symbol_info(symbol)
         if sym_info is None:
             return mt5.ORDER_FILLING_RETURN
         fm = sym_info.filling_mode
@@ -270,13 +281,15 @@ class OrderManager:
         Close a percentage of an open position.
         close_pct: 0.0–1.0 (e.g. 0.5 = close 50%)
         """
-        positions = mt5.positions_get(ticket=ticket)
+        with self._client._lock:
+            positions = mt5.positions_get(ticket=ticket)
         if not positions:
             logger.warning(f"partial_close: ticket #{ticket} not found")
             return False
 
         pos = positions[0]
-        symbol_info = mt5.symbol_info(pos.symbol)
+        with self._client._lock:
+            symbol_info = mt5.symbol_info(pos.symbol)
         if symbol_info is None:
             return False
 
@@ -289,7 +302,8 @@ class OrderManager:
         step = symbol_info.volume_step
         close_volume = round(round(close_volume / step) * step, 8)
 
-        tick = mt5.symbol_info_tick(pos.symbol)
+        with self._client._lock:
+            tick = mt5.symbol_info_tick(pos.symbol)
         if tick is None:
             return False
 
@@ -314,7 +328,8 @@ class OrderManager:
             "type_filling": self._filling_for(pos.symbol),
         }
 
-        result = mt5.order_send(request)
+        with self._client._lock:
+            result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment if result else str(mt5.last_error())
             logger.error(f"partial_close #{ticket} ({close_pct*100:.0f}%) failed: {err}")
@@ -324,6 +339,28 @@ class OrderManager:
             f"Partial close | #{ticket} | {pos.symbol} | "
             f"{close_pct*100:.0f}% ({close_volume} lots) | Reason: {reason}"
         )
+        # H-5 fix: journal the partial close so trailing audit logs are complete
+        try:
+            from engine.trade_journal import trade_journal
+            from engine.account_store import current_mode
+            from datetime import datetime, timezone
+            trade_journal.log(
+                ticket=ticket,
+                symbol=pos.symbol,
+                direction="BUY" if pos.type == mt5.ORDER_TYPE_BUY else "SELL",
+                volume=close_volume,
+                entry=pos.price_open,
+                sl=pos.sl,
+                tp=pos.tp if pos.tp else None,
+                profit=result.profit if hasattr(result, "profit") else None,
+                trading_type="",
+                account_mode=current_mode(),
+                comment=reason,
+                event="partial_close",
+                close_time=datetime.now(tz=timezone.utc).isoformat(),
+            )
+        except Exception as _je:
+            logger.debug(f"partial_close journal write failed for #{ticket}: {_je}")
         return True
 
     # ------------------------------------------------------------------
@@ -335,7 +372,8 @@ class OrderManager:
         Mode is derived from the comment prefix (scalp|, day|, swing|).
         An empty/unrecognised prefix falls back to matching any bot position on that symbol.
         """
-        positions = mt5.positions_get(symbol=symbol)
+        with self._client._lock:
+            positions = mt5.positions_get(symbol=symbol)
         if not positions:
             return False
         order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL

@@ -40,6 +40,28 @@ from engine.order_manager import BOT_MAGIC
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
+# ── App config TTL cache (M-1/M-10 fix) ──────────────────────────────────────
+# Reading app.json on every signal (up to 3× per symbol×strategy) is wasteful.
+# Cache it for 5 seconds so hot-path reads are in-memory while still picking up
+# dashboard config changes within one scan tick.
+import time as _time
+_app_cfg_cache: dict = {}
+_app_cfg_loaded_at: float = 0.0
+_APP_CFG_TTL = 5.0  # seconds
+
+
+def _get_app_config() -> dict:
+    global _app_cfg_cache, _app_cfg_loaded_at
+    now = _time.monotonic()
+    if now - _app_cfg_loaded_at < _APP_CFG_TTL:
+        return _app_cfg_cache
+    try:
+        _app_cfg_cache = json.loads((CONFIG_DIR / "app.json").read_text(encoding="utf-8-sig"))
+    except Exception:
+        pass  # keep using stale cache on read error
+    _app_cfg_loaded_at = now
+    return _app_cfg_cache
+
 # ── Correlation guard ─────────────────────────────────────────────────────────
 # USD polarity for each symbol when signal direction is BUY.
 # USD_SHORT = going long this pair is a bearish USD bet (e.g. EURUSD BUY)
@@ -262,7 +284,7 @@ class StrategyRunner:
         # The RL agent learns whether to scale position size up or down based on
         # recent win rate and confidence — this is how it feeds back into live sizing.
         try:
-            _rl_enabled = json.loads((CONFIG_DIR / "app.json").read_text()).get("ai", {}).get("rl_agent_enabled", True)
+            _rl_enabled = _get_app_config().get("ai", {}).get("rl_agent_enabled", True)
             if _rl_enabled:
                 from ai.rl_agent import rl_manager as _rl
                 rf = _rl.risk_factor(trading_type)
@@ -318,7 +340,7 @@ class StrategyRunner:
             )
             # AI/ML confidence filter (enabled via Settings → AI → confidence_filter_enabled)
             try:
-                _ai = json.loads((CONFIG_DIR / "app.json").read_text()).get("ai", {})
+                _ai = _get_app_config().get("ai", {})
                 if _ai.get("confidence_filter_enabled"):
                     _threshold = float(_ai.get("confidence_threshold", 60)) / 100.0
                     if strat_sig.confidence < _threshold:
@@ -361,6 +383,8 @@ class StrategyRunner:
                 sig = self._run_strategy(trading_type, symbol, strat_name)
                 if sig:
                     candidates.append(sig)
+                else:
+                    logger.debug(f"[G-7] No signal: {trading_type}/{symbol}/{strat_name}")
             if candidates:
                 # Pick highest-confidence signal; if tied, first one wins
                 best = max(candidates, key=lambda s: s.confidence)
@@ -378,8 +402,7 @@ class StrategyRunner:
         if this_usd_dir is None:
             return True  # non-USD pair — no correlation check
         try:
-            cfg = json.loads((CONFIG_DIR / "app.json").read_text())
-            max_corr = int(cfg.get("max_correlated_positions", 1))
+            max_corr = int(_get_app_config().get("max_correlated_positions", 1))
         except Exception:
             max_corr = 1
         mode_prefix = sig.comment.split("|")[0] if "|" in sig.comment else ""

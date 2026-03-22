@@ -191,13 +191,16 @@ def rl_reset(trading_type: TRADING_TYPE):
     """Reset a specific RL agent back to default thresholds (useful for testing)."""
     import os
     from ai.rl_agent import DATA_DIR, DEFAULT_CONF_THRESH, DEFAULT_RISK_FACTOR
-    path = DATA_DIR / f"rl_qtable_{trading_type}.json"
+    from engine.account_store import current_mode as _cm
+    _mode = _cm()
+    # Delete the mode-suffixed file that is actually in use (e.g. rl_qtable_scalping_live.json)
+    path = DATA_DIR / f"rl_qtable_{trading_type}_{_mode}.json"
     if path.exists():
         os.remove(path)
     # Reinitialise agent
     from ai.rl_agent import RLAgent
-    rl_manager._agents[trading_type] = RLAgent(trading_type)
-    return {"status": "reset", "trading_type": trading_type}
+    rl_manager._agents[trading_type] = RLAgent(trading_type, mode=_mode)
+    return {"status": "reset", "trading_type": trading_type, "mode": _mode}
 
 
 # ───────────────────────────────────

@@ -169,7 +169,7 @@ class EABridge:
             return False
 
     def _get_dir(self) -> Optional[Path]:
-        """Resolve and cache the MT5 common data path."""
+        """Resolve and cache the MT5 common data path. Cleans up orphan cmd files on first call."""
         if self._base_dir is not None and self._base_dir.exists():
             return self._base_dir
 
@@ -183,6 +183,15 @@ class EABridge:
             common = Path(info.commondata_path) / "Files" / "evotrade"
             common.mkdir(parents=True, exist_ok=True)
             self._base_dir = common
+            # G-8: clean up orphaned ea_cmd_*.json files left by a previous crash
+            _now = time.time()
+            for orphan in common.glob("ea_cmd_*.json"):
+                try:
+                    if _now - orphan.stat().st_mtime > 30:
+                        orphan.unlink(missing_ok=True)
+                        logger.debug(f"EABridge: removed orphan {orphan.name}")
+                except OSError:
+                    pass
             return common
         except Exception as exc:
             logger.debug(f"EABridge._get_dir error: {exc}")

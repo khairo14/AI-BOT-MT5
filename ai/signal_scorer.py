@@ -16,6 +16,7 @@ Below 0.50 is low (gray).
 from __future__ import annotations
 
 import json
+import time as _time
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,23 @@ from loguru import logger
 from ai.predictor import PricePredictor, predictor as _predictor_singleton
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "app.json"
+
+# TTL cache — re-read app.json at most once every 5 s
+_cfg_cache: dict = {}
+_cfg_loaded_at: float = 0.0
+_CFG_TTL = 5.0
+
+def _get_app_cfg() -> dict:
+    global _cfg_cache, _cfg_loaded_at
+    now = _time.monotonic()
+    if now - _cfg_loaded_at < _CFG_TTL:
+        return _cfg_cache
+    try:
+        _cfg_cache = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    _cfg_loaded_at = now
+    return _cfg_cache
 
 
 class SignalScorer:
@@ -41,7 +59,7 @@ class SignalScorer:
     def _weights(self) -> tuple[float, float, float, float]:
         """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) from app.json or defaults."""
         try:
-            cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            cfg = _get_app_cfg()
             w = cfg.get("ai", {}).get("scorer_weights", {})
             if w:
                 wl = float(w.get("lstm",   self._DEFAULT_W_LSTM))
@@ -98,7 +116,7 @@ class SignalScorer:
         Defaults to True (pass-through) if rl_agent_enabled=false or rl_manager unavailable.
         """
         try:
-            cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            cfg = _get_app_cfg()
             if not cfg.get("ai", {}).get("rl_agent_enabled", True):
                 return True  # RL gate disabled — let all signals through
         except Exception:
@@ -119,7 +137,7 @@ class SignalScorer:
         Returns 0.5 (neutral) when price_prediction_enabled=false.
         """
         try:
-            cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+            cfg = _get_app_cfg()
             if not cfg.get("ai", {}).get("price_prediction_enabled", True):
                 return 0.5  # LSTM disabled — contribute neutral score
         except Exception:
