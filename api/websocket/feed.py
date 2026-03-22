@@ -37,7 +37,7 @@ class ConnectionManager:
     async def broadcast_tick(self, symbol: str, payload: dict) -> None:
         """Send a tick update to all clients subscribed to this symbol."""
         dead = []
-        for ws, syms in self._connections.items():
+        for ws, syms in list(self._connections.items()):
             if symbol in syms:
                 try:
                     await ws.send_text(json.dumps(payload))

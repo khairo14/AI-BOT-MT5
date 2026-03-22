@@ -197,6 +197,12 @@ def run_backtest(
     i        = warmup
     trade_num = 0
 
+    try:
+        from ai.param_optimizer import optimizer as _opt
+        _strat_params: dict = _opt.get_params(strategy_name, symbol) or {}
+    except Exception:
+        _strat_params = {}
+
     while i < len(df) - 1:
         # Slice secondary dataframes up to (and including) the current bar time
         # to prevent lookahead bias.
@@ -211,7 +217,7 @@ def run_backtest(
 
         # Run strategy on bars 0..i
         try:
-            strat  = strategy_cls(symbol=symbol, params={})
+            strat  = strategy_cls(symbol=symbol, params=_strat_params)
             result = dispatch(strat, df.iloc[: i + 1], sliced_extra)
             sig    = result.signal
         except Exception as exc:
