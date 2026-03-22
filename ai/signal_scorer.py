@@ -140,19 +140,34 @@ class SignalScorer:
 
     def _trend_score(self, direction: str, df: pd.DataFrame) -> float:
         """
-        EMA50 vs EMA200 trend alignment with signal direction.
-        Aligned = 1.0, counter-trend = 0.1, not enough data = 0.5 (neutral).
+        Graduated EMA50 vs EMA200 trend-alignment score.
+
+        Rather than a binary 1.0 / 0.1 flip, the score is proportional to how
+        far apart the EMAs are (as % of EMA200).  This penalises weak or choppy
+        trends gradually instead of treating a 1-pip separation identically to a
+        100-pip separation.
+
+        Scoring formula:
+          gap_pct        = (EMA50 - EMA200) / |EMA200|   (positive = bullish)
+          trend_strength = clip(gap_pct / 0.02, -1, 1)   (normalised to ±1 at ±2% gap)
+          raw_score      = 0.5 + 0.4 × trend_strength     (range [0.1, 0.9])
+
+        BUY  direction: raw_score  (high = trend aligned)
+        SELL direction: 1 - raw_score (inverted)
         """
         if len(df) < 200:
             return 0.5
         close  = df["close"].values.astype(float)
         ema50  = _ema(close, 50)
         ema200 = _ema(close, 200)
-        bullish = ema50[-1] > ema200[-1]
+        eps    = max(abs(ema200[-1]), 1e-8)
+        gap_pct        = (ema50[-1] - ema200[-1]) / eps
+        trend_strength = float(np.clip(gap_pct / 0.02, -1.0, 1.0))
+        raw_score      = round(0.5 + 0.4 * trend_strength, 4)   # [0.1, 0.9]
         if direction.upper() == "BUY":
-            return 1.0 if bullish else 0.1
+            return raw_score
         else:
-            return 1.0 if not bullish else 0.1
+            return round(1.0 - raw_score, 4)
 
     def _volume_score(self, df: pd.DataFrame) -> float:
         """

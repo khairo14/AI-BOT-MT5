@@ -136,15 +136,14 @@ class PaperTradeEngine:
                 pos.current_price = mt5_match.get("price_current", pos.current_price)
                 pos.profit        = mt5_match.get("profit", 0.0)
             else:
-                # Position no longer in MT5 — mark as closed
-                pos.closed     = True
-                pos.close_time = time.time()
-                price_info     = self.client.get_current_price(pos.symbol)
-                pos.close_price = (
-                    price_info.get("bid", pos.current_price)
-                    if pos.direction == "BUY"
-                    else price_info.get("ask", pos.current_price)
-                ) if price_info else pos.current_price
+                # Position no longer in MT5 — mark as closed.
+                # Use pos.current_price (last value synced from MT5's price_current field)
+                # rather than fetching a fresh bid/ask quote ~30 s after the trade closed.
+                # A fresh quote is unrelated to the actual fill price and introduces
+                # arbitrary slippage error into the P&L record.
+                pos.closed      = True
+                pos.close_time  = time.time()
+                pos.close_price = pos.current_price
                 with self._lock:
                     self._history.append(pos)
                 try:

@@ -1,6 +1,6 @@
 {
   "scalping": {
-    "enabled": true,
+    "enabled": false,
     "symbols": [
       "EURUSD",
       "USDJPY",
@@ -13,36 +13,18 @@
   "day_trading": {
     "enabled": true,
     "symbols": [
-      "GOLD",
-      "OILCash",
-      "EURUSD",
-      "GBPUSD",
-      "USDJPY",
-      "AUDUSD",
-      "Tesla",
-      "Nvidia",
-      "Amazon",
-      "GBPJPY"
+      "BTCUSD",
+      "ETHUSD"
     ],
     "timeframe": "M15/H1"
   },
   "swing": {
     "enabled": true,
     "symbols": [
-      "GOLD",
-      "OILCash",
-      "SILVER",
-      "BRENTCash",
       "BTCUSD",
       "ETHUSD",
       "XRPUSD",
-      "SOLUSD",
-      "Tesla",
-      "Nvidia",
-      "Google",
-      "Facebook",
-      "Netflix",
-      "AdvMicroDev"
+      "SOLUSD"
     ],
     "timeframe": "H4/D1"
   }

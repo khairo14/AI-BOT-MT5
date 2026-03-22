@@ -29,10 +29,12 @@ This document describes exactly what each AI component does, its current limits,
   - `oc_body` — (close − open) / open
   - `volume_norm` — volume / mean volume
   - `upper_wick` — (high − close) / close
-  - `is_near_news` — binary flag: 1.0 if within 30 min of a high-impact news event, else 0.0
+  - `is_near_news` — per-bar flag: 1.0 only for bars within the 45-min news blackout window (scaled to bar count for the timeframe), else 0.0. This prevents the train/inference distribution shift that occurred when the whole 60-bar sequence received the same current news state.
   - `atr_norm` — ATR(14) / close: normalised volatility regime indicator — tells the model whether the market is in a high/low volatility environment
 - Output: binary classification (up vs down) — not a price regression
 - Trained with `BCELoss` for 20 epochs, gradient clipping `max_norm=1.0`, 80/20 train/val split
+
+**Accuracy gate:** After training, if validation accuracy is below **52%** (statistically indistinguishable from random), the new weights are discarded and the previous model file is kept intact. This prevents a coin-flip model from overwriting a working one during low-data or adverse-regime retrains.
 
 **One model per symbol × trading type.** A `EURUSD` scalping model trains on M5 OHLCV. An `EURUSD` day trading model trains on H1. These are completely independent files stored as `ai/models/{symbol}_{type}_lstm.pt` + `{symbol}_{type}_scaler.pkl`.
 
@@ -79,6 +81,13 @@ This document describes exactly what each AI component does, its current limits,
 - `< 0.50` → Low (gray)
 
 **Graceful degradation:** If LSTM is untrained or throws an error, LSTM component returns `0.5` (neutral) rather than crashing the signal. The overall score still reflects R:R, trend, and volume.
+
+**Trend score — graduated (not binary):** The EMA alignment component uses a continuous score instead of a hard 1.0/0.1 flip:
+- `gap_pct = (EMA50 − EMA200) / |EMA200|` — measures how far apart the EMAs are as a percentage
+- `trend_strength = clip(gap_pct / 0.02, −1, +1)` — normalises: ±2% gap = ±1
+- `raw_score = 0.5 + 0.4 × trend_strength` — range **[0.1, 0.9]**
+- BUY direction uses `raw_score` directly; SELL direction uses `1 − raw_score`
+- A weak alignment (EMAs nearly equal) now correctly produces ~0.5, not a false 1.0
 
 **What it does NOT do:**
 - It does not block signals by itself. Scoring is informational until a gate checks the score.
@@ -139,21 +148,27 @@ As the RL agent learns from closed trades, it shifts the threshold up or down (�
 1. `confidence_threshold` — signals below this are suppressed (Gate 2 above)
 2. `risk_factor` — multiplier on the base risk% from `config/risk.json`
 
-**State space (27 states):**
+**State space (81 states):**
 
-State = `{win_rate_bucket}_{conf_bucket}_{session_bucket}`
+State = `{win_rate_bucket}_{conf_bucket}_{session_bucket}_{drawdown_bucket}`
 
-| | Conf: Low (<0.55) | Conf: Med (0.55–0.70) | Conf: High (>0.70) |
-|---|---|---|---|
-| **WR: Low (<40%)** | `low_low_*` | `low_med_*` | `low_high_*` |
-| **WR: Med (40–60%)** | `med_low_*` | `med_med_*` | `med_high_*` |
-| **WR: High (>60%)** | `high_low_*` | `high_med_*` | `high_high_*` |
+| Dimension | Buckets | Values |
+|---|---|---|
+| Win rate | 3 | `low` (<40%), `med` (40–60%), `high` (>60%) |
+| Confidence | 3 | `low` (<0.55), `med` (0.55–0.70), `high` (>0.70) |
+| Session | 3 | `overlap` (12–18 UTC), `active` (07–22 UTC), `quiet` |
+| Drawdown | 3 | `low` (<1.5% daily DD), `med` (1.5–3%), `high` (≥3%) |
 
-Each of the 9 WR×conf cells is further split by **session bucket** (`overlap`, `active`, `quiet`) → **27 total states**.
+3 × 3 × 3 × 3 = **81 total states**.
 
-- `overlap` — London/NY overlap (12:00–17:59 UTC)
-- `active` — London or New York open (07:00–21:59 UTC)
-- `quiet` — Asian session / off-hours
+The **drawdown bucket** was added to give the RL agent awareness of its current risk exposure. As daily drawdown approaches the 5% circuit-breaker limit, the agent enters different state rows and can learn to become more conservative (lower confidence threshold, lower risk factor) independently of its win-rate and recent confidence levels.
+
+Drawdown is computed in `signal_bus._poll_outcome` after each closed trade:
+```python
+drawdown_pct = max(0.0, (day_start_balance - balance) / day_start_balance * 100)
+```
+
+Backward compatibility: existing 27-key Q-table entries (e.g. `"low_low_overlap"`) simply won't match the new 81-state keys and will be treated as unseen states, explored fresh with epsilon. No data migration is needed.
 
 **Action space (9 joint actions):**
 Every combination of: `{decrease, hold, increase}` for `conf_threshold` × `{decrease, hold, increase}` for `risk_factor`.
@@ -170,7 +185,7 @@ Steps: `conf ±0.02`, `risk ±0.05`.
 
 **Hard limits:**
 - Operates only on the last ~50 trades from memory for win-rate calculation (inside `trade_memory.stats()`).
-- Does not consider session time, news, or volatility regime — just win rate + average confidence.
+- Does not consider news or volatility regime directly — state is built from win rate, avg confidence, session, and daily drawdown%.
 - Cannot increase `confidence_threshold` above `0.85` or `risk_factor` above `1.5`.
 - One agent per trading type — scalping/day_trading/swing RL tables are independent.
 
@@ -217,8 +232,12 @@ Steps: `conf ±0.02`, `risk ±0.05`.
 
 **Hard limits:**
 - Grid search is CPU-bound and synchronous within its background thread. Maximum **2 concurrent optimizer jobs** enforced (`MAX_CONCURRENT_OPT=2`) to prevent event-loop starvation and MT5 heartbeat timeouts. CPU yields (`time.sleep(0)`) between combo iterations allow the FastAPI event loop to stay responsive.
-- Simulates spread/slippage cost per mode (subtracted from each combination result during backtest): `scalping = 0.15R`, `day_trading = 0.05R`, `swing = 0.02R`. Combos that only appear profitable before spread are penalised and will not be selected.
-- Minimum 10 signals fired per combo before it qualifies — low-signal combos are discarded.
+- Simulates spread/slippage cost. Mode-based defaults: `scalping = 0.15R`, `day_trading = 0.05R`, `swing = 0.02R`. Per-symbol overrides take priority for high-spread assets (crypto, gold, indices) so their wider spreads are correctly penalised regardless of trading mode:
+  - Crypto (BTCUSD, ETHUSD, XRPUSD, SOLUSD): **0.25–0.30R**
+  - Gold / Silver: **0.10–0.12R**; Oil: **0.12R**
+  - US/EU indices (US30Cash, US100Cash, GER40Cash …): **0.08–0.10R**
+- Minimum **15 signals** fired per combo before it qualifies (raised from 10 — at 10 signals the ±31% confidence interval made scores unreliable; 15 narrows this to ±26%).
+- Same-bar SL/TP resolution: when both stop-loss and take-profit levels are touched within the same bar, SL is counted as hitting first (conservative). This prevents walk-forward win rates from being inflated by unrealistic TP-first assumptions on large news candles.
 - Optimized params affect the strategy on the **next** run — no restart needed (re-read from `config/optimized_params.json` each cycle).
 
 ---
@@ -345,12 +364,22 @@ All AI flags live in `config/app.json` under the `"ai"` key:
 | RL exploration rate | 15% → 2% (exponential decay over ~250 updates) |
 | RL reward clipping | ±0.10 per trade (prevents outlier distortion) |
 | Optimizer max grid combos | 64 |
-| Optimizer min signals per combo | 10 |
+| Optimizer min signals per combo | 15 |
 | Optimizer cooldown | 24 hours |
 | Optimizer max concurrency | 2 simultaneous jobs |
 | Optimizer spread cost — scalping | 0.15R per trade |
 | Optimizer spread cost — day trading | 0.05R per trade |
 | Optimizer spread cost — swing | 0.02R per trade |
+| Optimizer spread cost — crypto | 0.25–0.30R per trade (symbol override) |
+| Optimizer spread cost — gold/silver | 0.10–0.12R per trade (symbol override) |
+| Optimizer spread cost — indices | 0.08–0.10R per trade (symbol override) |
+| RL state space | 81 states (WR × conf × session × drawdown) |
+| RL drawdown buckets | low (<1.5%), med (1.5–3%), high (≥3% daily DD) |
+| LSTM accuracy gate | Skip save if val accuracy < 52% |
+| LSTM news flag window | Per-bar tail window (45 min ÷ TF minutes) |
+| Backtester SL/TP same-bar | SL counted first (conservative) |
+| US market holiday blocking | NYSE/NASDAQ holidays enforced for stock/us_index |
+| Paper trade close price | Last MT5-synced `price_current` (not fresh bid/ask) |
 | Auto-retrain trigger 1 | Every 20 closed trades per symbol×mode |
 | Auto-retrain trigger 2 | Model age > 7 days (requires ≥ 10 trades) |
 | Auto-retrain trigger 3 | 5 consecutive losses for symbol×mode |

@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +49,75 @@ def _load_symbol_categories() -> dict[str, str]:
         return result
     except Exception:
         return {}
+
+
+# ── US market holiday helpers ──────────────────────────────────────────────────
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    """Return the nth occurrence (1-based) of *weekday* (0=Mon, 3=Thu, etc.) in year/month."""
+    first = date(year, month, 1)
+    first_occurrence = first + timedelta(days=(weekday - first.weekday()) % 7)
+    return first_occurrence + timedelta(weeks=n - 1)
+
+
+def _last_weekday_in_month(year: int, month: int, weekday: int) -> date:
+    """Return the last occurrence of *weekday* in year/month."""
+    if month == 12:
+        last = date(year, 12, 31)
+    else:
+        last = date(year, month + 1, 1) - timedelta(days=1)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _easter(year: int) -> date:
+    """Compute Easter Sunday using the Anonymous Gregorian algorithm."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    ll = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * ll) // 451
+    month = (h + ll - 7 * m + 114) // 31
+    day   = (h + ll - 7 * m + 114) % 31 + 1
+    return date(year, month, day)
+
+
+def _observed(d: date) -> date:
+    """If holiday falls on Saturday → Friday observed; Sunday → Monday observed."""
+    if d.weekday() == 5:   # Saturday
+        return d - timedelta(days=1)
+    if d.weekday() == 6:   # Sunday
+        return d + timedelta(days=1)
+    return d
+
+
+@lru_cache(maxsize=10)
+def _us_market_holidays(year: int) -> frozenset:
+    """
+    Return the set of NYSE/NASDAQ market-closed dates for *year*.
+    Covers: New Year's Day, MLK Day, Presidents' Day, Good Friday,
+    Memorial Day, Juneteenth, Independence Day, Labor Day,
+    Thanksgiving, Christmas.
+    Results are cached per year via lru_cache.
+    """
+    holidays: set[date] = set()
+
+    # Fixed calendar dates (with observed shift for weekends)
+    for month, day in [(1, 1), (6, 19), (7, 4), (12, 25)]:
+        holidays.add(_observed(date(year, month, day)))
+
+    # Floating / rule-based holidays
+    holidays.add(_nth_weekday(year, 1, 0, 3))               # MLK Day:        3rd Mon Jan
+    holidays.add(_nth_weekday(year, 2, 0, 3))               # Presidents Day: 3rd Mon Feb
+    holidays.add(_easter(year) - timedelta(days=2))         # Good Friday:    2 days before Easter
+    holidays.add(_last_weekday_in_month(year, 5, 0))        # Memorial Day:   last Mon May
+    holidays.add(_nth_weekday(year, 9, 0, 1))               # Labor Day:      1st Mon Sep
+    holidays.add(_nth_weekday(year, 11, 3, 4))              # Thanksgiving:   4th Thu Nov
+
+    return frozenset(holidays)
 
 
 class SessionFilter:
@@ -87,8 +157,8 @@ class SessionFilter:
 
         now  = datetime.now(tz=UTC)
         days = session.get("days", "mon-fri")
-        if not self._day_allowed(now, days):
-            return False, f"{symbol} market closed — weekend"
+        if not self._day_allowed(now, days, cat):
+            return False, f"{symbol} market closed — weekend or holiday"
 
         open_t  = self._parse_time(session.get("open",  "00:00"))
         close_t = self._parse_time(session.get("close", "23:59"))
@@ -148,12 +218,17 @@ class SessionFilter:
             return time(0, 0)
 
     @staticmethod
-    def _day_allowed(dt: datetime, days_spec: str) -> bool:
+    def _day_allowed(dt: datetime, days_spec: str, category: str = "forex") -> bool:
         if days_spec == "all":
             return True
         wd = dt.weekday()   # 0=Mon … 6=Sun
         if days_spec == "mon-fri":
-            return wd <= 4   # Mon–Fri
+            if wd > 4:
+                return False   # weekend
+            # For US equity and index categories, also block on US market holidays
+            if category in ("stock", "us_index"):
+                return dt.date() not in _us_market_holidays(dt.year)
+            return True
         return True
 
     @staticmethod

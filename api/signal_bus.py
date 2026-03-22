@@ -695,6 +695,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             stats = memory.stats(trading_type=trading_type, live_only=True)
 
             # Update consecutive win/loss counter in the risk manager
+            _drawdown_pct = 0.0
             try:
                 from api.runner_loop import _risk_manager as _rm
                 if _rm is not None:
@@ -709,6 +710,13 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         _acct = await asyncio.to_thread(_c2.get_account_info)
                         if _acct and _acct.get("balance"):
                             _rm.update_balance(_acct["balance"])
+                            # Compute current daily drawdown % for RL state
+                            if _rm._day_start_balance and _rm._day_start_balance > 0:
+                                _drawdown_pct = max(
+                                    0.0,
+                                    (_rm._day_start_balance - _acct["balance"])
+                                    / _rm._day_start_balance * 100.0,
+                                )
             except Exception:
                 pass
 
@@ -730,6 +738,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 profit_pct=_profit_pct,
                 win_rate=stats.get("win_rate", 0.5),
                 avg_conf=stats.get("avg_conf", 0.5),
+                drawdown_pct=_drawdown_pct,
             )
             logger.info(
                 f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "

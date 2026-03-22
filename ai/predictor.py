@@ -226,6 +226,16 @@ class PricePredictor:
             preds    = (model(X_val) > 0.5).float()
             accuracy = (preds == y_val).float().mean().item()
 
+        # Accuracy gate: refuse to swap in a coin-flip model.
+        # Keeps the previous trained version (if any) rather than degrading it.
+        _MIN_ACCURACY = 0.52
+        if accuracy < _MIN_ACCURACY:
+            logger.warning(
+                f"LSTM {key}: val accuracy {accuracy:.2%} < {_MIN_ACCURACY:.0%} threshold — "
+                "model NOT saved. Existing model (if any) retained. Will retry on next retrain trigger."
+            )
+            return
+
         # Persist
         torch.save(model.state_dict(), MODELS_DIR / f"{key}_lstm.pt")
         with open(MODELS_DIR / f"{key}_scaler.pkl", "wb") as f:
@@ -315,11 +325,19 @@ def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_
     vol_n   = vol / (vol.mean() + eps)
     wick    = (high - close) / (close + eps)
 
-    # is_near_news: 1.0 if the symbol is currently in a news blackout window
+    # is_near_news: 1.0 if the symbol is currently in a news blackout window.
+    # Applied only to the tail of the sequence matching the 45-min blackout window
+    # rather than all bars uniformly — prevents train/inference distribution shift
+    # (during training all 60 bars got the same current flag, which the model never
+    # sees consistently at inference time for older bars in the sequence).
     try:
         from engine.news_filter import news_filter
         near_news, _ = news_filter.is_blocked(symbol, trading_type)
-        news_flag = np.full(len(close), 1.0 if near_news else 0.0)
+        news_flag = np.zeros(len(close))
+        if near_news:
+            tf_minutes = {"scalping": 5, "day_trading": 60, "swing": 240}.get(trading_type, 5)
+            news_window_bars = max(1, 45 // tf_minutes)  # 45-min window (30 before + 15 after)
+            news_flag[-news_window_bars:] = 1.0
     except Exception:
         news_flag = np.zeros(len(close))
 

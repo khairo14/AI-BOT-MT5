@@ -128,6 +128,19 @@ class RiskManager:
         # Round down to nearest lot_step (never round up — avoids over-risking)
         lot = math.floor(raw_lot / lot_step) * lot_step
         lot = round(lot, 8)
+
+        # Detect when broker minimum lot exceeds intended risk.
+        # math.floor can produce 0.0 when raw_lot < lot_step; clamping to min_lot
+        # then silently doubles-or-more the intended risk. Log a clear warning so
+        # the operator knows actual risk is higher than configured.
+        if raw_lot > 0 and lot < min_lot:
+            actual_risk_pct = (min_lot / raw_lot) * risk_pct
+            logger.warning(
+                f"Lot size {raw_lot:.5f} is below broker minimum {min_lot} — "
+                f"clamping to {min_lot}. Actual risk will be {actual_risk_pct:.2f}% "
+                f"(target {risk_pct:.2f}%). Consider widening SL or reducing position on a larger balance."
+            )
+
         lot = max(min_lot, min(lot, max_lot))
 
         logger.debug(

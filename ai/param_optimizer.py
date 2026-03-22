@@ -41,7 +41,7 @@ CONFIG_DIR = Path(__file__).parent.parent / "config"
 OPT_FILE   = CONFIG_DIR / "optimized_params.json"
 
 MIN_TRADES_FOR_REFINEMENT = 20   # closed trades before live refinement kicks in
-MIN_BACKTEST_SIGNALS      = 10   # discard combos that fired fewer signals (raised from 5 to reduce noise)
+MIN_BACKTEST_SIGNALS      = 15   # discard combos that fired fewer signals (≥15 gives tighter confidence intervals)
 MAX_GRID_COMBOS           = 64   # cap to keep backtest fast
 BACKTEST_COOLDOWN_HOURS   = 24   # min hours between automatic re-backtests
 LIVE_REFINE_WIN_THRESH    = 0.45 # re-optimize when win_rate drops below this
@@ -54,6 +54,17 @@ SPREAD_COST_R: dict[str, float] = {
     "scalping":    0.15,   # tight stops → spread ~15% of 1R
     "day_trading": 0.05,   # spread ~5% of 1R
     "swing":       0.02,   # spread ~2% of 1R for wide swing targets
+}
+
+# Per-symbol overrides: these assets have much wider spreads than typical forex.
+# Checked first in _run_backtest(); falls back to SPREAD_COST_R[trading_type] if symbol absent.
+SPREAD_COST_R_SYMBOL: dict[str, float] = {
+    "BTCUSD":    0.30,  "ETHUSD":    0.30,   # crypto: spread can be 0.3R easily
+    "XRPUSD":    0.25,  "SOLUSD":    0.25,
+    "XAUUSD":    0.10,  "GOLD":      0.10,   # gold: tighter than crypto, wider than forex
+    "SILVER":    0.12,  "USOIL":     0.12,   "UKOIL":     0.12,
+    "US30Cash":  0.08,  "US100Cash": 0.08,   "US500Cash": 0.08,   # US indices
+    "GER40Cash": 0.10,  "UK100Cash": 0.10,   "FRA40Cash": 0.10,   # EU indices
 }
 
 # Walk-forward step (every Nth bar) and max hold per mode
@@ -428,7 +439,7 @@ class ParamOptimizer:
         best_score  = -1.0
         best_n      = 0
 
-        spread_r = SPREAD_COST_R.get(trading_type, 0.05)
+        spread_r = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
 
         for combo in combos:
             time.sleep(0)  # yield CPU between combos to prevent event-loop starvation

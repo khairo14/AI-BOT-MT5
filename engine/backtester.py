@@ -122,11 +122,22 @@ def _sim_trade(
         high = float(df.iloc[j]["high"])
         low  = float(df.iloc[j]["low"])
         if direction == "BUY":
-            if high >= tp: return "tp_hit", tp, j   # check TP first (benefit-of-doubt on gap open)
-            if low  <= sl: return "sl_hit", sl, j
+            sl_touched = low  <= sl
+            tp_touched = high >= tp
+            # When both SL and TP are breached in the same bar (e.g. large news candle)
+            # use the conservative assumption: SL was hit first.  The previous code
+            # checked TP first (optimistic) which inflated backtest win rates.
+            if sl_touched and tp_touched:
+                return "sl_hit", sl, j
+            if tp_touched: return "tp_hit", tp, j
+            if sl_touched: return "sl_hit", sl, j
         else:
-            if low  <= tp: return "tp_hit", tp, j   # check TP first for SELL
-            if high >= sl: return "sl_hit", sl, j
+            sl_touched = high >= sl
+            tp_touched = low  <= tp
+            if sl_touched and tp_touched:
+                return "sl_hit", sl, j
+            if tp_touched: return "tp_hit", tp, j
+            if sl_touched: return "sl_hit", sl, j
 
     # Max hold reached — exit at close of last bar
     exit_price = float(df.iloc[end - 1]["close"])

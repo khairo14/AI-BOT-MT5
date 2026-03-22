@@ -197,10 +197,20 @@ class NewsFilter:
             try:
                 tz: datetime.tzinfo = ZoneInfo("America/New_York")
             except (KeyError, ZoneInfoNotFoundError):
-                # tzdata package not installed (common on Windows without tzdata)
-                # Fall back to UTC-5 (EST, close enough for news blackout purposes)
-                from datetime import timedelta
-                tz = timezone(timedelta(hours=-5))
+                # tzdata package not installed (common on Windows without tzdata).
+                # Compute the correct US offset for this specific date (EST vs EDT)
+                # rather than hardcoding UTC-5 year-round (wrong March-November).
+                # US DST: 2nd Sunday in March → 1st Sunday in November.
+                from datetime import timedelta as _td
+                _year = dt.year
+                # 2nd Sunday in March
+                _mar1 = datetime(_year, 3, 1)
+                _dst_start = _mar1 + _td(days=(6 - _mar1.weekday()) % 7 + 7)
+                # 1st Sunday in November
+                _nov1 = datetime(_year, 11, 1)
+                _dst_end = _nov1 + _td(days=(6 - _nov1.weekday()) % 7)
+                _is_edt = _dst_start <= dt < _dst_end
+                tz = timezone(_td(hours=-4 if _is_edt else -5))
             return dt.replace(tzinfo=tz).astimezone(UTC)
         except Exception:
             return None
