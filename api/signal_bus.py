@@ -661,6 +661,32 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         om.modify_position(ticket, sl=round(new_sl, 5))
                         logger.info(f"Trail SL → {new_sl:.5f} | #{ticket} {signal.get('symbol')}")
 
+                async def _get_atr(timeframe: str, period: int = 14) -> float:
+                    """
+                    Compute live ATR(period) for this symbol on `timeframe`.
+                    Uses the Wilder True Range formula over MT5 OHLCV candles.
+                    Returns the ATR value, or 0.0 on any failure.
+                    """
+                    import pandas as pd
+                    try:
+                        _df = await asyncio.to_thread(
+                            client.get_ohlcv, signal.get("symbol", ""), timeframe, period + 6
+                        )
+                        if _df is None or len(_df) < period + 1:
+                            return 0.0
+                        high = _df["high"]
+                        low  = _df["low"]
+                        prev = _df["close"].shift(1)
+                        tr   = pd.concat([
+                            high - low,
+                            (high - prev).abs(),
+                            (low  - prev).abs(),
+                        ], axis=1).max(axis=1)
+                        val  = float(tr.rolling(period).mean().iloc[-1])
+                        return val if val > 0 else 0.0
+                    except Exception:
+                        return 0.0
+
                 # ── Day trading: TP1 partial-close + move SL to breakeven ────
                 if tp2 and tp1 and not _tp1_triggered:
                     hit_tp1 = (
@@ -681,11 +707,14 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         except Exception as _pce:
                             logger.warning(f"TP1 partial-close failed #{ticket}: {_pce}")
 
-                # ── Day trading: trail remaining 50% once TP1 has fired ──────
-                # Trail distance = 50% of original SL distance.
+                # ── Day trading: ATR trail on remainder after TP1 ────────────
+                # Trail distance = ATR(14, H1) × 1.5 — adapts to current intraday
+                # volatility so wide candles don't stop out the runner prematurely.
+                # Falls back to 50% original-SL distance if MT5 data is unavailable.
                 if _tp1_triggered and entry_px and orig_sl:
-                    _trail_dist = abs(entry_px - orig_sl) * 0.5
                     try:
+                        _atr = await _get_atr("H1", 14)
+                        _trail_dist = (_atr * 1.5) if _atr > 0 else abs(entry_px - orig_sl) * 0.5
                         _new_sl = (
                             max(pos.price_current - _trail_dist, entry_px) if direction == "BUY"
                             else min(pos.price_current + _trail_dist, entry_px)
@@ -694,12 +723,13 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     except Exception as _te:
                         logger.debug(f"Day trail failed #{ticket}: {_te}")
 
-                # ── Swing: breakeven at 50% of TP distance, then trail ───────
+                # ── Swing: BE at halfway then ATR trail (H4 ATR × 2.0) ───────
                 # Swing signals have tp2=None so tp2==0 here.
-                # Step 1: once price is halfway to TP, move SL to entry.
-                # Step 2: after breakeven, trail SL at 50% of original SL distance.
+                # Step 1: once price reaches 50% of TP distance, move SL to entry.
+                # Step 2: after BE fires, trail with ATR(14, H4) × 2.0 — wider buffer
+                #         to survive multi-day pullbacks without premature stop-outs.
+                #         Falls back to 50% original-SL distance if ATR fetch fails.
                 elif not tp2 and tp1 and entry_px and orig_sl:
-                    _trail_dist = abs(entry_px - orig_sl) * 0.5
                     _halfway = (
                         entry_px + (tp1 - entry_px) * 0.5 if direction == "BUY"
                         else entry_px - (entry_px - tp1) * 0.5
@@ -723,6 +753,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                 logger.warning(f"Swing BE failed #{ticket}: {_be_e}")
                     if _swing_be_triggered:
                         try:
+                            _atr = await _get_atr("H4", 14)
+                            _trail_dist = (_atr * 2.0) if _atr > 0 else abs(entry_px - orig_sl) * 0.5
                             _new_sl = (
                                 max(pos.price_current - _trail_dist, entry_px) if direction == "BUY"
                                 else min(pos.price_current + _trail_dist, entry_px)

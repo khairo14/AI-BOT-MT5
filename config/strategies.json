@@ -35,6 +35,9 @@
   },
   "day_trading": {
     "active_strategies": ["macd_ema_trend", "sr_breakout", "rsi_divergence"],
+    "atr_trail_timeframe": "H1",
+    "atr_trail_period": 14,
+    "atr_trail_multiplier": 1.5,
     "symbol_strategy_override": {
       "BTCUSD":  ["sr_breakout"],
       "ETHUSD":  ["sr_breakout"],
@@ -70,6 +73,9 @@
   },
   "swing": {
     "active_strategies": ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
+    "atr_trail_timeframe": "H4",
+    "atr_trail_period": 14,
+    "atr_trail_multiplier": 2.0,
     "symbol_strategy_override": {
       "BTCUSD":   ["fibonacci_rsi", "weekly_breakout"],
       "ETHUSD":   ["fibonacci_rsi", "weekly_breakout"],
