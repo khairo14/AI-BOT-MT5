@@ -306,7 +306,7 @@ class MT5Client:
             {
                 "ticket":      p.ticket,
                 "symbol":        p.symbol,
-                "type":          "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL",
+                "type":          "buy" if p.type == mt5.ORDER_TYPE_BUY else "sell",
                 "volume":        p.volume,
                 "open_price":    p.price_open,
                 "price_current": p.price_current,
@@ -342,7 +342,7 @@ class MT5Client:
                 "ticket":    d.ticket,
                 "order":     d.order,
                 "symbol":    d.symbol,
-                "type":      "BUY" if d.type == mt5.DEAL_TYPE_BUY else "SELL",
+                "type":      "buy" if d.type == mt5.DEAL_TYPE_BUY else "sell",
                 "volume":    d.volume,
                 "price":     d.price,
                 "profit":    d.profit,
