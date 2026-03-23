@@ -607,9 +607,16 @@ async def recover_unclosed_trades(client) -> None:
             )
             memory.record(outcome)
             _stats = memory.stats(trading_type=trading_type, live_only=True)
+            # Normalize raw dollar profit → % of balance (same scale as _poll_outcome)
+            try:
+                from engine.risk_manager import risk_manager as _rm_rec
+                _rec_bal = _rm_rec._day_start_balance or 0.0
+            except Exception:
+                _rec_bal = 0.0
+            _rec_pct = (profit / _rec_bal * 100.0) if _rec_bal > 0 else (profit / 10000.0 * 100.0)
             rl_manager.on_trade_closed(
                 trading_type=trading_type,
-                profit_pct=profit,
+                profit_pct=_rec_pct,
                 win_rate=_stats.get("win_rate", 0.5),
                 avg_conf=_stats.get("avg_conf", 0.5),
             )
