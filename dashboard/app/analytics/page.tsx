@@ -86,10 +86,13 @@ function StatCard({
   label, value, sub, valueClass = "text-white",
 }: { label: string; value: string; sub?: string; valueClass?: string }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col gap-1">
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col gap-1 min-w-0">
       <span className="text-xs text-gray-500 uppercase tracking-wide">{label}</span>
-      <span className={`text-2xl font-bold font-mono ${valueClass}`}>{value}</span>
-      {sub && <span className="text-xs text-gray-500">{sub}</span>}
+      <span
+        className={`text-lg font-bold font-mono leading-tight break-all ${valueClass}`}
+        title={value}
+      >{value}</span>
+      {sub && <span className="text-xs text-gray-500 truncate">{sub}</span>}
     </div>
   );
 }
@@ -278,9 +281,9 @@ export default function AnalyticsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const byStrategyRows   = data ? Object.entries(data.by_strategy).sort((a, b) => b[1].total_profit - a[1].total_profit) : [];
-  const bySymbolRows     = data ? Object.entries(data.by_symbol).sort((a, b) => b[1].total_profit - a[1].total_profit) : [];
-  const byModeRows       = data ? Object.entries(data.by_mode).sort((a, b) => b[1].total_profit - a[1].total_profit) : [];
+  const byStrategyRows   = data?.by_strategy ? Object.entries(data.by_strategy).sort((a, b) => b[1].total_profit - a[1].total_profit) : [];
+  const bySymbolRows     = data?.by_symbol   ? Object.entries(data.by_symbol).sort((a, b) => b[1].total_profit - a[1].total_profit) : [];
+  const byModeRows       = data?.by_mode     ? Object.entries(data.by_mode).sort((a, b) => b[1].total_profit - a[1].total_profit) : [];
 
   const equityFinal = data?.equity_curve?.at(-1)?.equity ?? 0;
 
@@ -353,7 +356,7 @@ export default function AnalyticsPage() {
       {data && data.total_trades > 0 && (
         <>
           {/* Key stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <StatCard label="Trades"       value={String(data.total_trades)} />
             <StatCard label="Win Rate"     value={pct(data.win_rate)}
               valueClass={data.win_rate >= 50 ? "text-green-400" : data.win_rate >= 40 ? "text-yellow-400" : "text-red-400"} />
