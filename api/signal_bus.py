@@ -433,22 +433,33 @@ def _get_server_utc_offset_secs(symbol: str = "EURUSD") -> int:
     comparing a fresh tick timestamp with the Python wall clock and rounding
     to the nearest hour.
 
-    Returns 0 if a tick cannot be obtained (safe default).
+    IMPORTANT: always probe liquid 24/5 forex pairs — NEVER the trading symbol.
+    Commodities (SILVER, XAUUSD) and indices (US30) have market hours; their
+    tick.time can be stale by hours or days when the market is closed, which
+    causes the offset calculation to return a wildly wrong value and shifts
+    every close_time by the same amount (e.g. +48 h for a 2-day-old tick).
+
+    Returns 0 if no fresh tick is available (safe default — deal.time is used as-is).
     """
     import MetaTrader5 as mt5
     import time as _time
 
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        # Try a fallback symbol
-        for sym in ("GBPUSD", "USDJPY", "BTCUSD"):
-            tick = mt5.symbol_info_tick(sym)
-            if tick is not None:
-                break
+    # Always use a 24/5 forex pair — these always have a fresh tick during market hours.
+    # The `symbol` parameter is intentionally ignored to prevent stale commodity ticks.
+    _FOREX_PROBES = ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF")
+    tick = None
+    for probe in _FOREX_PROBES:
+        tick = mt5.symbol_info_tick(probe)
+        if tick is not None:
+            break
     if tick is None:
         return 0
     diff = tick.time - int(_time.time())
-    # Round to nearest hour — offsets are always whole hours
+    # Sanity guard: the maximum real-world UTC offset is ±14 h (UTC+14).
+    # If |diff| exceeds this, even a forex tick is stale (weekend / holiday) — return 0.
+    if abs(diff) > 14 * 3600:
+        return 0
+    # Round to nearest hour — broker offsets are always whole hours
     return round(diff / 3600) * 3600
 
 
@@ -518,7 +529,9 @@ async def recover_unclosed_trades(client) -> None:
             outcome_type = "manual_close"
 
         open_dt2  = datetime.fromisoformat(entry.get("open_time", close_time).replace("Z", "+00:00"))
-        close_dt2 = datetime.fromtimestamp(deal.time, tz=timezone.utc)
+        # Use the offset-corrected close_time ISO string (not raw deal.time) so both
+        # endpoints share the same UTC reference and duration is calculated correctly.
+        close_dt2 = datetime.fromisoformat(close_time)
         dur_mins  = (close_dt2 - open_dt2).total_seconds() / 60
 
         # Write close event to journal
