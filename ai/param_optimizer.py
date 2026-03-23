@@ -87,6 +87,8 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "bb_period":       [15, 20, 25],
         "bb_std":          [1.5, 2.0, 2.5],
         "min_squeeze_bars": [3, 5, 7],
+        "sl_atr_mult":     [1.0, 1.5, 2.0],
+        "tp_atr_mult":     [2.0, 2.5, 3.0],
     },
     "vwap_reversion": {
         "sigma_entry": [1.0, 1.5, 2.0],
@@ -99,26 +101,35 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "macd_signal": [6, 9],
         "ema_fast":    [15, 20],
         "ema_slow":    [45, 50],
+        "tp1_rr":      [0.8, 1.0, 1.2],
+        "tp2_rr":      [1.5, 2.0, 2.5],
     },
     "sr_breakout": {
-        "lookback_bars": [30, 50, 70],
-        "atr_period":    [10, 14, 20],
+        "lookback_bars":  [30, 50, 70],
+        "atr_period":     [10, 14, 20],
+        "sl_buffer_atr":  [0.2, 0.3, 0.5],
+        "tp_rr":          [1.5, 1.8, 2.2],
     },
     "rsi_divergence": {
         "rsi_period":      [10, 14, 18],
         "ema_bias_period": [40, 50, 65],
+        "tp_rr":           [1.2, 1.5, 2.0],
     },
     "ema_trend_rider": {
-        "ema_fast": [13, 20, 25],
-        "ema_slow": [50, 60, 75],
+        "ema_fast":     [13, 20, 25],
+        "ema_slow":     [50, 60, 75],
+        "sl_atr_mult":  [1.0, 1.5, 2.0],
+        "tp_rr":        [2.0, 2.5, 3.0],
     },
     "fibonacci_rsi": {
         "rsi_period":   [10, 14, 18],
         "fib_lookback": [30, 50, 70],
+        "sl_atr_mult":  [1.0, 1.5, 2.0],
     },
     "weekly_breakout": {
         "lookback_bars": [50, 80, 100],
-        "atr_mult_sl":   [1.5, 2.0, 2.5],
+        "sl_atr_mult":   [1.0, 1.5, 2.0, 2.5],
+        "tp_rr":         [1.5, 2.0, 2.5],
     },
 }
 
