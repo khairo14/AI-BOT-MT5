@@ -625,10 +625,24 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     # Re-fetching it inside the 30 s poll loop wasted a live tick request per iteration.
     _srv_offset = await asyncio.to_thread(_get_server_utc_offset_secs, signal.get("symbol", "EURUSD"))
 
+    # Fetch symbol digits ONCE — used to round SL to the instrument's correct precision
+    # (5 for EURUSD, 3 for USDJPY, 2 for XAUUSD/BTCUSD, etc.)
+    _sym_digits = 5
+    try:
+        _sinfo = await asyncio.to_thread(mt5.symbol_info, signal.get("symbol", "EURUSD"))
+        if _sinfo:
+            _sym_digits = _sinfo.digits
+    except Exception:
+        pass
+
     # G-6: tp2 partial-close state — set to True after tp1 partial-close fires
     _tp1_triggered = False
     # Swing: set to True once SL has been moved to breakeven
     _swing_be_triggered = False
+    # ATR cache: keyed by timeframe string → (atr_value, monotonic_timestamp)
+    # Refreshed at most once every 5 minutes — ATR on H1/H4 changes per candle close
+    # not per 30-second poll, so re-fetching every cycle is wasteful.
+    _atr_cache: dict = {}
 
     for _ in range(MAX_POLLS):
         await asyncio.sleep(30)
@@ -654,20 +668,29 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     om = _get_om()
                     if not om:
                         return
-                    if direction == "BUY" and new_sl > pos.sl + 1e-9:
-                        om.modify_position(ticket, sl=round(new_sl, 5))
-                        logger.info(f"Trail SL → {new_sl:.5f} | #{ticket} {signal.get('symbol')}")
-                    elif direction == "SELL" and (pos.sl == 0 or new_sl < pos.sl - 1e-9):
-                        om.modify_position(ticket, sl=round(new_sl, 5))
-                        logger.info(f"Trail SL → {new_sl:.5f} | #{ticket} {signal.get('symbol')}")
+                    _rounded = round(new_sl, _sym_digits)
+                    if direction == "BUY" and _rounded > pos.sl + 1e-9:
+                        om.modify_position(ticket, sl=_rounded)
+                        logger.info(f"Trail SL → {_rounded} | #{ticket} {signal.get('symbol')}")
+                    elif direction == "SELL" and (pos.sl == 0 or _rounded < pos.sl - 1e-9):
+                        om.modify_position(ticket, sl=_rounded)
+                        logger.info(f"Trail SL → {_rounded} | #{ticket} {signal.get('symbol')}")
 
                 async def _get_atr(timeframe: str, period: int = 14) -> float:
                     """
-                    Compute live ATR(period) for this symbol on `timeframe`.
-                    Uses the Wilder True Range formula over MT5 OHLCV candles.
+                    Compute ATR(period) for this symbol on `timeframe`.
+                    True Range = max(H-L, |H-prev_close|, |L-prev_close|).
+                    Smoothed with a simple rolling mean (SMA-ATR).
+                    Result is cached per timeframe for 5 minutes — H1/H4 ATR
+                    only changes when a new candle closes, so re-fetching every
+                    30 s poll cycle is entirely wasteful.
                     Returns the ATR value, or 0.0 on any failure.
                     """
                     import pandas as pd
+                    _now_mono = time.monotonic()
+                    _cached = _atr_cache.get(timeframe)
+                    if _cached and _now_mono - _cached[1] < 300:  # 5-minute cache
+                        return _cached[0]
                     try:
                         _df = await asyncio.to_thread(
                             client.get_ohlcv, signal.get("symbol", ""), timeframe, period + 6
@@ -683,7 +706,9 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                             (low  - prev).abs(),
                         ], axis=1).max(axis=1)
                         val  = float(tr.rolling(period).mean().iloc[-1])
-                        return val if val > 0 else 0.0
+                        val  = val if val > 0 else 0.0
+                        _atr_cache[timeframe] = (val, _now_mono)
+                        return val
                     except Exception:
                         return 0.0
 
