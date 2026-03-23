@@ -223,7 +223,7 @@ def memory_recent(n: int = 50, trading_type: Optional[TRADING_TYPE] = None):
 # Parameter Optimizer endpoints
 # ───────────────────────────────────
 
-from ai.param_optimizer import optimizer as _optimizer, PARAM_GRIDS
+from ai.param_optimizer import optimizer as _optimizer, PARAM_GRIDS, MAX_CONCURRENT_OPT
 
 
 @router.get("/optimizer/status")
@@ -339,6 +339,9 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                     df = ohlcv_cache.get((symbol, tf_str))
                     if df is None or df.empty:
                         continue
+                    # Wait for a free concurrency slot before dispatching
+                    while sum(1 for j in _optimizer.status().values() if j.get("running")) >= MAX_CONCURRENT_OPT:
+                        await asyncio.sleep(5.0)
                     _optimizer.optimize_async(strat, symbol, df, trading_type)
                     await asyncio.sleep(0.1)  # rest between pairs
 
