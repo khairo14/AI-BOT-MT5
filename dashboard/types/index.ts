@@ -166,3 +166,60 @@ export interface SwitchModeError {
   message: string;
   open_count: number;
 }
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+
+export interface EquityPoint {
+  time: string;
+  equity: number;
+}
+
+export interface BucketStats {
+  total: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_profit: number;
+  avg_profit: number;
+}
+
+export interface TradeQuality {
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface FailureAnalysis {
+  worst_symbols:    (BucketStats & { symbol: string })[];
+  worst_strategies: (BucketStats & { strategy: string })[];
+  max_losing_streak:     number;
+  current_losing_streak: number;
+}
+
+export interface AnalyticsPerformance {
+  account:          string;
+  trading_type:     string;
+  total_trades:     number;
+  wins:             number;
+  losses:           number;
+  win_rate:         number;
+  total_profit:     number;
+  avg_profit:       number;
+  avg_win:          number;
+  avg_loss:         number;
+  avg_rr:           number;
+  sharpe_ratio:     number;
+  sortino_ratio:    number;
+  max_drawdown_pct: number;
+  max_losing_streak:     number;
+  current_losing_streak: number;
+  equity_curve:   EquityPoint[];
+  by_strategy:    Record<string, BucketStats>;
+  by_symbol:      Record<string, BucketStats>;
+  by_mode:        Record<string, BucketStats>;
+  by_account:     Record<string, BucketStats>;
+  by_hour:        Record<string, BucketStats>;
+  trade_quality:  TradeQuality;
+  failure_analysis: FailureAnalysis;
+  message?: string;
+}

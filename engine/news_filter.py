@@ -162,8 +162,7 @@ class NewsFilter:
             if self._refresh_in_progress:
                 return   # another thread is already fetching
             self._refresh_in_progress = True
-
-        threading.Thread(target=self._fetch, daemon=True).start()
+            threading.Thread(target=self._fetch, daemon=True).start()
 
     def _fetch(self) -> None:
         try:

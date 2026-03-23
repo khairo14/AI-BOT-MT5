@@ -28,6 +28,8 @@ from ai.param_optimizer import (
     _BACKTEST_CONFIG,
     _DISPATCH,
     _get_strategy_map,
+    SPREAD_COST_R,
+    SPREAD_COST_R_SYMBOL,
 )
 
 # Natural backtest timeframe per trading type (matches LSTM training TF)
@@ -183,6 +185,7 @@ def run_backtest(
 
     dispatch = _DISPATCH.get(strategy_name, lambda s, d, e={}: s.calculate(d))
     cfg      = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
+    spread_r = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
     step     = cfg["step"]
     max_hold = cfg["max_hold"]
     warmup   = cfg["warmup"]
@@ -251,14 +254,15 @@ def run_backtest(
         )
         rr = raw_move / risk
 
-        # P&L as % of equity: risk_pct% is the downside; scale gain by actual RR
+        # P&L as % of equity: risk_pct% is the downside; scale gain by actual RR.
+        # Deduct spread cost (same as param_optimizer) so results are not overly optimistic.
         if outcome == "tp_hit":
             tp_rr    = abs((sig.tp_price - sig.entry_price)) / risk
-            pnl_pct  = risk_pct * tp_rr
+            pnl_pct  = risk_pct * (tp_rr - spread_r)
         elif outcome == "sl_hit":
-            pnl_pct  = -risk_pct
+            pnl_pct  = -risk_pct * (1.0 + spread_r)
         else:   # timeout
-            pnl_pct  = risk_pct * rr
+            pnl_pct  = risk_pct * (rr - spread_r)
 
         equity    *= 1.0 + pnl_pct / 100.0
         trade_num += 1

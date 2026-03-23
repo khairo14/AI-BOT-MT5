@@ -57,15 +57,25 @@ def _get_app_config() -> dict:
         return _app_cfg_cache
     try:
         _app_cfg_cache = json.loads((CONFIG_DIR / "app.json").read_text(encoding="utf-8-sig"))
-    except Exception:
-        pass  # keep using stale cache on read error
+    except Exception as _cfg_exc:
+        logger.warning(f"app.json read failed: {_cfg_exc} — using stale cache")
     _app_cfg_loaded_at = now
     return _app_cfg_cache
 
 # ── Correlation guard ─────────────────────────────────────────────────────────
-# USD polarity for each symbol when signal direction is BUY.
-# USD_SHORT = going long this pair is a bearish USD bet (e.g. EURUSD BUY)
-# USD_LONG  = going long this pair is a bullish USD bet  (e.g. USDJPY BUY)
+# Each entry maps symbol → correlation group tag.
+# Symbols sharing the same tag are treated as correlated — only
+# max_correlated_positions of them may be open simultaneously in the same mode.
+#
+# Groups:
+#   USD_SHORT / USD_LONG  — forex USD directional bets (original logic)
+#   CRYPTO_LONG/SHORT     — crypto all move together
+#   GOLD                  — precious metals cluster
+#   OIL                   — crude oil instruments
+#   US_INDICES            — US equity indices
+#   EU_INDICES            — European equity indices
+#   TECH_STOCKS           — mega-cap tech (high correlation)
+
 _USD_POLARITY_BUY: dict[str, str] = {
     "EURUSD": "USD_SHORT", "GBPUSD": "USD_SHORT",
     "AUDUSD": "USD_SHORT", "NZDUSD": "USD_SHORT",
@@ -73,6 +83,39 @@ _USD_POLARITY_BUY: dict[str, str] = {
     "USDJPY": "USD_LONG",  "USDCAD": "USD_LONG",
     "USDCHF": "USD_LONG",  "USDSGD": "USD_LONG",
     "USDMXN": "USD_LONG",  "USDZAR": "USD_LONG",
+    "EURJPY": "USD_SHORT", "GBPJPY": "USD_SHORT",
+    "CADJPY": "USD_SHORT",
+}
+
+# Non-USD correlation groups (BUY direction tag; SELL inverts last word)
+_ASSET_GROUP_BUY: dict[str, str] = {
+    # Crypto
+    "BTCUSD":  "CRYPTO_LONG", "ETHUSD":  "CRYPTO_LONG",
+    "XRPUSD":  "CRYPTO_LONG", "SOLUSD":  "CRYPTO_LONG",
+    "ADAUSD":  "CRYPTO_LONG", "DOTUSD":  "CRYPTO_LONG",
+    "LTCUSD":  "CRYPTO_LONG", "BNBUSD":  "CRYPTO_LONG",
+    # Gold / Silver
+    "GOLD":    "GOLD_LONG",   "SILVER":  "GOLD_LONG",
+    "XAUUSD":  "GOLD_LONG",   "XAGUSD":  "GOLD_LONG",  # also covered in USD dict
+    # Oil
+    "USOIL":   "OIL_LONG",    "UKOIL":   "OIL_LONG",
+    "BRENTCash":"OIL_LONG",   "WTICash": "OIL_LONG",
+    "NGAS":    "OIL_LONG",
+    # US Indices
+    "US30Cash": "US_IDX_LONG",  "US100Cash": "US_IDX_LONG",
+    "US500Cash": "US_IDX_LONG", "SPXCash":   "US_IDX_LONG",
+    "NDXCash":  "US_IDX_LONG",
+    # EU / Global Indices
+    "GER40Cash": "EU_IDX_LONG", "UK100Cash": "EU_IDX_LONG",
+    "FRA40Cash": "EU_IDX_LONG", "JPN225Cash":"EU_IDX_LONG",
+    "AUS200Cash":"EU_IDX_LONG",
+    # Tech stocks (high intraday correlation)
+    "Tesla":     "TECH_LONG",  "Nvidia":    "TECH_LONG",
+    "Apple":     "TECH_LONG",  "Microsoft": "TECH_LONG",
+    "Amazon":    "TECH_LONG",  "Meta":      "TECH_LONG",
+    "Alphabet":  "TECH_LONG",  "Netflix":   "TECH_LONG",
+    "AMD":       "TECH_LONG",  "Intel":     "TECH_LONG",
+    "AdvMicroDev":"TECH_LONG",
 }
 
 
@@ -84,6 +127,18 @@ def _usd_direction(symbol: str, direction: str) -> str | None:
     return buy_polarity if direction == "BUY" else (
         "USD_SHORT" if buy_polarity == "USD_LONG" else "USD_LONG"
     )
+
+
+def _asset_group_direction(symbol: str, direction: str) -> str | None:
+    """Return a directional group tag for non-USD correlated assets, or None."""
+    buy_tag = _ASSET_GROUP_BUY.get(symbol)
+    if buy_tag is None:
+        return None
+    # Invert last word for SELL direction (CRYPTO_LONG → CRYPTO_SHORT etc.)
+    if direction == "BUY":
+        return buy_tag
+    base = buy_tag.rsplit("_", 1)[0]
+    return f"{base}_SHORT"
 
 STRATEGY_MAP = {
     "ema_scalp":        EMAScalp,
@@ -97,17 +152,33 @@ STRATEGY_MAP = {
     "weekly_breakout":  WeeklyBreakout,
 }
 
-# Timeframes required per strategy (primary timeframe → bars to fetch)
+# Timeframes required per strategy (primary timeframe → bars to fetch).
+# Primary TF bars are set to ≥250 so the regime classifier (which needs
+# EMA200 = 200 bars minimum) always has enough data to return a real label.
 TIMEFRAME_BARS: dict[str, dict[str, int]] = {
-    "ema_scalp":       {"M1": 100, "M5": 100},
-    "bb_squeeze":      {"M5": 100},
-    "vwap_reversion":  {"M5": 200},
-    "macd_ema_trend":  {"H1": 220, "M15": 200},
-    "sr_breakout":     {"H1": 150},
-    "rsi_divergence":  {"M30": 100, "H1": 100},
-    "ema_trend_rider": {"H1": 250, "H4": 100, "D1": 60},
-    "fibonacci_rsi":   {"H4": 100},
-    "weekly_breakout": {"H4": 80, "D1": 30},
+    "ema_scalp":       {"M1": 250, "M5": 250},
+    "bb_squeeze":      {"M5": 250},
+    "vwap_reversion":  {"M5": 250},
+    "macd_ema_trend":  {"H1": 250, "M15": 250},
+    "sr_breakout":     {"H1": 250},
+    "rsi_divergence":  {"M30": 250, "H1": 250},
+    "ema_trend_rider": {"H1": 250, "H4": 250, "D1": 60},
+    "fibonacci_rsi":   {"H4": 250},
+    "weekly_breakout": {"H4": 250, "D1": 60},
+}
+
+# Primary timeframe per strategy — used for regime classification and LSTM scoring.
+# Kept at module level so both _run_strategy and the scorer share one definition.
+_PRIMARY_TF: dict[str, str] = {
+    "ema_scalp":       "M5",
+    "bb_squeeze":      "M5",
+    "vwap_reversion":  "M5",
+    "macd_ema_trend":  "H1",
+    "sr_breakout":     "H1",
+    "rsi_divergence":  "H1",
+    "ema_trend_rider": "H1",
+    "fibonacci_rsi":   "H4",
+    "weekly_breakout": "H4",
 }
 
 MT5_TF = {
@@ -210,13 +281,25 @@ class StrategyRunner:
             return None
 
         strat_cls = STRATEGY_MAP[strat_name]
-        params    = self._strategy_params(strat_name, symbol)
-        strategy  = strat_cls(symbol=symbol, params=params)
 
-        # Fetch all required timeframes
-        tf_data   = self._fetch_timeframes(symbol, strat_name)
+        # Fetch all required timeframes first — primary_df is needed for regime
+        # classification which must happen before strategy params are selected.
+        tf_data = self._fetch_timeframes(symbol, strat_name)
         if not tf_data:
             return None
+
+        # Classify market regime early so _strategy_params can pick regime-aware
+        # optimized params (e.g. tighter EMA lengths in ranging markets).
+        _ptf       = _PRIMARY_TF.get(strat_name)
+        primary_df = tf_data.get(_ptf, next(iter(tf_data.values()))) if _ptf else next(iter(tf_data.values()))
+        try:
+            from engine.regime_classifier import regime_classifier as _rc
+            _regime: str | None = _rc.classify(symbol, primary_df)
+        except Exception:
+            _regime = None
+
+        params   = self._strategy_params(strat_name, symbol, regime=_regime)
+        strategy = strat_cls(symbol=symbol, params=params)
 
         # Call strategy with appropriate dataframe arguments
         try:
@@ -292,8 +375,10 @@ class StrategyRunner:
                     min_lot = sym_info.get("min_lot", 0.01)
                     lot_step = sym_info.get("lot_step", 0.01)
                     lot = max(min_lot, round(round(lot * rf / lot_step) * lot_step, 2))
-        except Exception:
-            pass  # RL not available — use raw lot as-is
+        except Exception as _rl_exc:
+            logger.warning(
+                f"RL risk factor skipped [{symbol}/{trading_type}]: {_rl_exc} — using raw lot"
+            )
 
         strat_sig = StrategySignal(
             trading_type=trading_type,
@@ -311,24 +396,10 @@ class StrategyRunner:
         )
 
         # Phase 6: score signal confidence (safe — degrades to 0.5 if AI not ready)
+        # primary_df and _regime already computed at the top of this method.
         try:
             from ai.signal_scorer import scorer
-            # Use the strategy's own primary TF for the scorer so EMA50/200 and
-            # LSTM signal are computed on the correct timeframe, not whichever TF
-            # happens to be first in the dict.
-            _PRIMARY_TF = {
-                "ema_scalp":       "M1",
-                "macd_ema_trend":  "M15",
-                "rsi_divergence":  "M30",
-                "ema_trend_rider": "H1",
-                "bb_squeeze":      "M5",
-                "vwap_reversion":  "M5",
-                "sr_breakout":     "H1",
-                "fibonacci_rsi":   "H4",
-                "weekly_breakout": "H4",
-            }
-            _ptf = _PRIMARY_TF.get(strat_name)
-            primary_df = tf_data.get(_ptf, next(iter(tf_data.values()))) if _ptf else next(iter(tf_data.values()))
+
             strat_sig.confidence = scorer.score(
                 symbol=symbol,
                 direction=sig.direction,
@@ -337,6 +408,7 @@ class StrategyRunner:
                 tp=sig.tp_price or sig.entry_price,
                 df=primary_df,
                 trading_type=trading_type,
+                regime=_regime,
             )
             # AI/ML confidence filter (enabled via Settings → AI → confidence_filter_enabled)
             try:
@@ -397,20 +469,36 @@ class StrategyRunner:
 
     def _correlation_ok(self, sig: StrategySignal) -> bool:
         """Return False if an open bot position in the same trading mode already
-        expresses the same USD directional bet — preventing double USD exposure."""
-        this_usd_dir = _usd_direction(sig.symbol, sig.direction)
-        if this_usd_dir is None:
-            return True  # non-USD pair — no correlation check
+        expresses the same directional bet in the same correlated asset group.
+
+        Covers:
+          - Forex USD pairs (original USD_LONG / USD_SHORT grouping)
+          - Crypto (BTC/ETH/XRP/SOL all correlated)
+          - Gold / Silver
+          - Oil instruments
+          - US equity indices (US30/US100/US500)
+          - EU equity indices (GER40/UK100/FRA40)
+          - Tech mega-cap stocks
+        """
+        this_usd_dir   = _usd_direction(sig.symbol, sig.direction)
+        this_asset_grp = _asset_group_direction(sig.symbol, sig.direction)
+
+        # Symbol is in neither map — no correlation check needed
+        if this_usd_dir is None and this_asset_grp is None:
+            return True
+
         try:
             max_corr = int(_get_app_config().get("max_correlated_positions", 1))
         except Exception:
             max_corr = 1
+
         mode_prefix = sig.comment.split("|")[0] if "|" in sig.comment else ""
         try:
             with self.client._lock:
                 positions = mt5.positions_get()
             if not positions:
                 return True
+
             count = 0
             for p in positions:
                 if p.magic != BOT_MAGIC:
@@ -420,16 +508,30 @@ class StrategyRunner:
                 ):
                     continue
                 p_dir = "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL"
-                if _usd_direction(p.symbol, p_dir) == this_usd_dir:
+
+                # Check USD correlation
+                if this_usd_dir and _usd_direction(p.symbol, p_dir) == this_usd_dir:
                     count += 1
+                    continue
+                # Check asset-group correlation
+                if this_asset_grp and _asset_group_direction(p.symbol, p_dir) == this_asset_grp:
+                    count += 1
+
             if count >= max_corr:
+                group_tag = this_asset_grp or this_usd_dir
                 logger.debug(
-                    f"Correlation filter blocked {sig.strategy}/{sig.symbol}: "
-                    f"{count} open {this_usd_dir} position(s) in mode '{mode_prefix}'"
+                    f"Correlation guard blocked {sig.strategy}/{sig.symbol}: "
+                    f"{count} open [{group_tag}] position(s) in mode '{mode_prefix}'"
                 )
                 return False
-        except Exception:
-            pass  # if MT5 call fails, allow the signal through
+        except Exception as exc:
+            # MT5 fetch failed — fail-closed: block the signal rather than
+            # silently disabling the correlation guard on disconnect.
+            logger.warning(
+                f"Correlation guard MT5 fetch failed [{sig.symbol}/{sig.strategy}]: "
+                f"{exc} — blocking signal (fail-safe)"
+            )
+            return False
         return True
 
     def _execute(self, sig: StrategySignal) -> bool:
@@ -538,8 +640,12 @@ class StrategyRunner:
             .get(symbol)
         )
 
-    def _strategy_params(self, strat_name: str, symbol: str = "") -> dict:
-        """Return merged params: strategies.json defaults + optimized overrides."""
+    def _strategy_params(self, strat_name: str, symbol: str = "", regime: str | None = None) -> dict:
+        """Return merged params: strategies.json defaults + optimized overrides.
+
+        When a regime label is supplied, the optimizer's per-regime params take
+        priority over the globally-best params (if a regime-specific entry exists).
+        """
         # Base params: search per-mode params in strategies.json
         base: dict = {}
         for mode_cfg in self._strategies_cfg.values():
@@ -549,10 +655,10 @@ class StrategyRunner:
                     base = dict(p)
                     break
 
-        # Optimized params from param_optimizer (per-symbol > global > none)
+        # Optimized params from param_optimizer (regime-specific > per-symbol > global)
         try:
             from ai.param_optimizer import optimizer
-            opt = optimizer.get_params(strat_name, symbol)
+            opt = optimizer.get_params(strat_name, symbol, regime=regime)
             if opt:
                 return {**base, **opt}
         except Exception:

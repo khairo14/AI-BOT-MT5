@@ -63,11 +63,32 @@ class SignalScorer:
     def __init__(self, pred: PricePredictor):
         self.predictor = pred
 
-    def _weights(self) -> tuple[float, float, float, float]:
-        """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) from app.json or defaults."""
+    def _weights(self, regime: str | None = None) -> tuple[float, float, float, float]:
+        """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) for the given regime.
+
+        Resolution order:
+          1. app.json ai.regime_weights[regime]  — adaptive per-regime profile
+          2. app.json ai.scorer_weights           — static base (now Balanced)
+          3. Class defaults
+        """
         try:
             cfg = _get_app_cfg()
-            w = cfg.get("ai", {}).get("scorer_weights", {})
+            ai  = cfg.get("ai", {})
+
+            # Try regime-specific weights first
+            if regime:
+                rw = ai.get("regime_weights", {}).get(regime, {})
+                if rw:
+                    wl = float(rw.get("lstm",   self._DEFAULT_W_LSTM))
+                    wr = float(rw.get("rr",     self._DEFAULT_W_RR))
+                    wt = float(rw.get("trend",  self._DEFAULT_W_TREND))
+                    wv = float(rw.get("volume", self._DEFAULT_W_VOLUME))
+                    total = wl + wr + wt + wv
+                    if total > 0:
+                        return wl / total, wr / total, wt / total, wv / total
+
+            # Fall back to static balanced weights
+            w = ai.get("scorer_weights", {})
             if w:
                 wl = float(w.get("lstm",   self._DEFAULT_W_LSTM))
                 wr = float(w.get("rr",     self._DEFAULT_W_RR))
@@ -76,8 +97,8 @@ class SignalScorer:
                 total = wl + wr + wt + wv
                 if total > 0:
                     return wl / total, wr / total, wt / total, wv / total
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"SignalScorer._weights: config read failed ({exc}) — using class defaults")
         return (
             self._DEFAULT_W_LSTM, self._DEFAULT_W_RR,
             self._DEFAULT_W_TREND, self._DEFAULT_W_VOLUME
@@ -92,9 +113,12 @@ class SignalScorer:
         tp:           float,
         df:           pd.DataFrame,   # primary timeframe OHLCV, most-recent bar last
         trading_type: str = "day_trading",
+        regime:       str | None = None,  # market regime label from RegimeClassifier
     ) -> float:
         """
         Return a 0–1 confidence score for a pending signal.
+        When regime is supplied, weights shift to the regime-specific profile
+        from app.json ai.regime_weights (trending/ranging/volatile/quiet).
         Gracefully returns 0.5 on any error.
         """
         try:
@@ -103,7 +127,7 @@ class SignalScorer:
             trend  = self._trend_score(direction, df)
             volume = self._volume_score(df)
 
-            W_LSTM, W_RR, W_TREND, W_VOLUME = self._weights()
+            W_LSTM, W_RR, W_TREND, W_VOLUME = self._weights(regime)
             score = (
                 W_LSTM   * lstm   +
                 W_RR     * rr     +

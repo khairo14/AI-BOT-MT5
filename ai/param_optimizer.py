@@ -244,6 +244,15 @@ def _simulate_trade(
     return actual > 0, rr_actual
 
 
+def _classify_bar_regime(df_slice: pd.DataFrame, symbol: str) -> str:
+    """Classify regime at a backtest bar. Lightweight — no hysteresis in backtest."""
+    try:
+        from engine.regime_classifier import _classify_raw
+        return _classify_raw(df_slice, symbol)
+    except Exception:
+        return "unknown"
+
+
 def _backtest_combo(
     strategy_cls,
     dispatch_fn,
@@ -253,11 +262,15 @@ def _backtest_combo(
     max_hold: int,
     warmup: int,
     spread_r: float = 0.0,
-) -> tuple[float, float, int]:
-    """Walk-forward backtest one param combo. Returns (win_rate, avg_rr, n_trades).
+    symbol: str = "__bt__",
+) -> tuple[float, float, int, dict[str, dict]]:
+    """Walk-forward backtest one param combo.
+    Returns (win_rate, avg_rr, n_trades, regime_stats).
+    regime_stats: {regime_label: {wins, total, rr_sum}}
     spread_r deducted from each trade result to simulate round-trip spread+slippage."""
     wins: list[float] = []
     rrs:  list[float] = []
+    regime_stats: dict[str, dict] = {}   # label → {wins, total, rr_sum}
     i = warmup
 
     while i < len(df) - 1:
@@ -275,6 +288,15 @@ def _backtest_combo(
                 rr_adj = rr - spread_r
                 wins.append(float(rr_adj > 0))
                 rrs.append(rr_adj)
+
+                # Record per-regime outcome
+                regime = _classify_bar_regime(df.iloc[:i + 1], symbol)
+                rs = regime_stats.setdefault(regime, {"wins": 0, "total": 0, "rr_sum": 0.0})
+                rs["total"] += 1
+                if rr_adj > 0:
+                    rs["wins"] += 1
+                rs["rr_sum"] += rr_adj
+
                 i += max(max_hold // 4, step)
                 continue
         except Exception:
@@ -283,10 +305,10 @@ def _backtest_combo(
 
     n = len(wins)
     if n < MIN_BACKTEST_SIGNALS:
-        return 0.0, 0.0, n
+        return 0.0, 0.0, n, {}
     win_rate = float(np.mean(wins))
     avg_rr   = float(np.mean(rrs))
-    return win_rate, avg_rr, n
+    return win_rate, avg_rr, n, regime_stats
 
 
 # ── Optimizer class ──────────────────────────────────────────────────────────
@@ -332,11 +354,28 @@ class ParamOptimizer:
         logger.info(f"Param optimizer started: {strategy_name}/{symbol} ({len(df)} bars)")
         return True
 
-    def get_params(self, strategy_name: str, symbol: str = "") -> dict:
-        """Return best known params for a strategy+symbol (empty dict = use defaults)."""
-        data = self._load_opt()
+    def get_params(self, strategy_name: str, symbol: str = "", regime: str | None = None) -> dict:
+        """Return best known params for a strategy+symbol.
+
+        Resolution order:
+          1. Per-regime params: data[strategy][symbol]["by_regime"][regime]  (if regime given)
+          2. Per-symbol global best: data[strategy][symbol]
+          3. Global best: data[strategy]["__global__"]
+          4. Empty dict (use strategy defaults)
+        """
+        data  = self._load_opt()
         strat = data.get(strategy_name, {})
-        return strat.get(symbol) or strat.get("__global__") or {}
+        sym_entry = strat.get(symbol) or strat.get("__global__") or {}
+
+        if regime and isinstance(sym_entry, dict):
+            by_regime = sym_entry.get("by_regime", {})
+            regime_params = by_regime.get(regime, {})
+            if regime_params:
+                return regime_params
+
+        # Strip the by_regime sub-dict before returning, expose flat params
+        flat = {k: v for k, v in sym_entry.items() if k != "by_regime"}
+        return flat or {}
 
     def should_reoptimize(self, strategy_name: str, symbol: str) -> bool:
         """
@@ -400,11 +439,11 @@ class ParamOptimizer:
         key: str,
     ) -> None:
         try:
-            best_params, score, n = self._run_backtest(
+            best_params, score, n, regime_best_params = self._run_backtest(
                 strategy_name, symbol, df, trading_type
             )
             if best_params is not None:
-                self._save_params(strategy_name, symbol, best_params)
+                self._save_params(strategy_name, symbol, best_params, regime_best_params)
                 with self._lock:
                     self._status[key] = {
                         "strategy":          strategy_name,
@@ -413,13 +452,14 @@ class ParamOptimizer:
                         "best_score":        round(score, 4),
                         "n_signals":         n,
                         "best_params":       best_params,
+                        "regime_params":     regime_best_params,
                         "last_optimized_at": datetime.now(tz=timezone.utc).isoformat(),
                         "bars_used":         len(df),
                     }
                 self._save_status()
                 logger.info(
                     f"Optimizer: {strategy_name}/{symbol} best_score={score:.3f} "
-                    f"params={best_params}"
+                    f"params={best_params} regimes={list(regime_best_params.keys())}"
                 )
             else:
                 logger.warning(f"Optimizer: no valid combos found for {strategy_name}/{symbol}")
@@ -435,13 +475,14 @@ class ParamOptimizer:
         symbol: str,
         df: pd.DataFrame,
         trading_type: str,
-    ) -> tuple[Optional[dict], float, int]:
-        """Run grid-search backtest. Returns (best_params, best_score, n_trades)."""
+    ) -> tuple[Optional[dict], float, int, dict[str, dict]]:
+        """Run grid-search backtest. Returns (best_params, best_score, n_trades, regime_best_params).
+        regime_best_params: {regime_label: best_params_for_that_regime}"""
         strat_map    = _get_strategy_map()
         strategy_cls = strat_map.get(strategy_name)
         if strategy_cls is None:
             logger.warning(f"Optimizer: unknown strategy {strategy_name}")
-            return None, 0.0, 0
+            return None, 0.0, 0, {}
 
         dispatch = _DISPATCH.get(strategy_name, lambda s, d: s.calculate(d))
         combos   = _grid_combos(strategy_name)
@@ -451,23 +492,39 @@ class ParamOptimizer:
         best_score  = -1.0
         best_n      = 0
 
+        # Per-regime tracking: {regime: (best_score, best_params)}
+        regime_best: dict[str, tuple[float, dict]] = {}
+        # Accumulated regime stats across all combos to find best per-regime params
+        # {combo_idx: {regime: stats}}
+        combo_regime_stats: list[tuple[dict, dict[str, dict]]] = []
+
         spread_r = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
 
         for combo in combos:
             time.sleep(0)  # yield CPU between combos to prevent event-loop starvation
-            wr, avg_rr, n = _backtest_combo(
+            wr, avg_rr, n, regime_stats = _backtest_combo(
                 strategy_cls, dispatch, df, combo,
-                cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r,
+                cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
             )
             # Score = win_rate weighted by quality of avg R:R
-            # Zero-score combos with negative avg_rr
             score = wr * max(avg_rr, 0.0) if n >= MIN_BACKTEST_SIGNALS else 0.0
             if score > best_score:
                 best_score  = score
                 best_params = combo
                 best_n      = n
 
-        return best_params, best_score, best_n
+            # Track per-regime best combo
+            for regime_label, rs in regime_stats.items():
+                if rs["total"] >= max(MIN_BACKTEST_SIGNALS // 3, 5):
+                    rwr    = rs["wins"] / rs["total"]
+                    ravg   = rs["rr_sum"] / rs["total"]
+                    rscore = rwr * max(ravg, 0.0)
+                    prev_score = regime_best.get(regime_label, (-1.0, {}))[0]
+                    if rscore > prev_score:
+                        regime_best[regime_label] = (rscore, combo)
+
+        regime_best_params = {lbl: params for lbl, (_, params) in regime_best.items()}
+        return best_params, best_score, best_n, regime_best_params
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
@@ -479,14 +536,28 @@ class ParamOptimizer:
             pass
         return {}
 
-    def _save_params(self, strategy_name: str, symbol: str, params: dict) -> None:
+    def _save_params(
+        self,
+        strategy_name: str,
+        symbol: str,
+        params: dict,
+        regime_params: dict[str, dict] | None = None,
+    ) -> None:
         with self._lock:
             data = self._load_opt()
             data.setdefault(strategy_name, {})
-            data[strategy_name][symbol] = params
+            # Merge: keep existing by_regime if present, update with new findings
+            existing = data[strategy_name].get(symbol, {})
+            existing_by_regime = existing.get("by_regime", {}) if isinstance(existing, dict) else {}
+            if regime_params:
+                existing_by_regime.update(regime_params)
+            entry = dict(params)
+            if existing_by_regime:
+                entry["by_regime"] = existing_by_regime
+            data[strategy_name][symbol] = entry
             # Also update __global__ if this is the first symbol
             if "__global__" not in data[strategy_name]:
-                data[strategy_name]["__global__"] = params
+                data[strategy_name]["__global__"] = entry
             OPT_FILE.write_text(
                 json.dumps(data, indent=2),
                 encoding="utf-8",

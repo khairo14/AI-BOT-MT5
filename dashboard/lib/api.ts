@@ -12,6 +12,12 @@ import type {
   JournalEntry,
   JournalStatsResponse,
   SwitchModeResponse,
+  AnalyticsPerformance,
+} from "@/types";
+  ExecutionMode,
+  JournalEntry,
+  JournalStatsResponse,
+  SwitchModeResponse,
 } from "@/types";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -219,3 +225,20 @@ export const fetchScannerConfig = (): Promise<Record<string, ScannerModeConfig>>
 
 export const patchScannerConfig = (patch: Record<string, unknown>) =>
   api.patch("/config/scanner", { data: patch }).then((r) => r.data);
+
+// ── Analytics ---------------------------------------------------------------
+export const fetchAnalyticsPerformance = (
+  account: "paper" | "live" | "all" = "all",
+  tradingType: "scalping" | "day_trading" | "swing" | "all" = "all",
+  limit = 5000,
+): Promise<AnalyticsPerformance> => {
+  const params = new URLSearchParams({
+    account,
+    trading_type: tradingType,
+    limit: String(limit),
+  });
+  return api.get(`/analytics/performance?${params.toString()}`).then((r) => r.data);
+};
+
+export const fetchRegimeStatus = (): Promise<{ regimes: Record<string, string> }> =>
+  api.get("/analytics/regime/status").then((r) => r.data);

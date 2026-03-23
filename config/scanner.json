@@ -13,15 +13,16 @@
   "day_trading": {
     "enabled": false,
     "symbols": [
-      "BTCUSD",
-      "ETHUSD",
       "EURUSD",
       "GBPUSD",
       "USDJPY",
       "AUDUSD",
       "GBPJPY",
       "GOLD",
-      "OILCash"
+      "OILCash",
+      "Nvidia",
+      "Apple",
+      "Amazon"
     ],
     "timeframe": "M15/H1"
   },

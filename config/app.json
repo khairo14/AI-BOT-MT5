@@ -34,10 +34,18 @@
     "confidence_threshold": 60,
     "rl_agent_enabled": true,
     "scorer_weights": {
-      "lstm": 0.40,
-      "rr": 0.25,
+      "lstm": 0.30,
+      "rr": 0.35,
       "trend": 0.20,
       "volume": 0.15
+    },
+    "regime_weights": {
+      "trending_bull":     { "lstm": 0.35, "rr": 0.25, "trend": 0.30, "volume": 0.10 },
+      "trending_bear":     { "lstm": 0.35, "rr": 0.25, "trend": 0.30, "volume": 0.10 },
+      "ranging_low_vol":   { "lstm": 0.25, "rr": 0.40, "trend": 0.10, "volume": 0.25 },
+      "ranging_high_vol":  { "lstm": 0.20, "rr": 0.45, "trend": 0.05, "volume": 0.30 },
+      "volatile_breakout": { "lstm": 0.25, "rr": 0.40, "trend": 0.20, "volume": 0.15 },
+      "quiet":             { "lstm": 0.35, "rr": 0.30, "trend": 0.20, "volume": 0.15 }
     }
   },
   "max_correlated_positions": 1,
