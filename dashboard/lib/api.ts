@@ -138,6 +138,9 @@ export const fetchAIStatus = () =>
 export const fetchRLStatus = () =>
   api.get("/ai/rl/status").then((r) => r.data);
 
+export const resetRLAgent = (trading_type: string) =>
+  api.post(`/ai/rl/reset/${trading_type}`).then((r) => r.data);
+
 export const fetchMemoryStats = (tradingType?: string) => {
   const params = tradingType ? `?trading_type=${tradingType}` : "";
   return api.get(`/ai/memory/stats${params}`).then((r) => r.data);
