@@ -185,29 +185,36 @@ class SignalBus:
         except Exception:
             pass
 
-        self.queue[signal["id"]] = signal
-        # Lazily purge stale + expired signals to keep queue bounded
-        self.purge_stale()
-
         exec_mode = self._get_exec_mode(mode)
         if exec_mode == "auto" and self._order_manager is not None:
-            # Confidence floor for auto-execution — scalping uses tight stops so
-            # low-confidence signals cause immediate SL hits.
-            MIN_CONF = {"scalping": 0.60, "day_trading": 0.50, "swing": 0.45}
-            min_conf = MIN_CONF.get(mode, 0.50)
-            conf = float(signal.get("confidence") or 0.0)
-            if conf < min_conf:
-                signal["status"] = "rejected"
-                signal["rejection_reason"] = (
-                    f"Confidence too low ({conf:.0%} < {min_conf:.0%} minimum for {mode})"
-                )
-                asyncio.create_task(broadcast_signal(dict(signal)))
-                logger.info(
-                    f"SignalBus: auto-rejected {signal.get('symbol')}/{signal.get('strategy')} "
-                    f"— conf={conf:.0%} below {min_conf:.0%} floor ({mode})"
-                )
-                return signal
+            # Confidence floor for auto-execution — only enforced when
+            # confidence_filter_enabled=true in app.json so users who disable
+            # the confidence filter aren't silently blocked here too.
+            # IMPORTANT: check BEFORE adding to the queue so repeated scanner
+            # ticks (every 30 s) don't flood the queue/archive with rejected
+            # entries and don't generate any notification noise on the dashboard.
+            try:
+                _ai_cfg = json.loads((CONFIG_DIR / "app.json").read_text()).get("ai", {})
+                _conf_filter_on = bool(_ai_cfg.get("confidence_filter_enabled", True))
+            except Exception:
+                _conf_filter_on = True
+            if _conf_filter_on:
+                MIN_CONF = {"scalping": 0.60, "day_trading": 0.50, "swing": 0.45}
+                min_conf = MIN_CONF.get(mode, 0.50)
+                conf = float(signal.get("confidence") or 0.0)
+                if conf < min_conf:
+                    # Silently drop — do NOT queue, do NOT broadcast.
+                    # Strategy runner generates a new UUID every scan tick so
+                    # queuing these would fill the archive with thousands of
+                    # rejected entries per hour and produce non-stop popups.
+                    logger.debug(
+                        f"SignalBus: conf-drop {signal.get('symbol')}/{signal.get('strategy')} "
+                        f"({mode}) conf={conf:.0%} < {min_conf:.0%} — not queued"
+                    )
+                    return signal
             signal["status"] = "executing"
+            self.queue[signal["id"]] = signal
+            self.purge_stale()
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
             asyncio.create_task(self._execute_async(signal))
@@ -226,6 +233,8 @@ class SignalBus:
                 datetime.now(tz=timezone.utc) + timedelta(seconds=exp_secs)
             ).isoformat()
             signal["status"] = "pending"
+            self.queue[signal["id"]] = signal
+            self.purge_stale()
             # Push to every connected dashboard client
             asyncio.create_task(broadcast_signal(dict(signal)))
 
@@ -362,13 +371,16 @@ class SignalBus:
                 return True
             # ── Standard Python execution (day_trading / swing / EA fallback) ─
 
+            # entry_price: runner_loop uses key "entry_price"; HTTP route uses "entry".
+            # Read both so SL/TP reanchoring fires regardless of origin.
+            _ep_raw = signal.get("entry_price") or signal.get("entry")
             req = OrderRequest(
                 symbol=signal["symbol"],
                 direction=signal["direction"].upper(),
                 volume=float(signal.get("lot_size") or 0.01),
                 sl=float(signal["sl"]),
                 tp=float(signal["tp"]) if signal.get("tp") else None,
-                entry_price=float(signal["entry"]) if signal.get("entry") else None,
+                entry_price=float(_ep_raw) if _ep_raw else None,
                 comment=f"{mode_prefix}|{signal.get('strategy', '?')[:20]}",
             )
             result = self._order_manager.place_market_order(req)
@@ -518,6 +530,9 @@ async def recover_unclosed_trades(client) -> None:
         if not deals:
             deals = []
 
+        # Resolve symbol early so it's available in all log/warning messages below
+        symbol = entry.get("symbol", "")
+
         closed = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
         if not closed:
             logger.warning(f"Recovery: no close deal found for ticket #{ticket} ({symbol}) — skipping")
@@ -529,7 +544,6 @@ async def recover_unclosed_trades(client) -> None:
         profit     = deal.profit
         close_px   = deal.price
         entry_px   = float(entry.get("entry") or 0)
-        symbol     = entry.get("symbol", "")
         direction  = entry.get("direction", "buy").upper()
         trading_type = entry.get("trading_mode") or entry.get("trading_type") or "day_trading"
         pip_val    = 0.01 if "JPY" in symbol else 0.0001

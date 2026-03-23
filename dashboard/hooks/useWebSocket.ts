@@ -56,11 +56,19 @@ export function useWebSocket(symbols: string[]) {
           case "signal": {
             const sig = normalizeSignal(msg as unknown as Record<string, unknown>);
             addSignal(sig);
-            pushNotification({
-              type: sig.status === "executing" ? "info" : "info",
-              title: `New signal — ${sig.symbol}`,
-              message: `${sig.direction.toUpperCase()} | ${sig.strategy} | conf: ${sig.confidence != null ? (sig.confidence * 100).toFixed(0) + "%" : "—"}`,
-            });
+            if (sig.status === "rejected") {
+              pushNotification({
+                type: "warning",
+                title: `Signal rejected — ${sig.symbol}`,
+                message: sig.rejection_reason ?? `${sig.direction.toUpperCase()} | ${sig.strategy} | conf too low`,
+              });
+            } else {
+              pushNotification({
+                type: "info",
+                title: `New signal — ${sig.symbol}`,
+                message: `${sig.direction.toUpperCase()} | ${sig.strategy} | conf: ${sig.confidence != null ? (sig.confidence * 100).toFixed(0) + "%" : "—"}`,
+              });
+            }
             // Browser notification (if permission granted)
             if (typeof Notification !== "undefined" && Notification.permission === "granted") {
               new Notification(`Signal: ${sig.symbol} ${sig.direction.toUpperCase()}`, {
