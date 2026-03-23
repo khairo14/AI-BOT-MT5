@@ -47,7 +47,7 @@ export default function AccountPanel() {
     const doFetch = (initial = false) => {
       Promise.all([
         fetchJournalStats(),
-        fetchTradeJournal(account, undefined, pageSize === "all" ? 1000 : pageSize),
+        fetchTradeJournal(account, undefined, pageSize === "all" ? 1000 : pageSize * 2),
         fetchPositions(),
       ])
         .then(([s, j, positions]) => {
@@ -176,7 +176,7 @@ export default function AccountPanel() {
           const getPnl = (e: JournalEntry) =>
             e.profit ?? (!( e.event === "close") ? (liveProfit[e.ticket] ?? null) : null);
 
-          const rows = Array.from(merged.values()).sort((a, b) => {
+          const allRows = Array.from(merged.values()).sort((a, b) => {
             let av: string | number | null = null;
             let bv: string | number | null = null;
             if (sortKey === "ticket")       { av = a.ticket;     bv = b.ticket; }
@@ -193,6 +193,7 @@ export default function AccountPanel() {
             const cmp = av < bv ? -1 : av > bv ? 1 : 0;
             return sortDir === "asc" ? cmp : -cmp;
           });
+          const rows = pageSize === "all" ? allRows : allRows.slice(0, pageSize);
 
           const handleSort = (key: SortKey) => {
             if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
