@@ -70,7 +70,8 @@ export default function TradePanel({ mode, defaultSymbol, symbolGroups, execMode
         message: `${direction.toUpperCase()} ${symbol} @ ${res.price ?? "market"} — ticket #${res.ticket}`,
       });
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Order failed";
+      const raw = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const msg = typeof raw === "string" ? raw : raw != null ? JSON.stringify(raw) : "Order failed";
       pushNotification({ type: "error", title: "Order error", message: msg });
     } finally {
       setLoading(false);

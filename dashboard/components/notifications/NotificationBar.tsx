@@ -22,7 +22,7 @@ export default function NotificationBar() {
         >
           <div className="flex-1 min-w-0">
             <p className="font-semibold truncate">{n.title}</p>
-            <p className="text-xs opacity-75 mt-0.5">{n.message}</p>
+            <p className="text-xs opacity-75 mt-0.5">{typeof n.message === "string" ? n.message : JSON.stringify(n.message)}</p>
           </div>
           <button
             onClick={() => dismissNotification(n.id)}

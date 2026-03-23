@@ -123,10 +123,10 @@ export const useBotStore = create<BotStore>()(
     }),
     {
       name: "evotrade-store",
-      // Only persist signals and notifications — live data (ticks, positions, account) should not be cached
+      // Only persist signals — notifications are transient and must not survive a reload
+      // (persisted non-string messages caused React crash on rehydration)
       partialize: (state) => ({
-        signals:       state.signals,
-        notifications: state.notifications,
+        signals: state.signals,
       }),
     }
   )

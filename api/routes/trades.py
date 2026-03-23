@@ -30,11 +30,16 @@ def _get_risk_manager() -> RiskManager:
 
 class PlaceOrderRequest(BaseModel):
     symbol: str
-    direction: str       # "BUY" or "SELL"
-    sl: float
+    direction: str            # "buy"/"sell" or "BUY"/"SELL" — normalised in handler
+    # Absolute price levels (used by strategy runner)
+    sl: Optional[float] = None
     tp: Optional[float] = None
+    # Pip-relative levels (used by dashboard TradePanel)
+    sl_pips: Optional[float] = None
+    tp_pips: Optional[float] = None
     risk_pct: Optional[float] = None
-    trading_mode: str    # "scalping" | "day_trading" | "swing"
+    trading_mode: Optional[str] = None   # "scalping" | "day_trading" | "swing"
+    mode: Optional[str] = None           # alias for trading_mode (frontend)
     comment: str = ""
 
 
@@ -90,15 +95,21 @@ def place_order(
     Place a market order. Validates risk rules before sending.
     Used by the manual confirmation flow and the strategy runner.
     """
+    # Normalise direction and resolve trading_mode/mode alias
+    direction = body.direction.upper()
+    trading_mode = body.trading_mode or body.mode
+    if not trading_mode:
+        raise HTTPException(status_code=422, detail="trading_mode (or mode) is required")
+
     # Check circuit breakers
     _risk_manager = _get_risk_manager()
-    allowed, reason = _risk_manager.is_trading_allowed(body.trading_mode)
+    allowed, reason = _risk_manager.is_trading_allowed(trading_mode)
     if not allowed:
         raise HTTPException(status_code=403, detail=reason)
 
     # Check concurrent limits
     positions = client.get_open_positions()
-    ok, reason = _risk_manager.check_concurrent_limit(body.trading_mode, positions)
+    ok, reason = _risk_manager.check_concurrent_limit(trading_mode, positions)
     if not ok:
         raise HTTPException(status_code=403, detail=reason)
 
@@ -111,10 +122,23 @@ def place_order(
     if not price:
         raise HTTPException(status_code=503, detail="Could not fetch current price")
 
-    entry = price["ask"] if body.direction == "BUY" else price["bid"]
+    entry = price["ask"] if direction == "BUY" else price["bid"]
+
+    # Compute absolute SL/TP from pips when the frontend sends pip-relative values
+    pip_size = sym["point"] * (10 if sym["digits"] in (3, 5) else 1)
+    digits = sym["digits"]
+    sl = body.sl
+    tp = body.tp
+    if sl is None and body.sl_pips is not None:
+        sl = round(entry - body.sl_pips * pip_size if direction == "BUY" else entry + body.sl_pips * pip_size, digits)
+    if tp is None and body.tp_pips is not None:
+        tp = round(entry + body.tp_pips * pip_size if direction == "BUY" else entry - body.tp_pips * pip_size, digits)
+
+    if sl is None:
+        raise HTTPException(status_code=422, detail="sl or sl_pips is required")
 
     # Validate SL/TP
-    valid, err = _risk_manager.validate_sl_tp(body.direction, entry, body.sl, body.tp)
+    valid, err = _risk_manager.validate_sl_tp(direction, entry, sl, tp)
     if not valid:
         raise HTTPException(status_code=400, detail=err)
 
@@ -125,9 +149,9 @@ def place_order(
     lot = _risk_manager.calculate_lot_size(
         account_balance=account["balance"],
         entry_price=entry,
-        sl_price=body.sl,
+        sl_price=sl,
         pip_value=sym["pip_value"],
-        pip_size=sym["point"] * 10,   # 1 pip = 10 points for 5-digit brokers
+        pip_size=pip_size,
         risk_pct=body.risk_pct,
         min_lot=sym["min_lot"],
         max_lot=sym["max_lot"],
@@ -136,17 +160,17 @@ def place_order(
 
     om = OrderManager(client)
     prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(
-        body.trading_mode, body.trading_mode
+        trading_mode, trading_mode
     )
     comment = f"{prefix}|{body.comment}"[:31]
 
     result = om.place_market_order(
         OrderRequest(
             symbol=body.symbol,
-            direction=body.direction,
+            direction=direction,
             volume=lot,
-            sl=body.sl,
-            tp=body.tp,
+            sl=sl,
+            tp=tp,
             comment=comment,
         )
     )
@@ -161,13 +185,13 @@ def place_order(
         trade_journal.log(
             ticket=result.ticket or 0,
             symbol=body.symbol,
-            direction=body.direction,
+            direction=direction,
             volume=lot,
             entry=result.open_price or entry,
-            sl=body.sl,
-            tp=body.tp,
+            sl=sl,
+            tp=tp,
             profit=None,
-            trading_type=body.trading_mode,
+            trading_type=trading_mode,
             account_mode=current_mode(),
             comment=body.comment,
             event="open",
@@ -182,13 +206,13 @@ def place_order(
             from api.signal_bus import _poll_outcome, bus
             _fake_signal = {
                 "symbol":       body.symbol,
-                "direction":    body.direction,
-                "trading_mode": body.trading_mode,
+                "direction":    direction,
+                "trading_mode": trading_mode,
                 "strategy":     body.comment,
                 "fill_price":   result.open_price or entry,
                 "entry_price":  result.open_price or entry,
-                "sl":           body.sl,
-                "tp":           body.tp,
+                "sl":           sl,
+                "tp":           tp,
                 "lot_size":     lot,
                 "confidence":   0.5,
             }
