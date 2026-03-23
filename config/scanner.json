@@ -1,6 +1,6 @@
 {
   "scalping": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "EURUSD",
       "USDJPY",
@@ -14,7 +14,14 @@
     "enabled": true,
     "symbols": [
       "BTCUSD",
-      "ETHUSD"
+      "ETHUSD",
+      "EURUSD",
+      "GBPUSD",
+      "USDJPY",
+      "AUDUSD",
+      "GBPJPY",
+      "GOLD",
+      "OILCash"
     ],
     "timeframe": "M15/H1"
   },
@@ -24,7 +31,17 @@
       "BTCUSD",
       "ETHUSD",
       "XRPUSD",
-      "SOLUSD"
+      "SOLUSD",
+      "EURUSD",
+      "GBPUSD",
+      "USDJPY",
+      "AUDUSD",
+      "USDCAD",
+      "NZDUSD",
+      "GOLD",
+      "SILVER",
+      "OILCash",
+      "BRENTCash"
     ],
     "timeframe": "H4/D1"
   }
