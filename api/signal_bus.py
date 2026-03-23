@@ -627,6 +627,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
     # G-6: tp2 partial-close state — set to True after tp1 partial-close fires
     _tp1_triggered = False
+    # Swing: set to True once SL has been moved to breakeven
+    _swing_be_triggered = False
 
     for _ in range(MAX_POLLS):
         await asyncio.sleep(30)
@@ -634,37 +636,101 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             # Position still open?
             positions = await asyncio.to_thread(mt5.positions_get, ticket=ticket)
             if positions:
-                # G-6: check if price has reached tp1 and we have a tp2 target
-                tp2 = float(signal.get("tp2") or 0)
-                tp1 = float(signal.get("tp") or 0)
+                pos       = positions[0]
+                direction = signal.get("direction", "").upper()
+                entry_px  = float(signal.get("fill_price") or signal.get("entry_price", 0))
+                orig_sl   = float(signal.get("sl", 0))
+                tp2       = float(signal.get("tp2") or 0)
+                tp1       = float(signal.get("tp") or 0)
+
+                def _get_om():
+                    from api.main import get_mt5_client as _gmc
+                    from engine.order_manager import OrderManager as _OMx
+                    _cx = _gmc()
+                    return _OMx(_cx) if _cx else None
+
+                def _try_trail(new_sl: float) -> None:
+                    """Move SL only if it improves (never widen the stop)."""
+                    om = _get_om()
+                    if not om:
+                        return
+                    if direction == "BUY" and new_sl > pos.sl + 1e-9:
+                        om.modify_position(ticket, sl=round(new_sl, 5))
+                        logger.info(f"Trail SL → {new_sl:.5f} | #{ticket} {signal.get('symbol')}")
+                    elif direction == "SELL" and (pos.sl == 0 or new_sl < pos.sl - 1e-9):
+                        om.modify_position(ticket, sl=round(new_sl, 5))
+                        logger.info(f"Trail SL → {new_sl:.5f} | #{ticket} {signal.get('symbol')}")
+
+                # ── Day trading: TP1 partial-close + move SL to breakeven ────
                 if tp2 and tp1 and not _tp1_triggered:
-                    pos = positions[0]
-                    direction = signal.get("direction", "").upper()
                     hit_tp1 = (
                         (direction == "BUY"  and pos.price_current >= tp1) or
                         (direction == "SELL" and pos.price_current <= tp1)
                     )
                     if hit_tp1:
                         _tp1_triggered = True
-                        # Partial close 50% + move SL to break-even
                         try:
-                            from api.main import get_mt5_client as _gclient3
-                            from engine.order_manager import OrderManager as _OM
-                            _c3 = _gclient3()
-                            if _c3:
-                                _om3 = _OM(_c3)
-                                # 50% partial close — pass fraction; partial_close handles lot rounding
-                                _om3.partial_close(ticket, 0.5)
-                                # Move SL to break-even
-                                _be = float(signal.get("fill_price") or signal.get("entry_price", 0))
-                                if _be:
-                                    _om3.modify_position(ticket, sl=_be, tp=tp2)
+                            om = _get_om()
+                            if om and entry_px:
+                                om.partial_close(ticket, 0.5)
+                                om.modify_position(ticket, sl=entry_px, tp=tp2)
                                 logger.info(
                                     f"TP1 partial-close fired: #{ticket} {signal.get('symbol')} "
-                                    f"vol={_half_vol} BE={_be} → now targeting TP2={tp2}"
+                                    f"BE={entry_px} → targeting TP2={tp2}"
                                 )
                         except Exception as _pce:
                             logger.warning(f"TP1 partial-close failed #{ticket}: {_pce}")
+
+                # ── Day trading: trail remaining 50% once TP1 has fired ──────
+                # Trail distance = 50% of original SL distance.
+                if _tp1_triggered and entry_px and orig_sl:
+                    _trail_dist = abs(entry_px - orig_sl) * 0.5
+                    try:
+                        _new_sl = (
+                            max(pos.price_current - _trail_dist, entry_px) if direction == "BUY"
+                            else min(pos.price_current + _trail_dist, entry_px)
+                        )
+                        _try_trail(_new_sl)
+                    except Exception as _te:
+                        logger.debug(f"Day trail failed #{ticket}: {_te}")
+
+                # ── Swing: breakeven at 50% of TP distance, then trail ───────
+                # Swing signals have tp2=None so tp2==0 here.
+                # Step 1: once price is halfway to TP, move SL to entry.
+                # Step 2: after breakeven, trail SL at 50% of original SL distance.
+                elif not tp2 and tp1 and entry_px and orig_sl:
+                    _trail_dist = abs(entry_px - orig_sl) * 0.5
+                    _halfway = (
+                        entry_px + (tp1 - entry_px) * 0.5 if direction == "BUY"
+                        else entry_px - (entry_px - tp1) * 0.5
+                    )
+                    if not _swing_be_triggered:
+                        hit_halfway = (
+                            (direction == "BUY"  and pos.price_current >= _halfway) or
+                            (direction == "SELL" and pos.price_current <= _halfway)
+                        )
+                        if hit_halfway:
+                            _swing_be_triggered = True
+                            try:
+                                om = _get_om()
+                                if om and entry_px:
+                                    om.modify_position(ticket, sl=entry_px)
+                                    logger.info(
+                                        f"Swing BE fired: #{ticket} {signal.get('symbol')} "
+                                        f"SL → entry {entry_px}"
+                                    )
+                            except Exception as _be_e:
+                                logger.warning(f"Swing BE failed #{ticket}: {_be_e}")
+                    if _swing_be_triggered:
+                        try:
+                            _new_sl = (
+                                max(pos.price_current - _trail_dist, entry_px) if direction == "BUY"
+                                else min(pos.price_current + _trail_dist, entry_px)
+                            )
+                            _try_trail(_new_sl)
+                        except Exception as _te:
+                            logger.debug(f"Swing trail failed #{ticket}: {_te}")
+
                 continue   # still open
 
             # Look in history by position ID — more reliable than time range
