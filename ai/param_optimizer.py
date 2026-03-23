@@ -80,6 +80,7 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
     "ema_scalp": {
         "ema_fast": [5, 8, 10, 13],
         "ema_slow": [18, 21, 26, 34],
+        "sl_pips":  [4, 6, 8, 10, 12],
         "rr":       [1.5, 2.0, 2.5, 3.0],
     },
     "bb_squeeze": {

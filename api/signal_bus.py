@@ -191,6 +191,22 @@ class SignalBus:
 
         exec_mode = self._get_exec_mode(mode)
         if exec_mode == "auto" and self._order_manager is not None:
+            # Confidence floor for auto-execution — scalping uses tight stops so
+            # low-confidence signals cause immediate SL hits.
+            MIN_CONF = {"scalping": 0.60, "day_trading": 0.50, "swing": 0.45}
+            min_conf = MIN_CONF.get(mode, 0.50)
+            conf = float(signal.get("confidence") or 0.0)
+            if conf < min_conf:
+                signal["status"] = "rejected"
+                signal["rejection_reason"] = (
+                    f"Confidence too low ({conf:.0%} < {min_conf:.0%} minimum for {mode})"
+                )
+                asyncio.create_task(broadcast_signal(dict(signal)))
+                logger.info(
+                    f"SignalBus: auto-rejected {signal.get('symbol')}/{signal.get('strategy')} "
+                    f"— conf={conf:.0%} below {min_conf:.0%} floor ({mode})"
+                )
+                return signal
             signal["status"] = "executing"
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
@@ -352,6 +368,7 @@ class SignalBus:
                 volume=float(signal.get("lot_size") or 0.01),
                 sl=float(signal["sl"]),
                 tp=float(signal["tp"]) if signal.get("tp") else None,
+                entry_price=float(signal["entry"]) if signal.get("entry") else None,
                 comment=f"{mode_prefix}|{signal.get('strategy', '?')[:20]}",
             )
             result = self._order_manager.place_market_order(req)

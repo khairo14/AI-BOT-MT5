@@ -25,6 +25,7 @@ class OrderRequest:
     volume: float         # lot size (calculated by risk manager)
     sl: float             # stop-loss price
     tp: Optional[float]   # take-profit price (None = trailing only)
+    entry_price: Optional[float] = None  # signal-generation price; used to reanchor SL/TP to live tick
     comment: str = ""
     magic: int = BOT_MAGIC
 
@@ -78,17 +79,47 @@ class OrderManager:
         order_type = mt5.ORDER_TYPE_BUY if req.direction == "BUY" else mt5.ORDER_TYPE_SELL
         price = tick.ask if req.direction == "BUY" else tick.bid
 
+        # Reanchor SL/TP to live fill price when we have the signal generation price.
+        # The strategy computes SL/TP from curr_close at bar time; by execution time
+        # the live tick may have moved (especially for tight scalping stops), causing
+        # "Invalid stops" broker rejections and immediate SL hits.
+        sl = req.sl
+        tp = req.tp
+        if req.entry_price and req.entry_price != 0.0:
+            sl_dist = abs(req.entry_price - sl)
+            if req.direction == "BUY":
+                sl = round(price - sl_dist, 6)
+                if tp is not None:
+                    tp_dist = abs(req.entry_price - tp)
+                    tp = round(price + tp_dist, 6)
+            else:  # SELL
+                sl = round(price + sl_dist, 6)
+                if tp is not None:
+                    tp_dist = abs(req.entry_price - tp)
+                    tp = round(price - tp_dist, 6)
+            if sl != req.sl or tp != req.tp:
+                logger.debug(
+                    f"SL/TP reanchored to live price: entry={req.entry_price} → live={price:.5f} "
+                    f"SL {req.sl:.5f}→{sl:.5f}  TP {req.tp}→{tp}"
+                )
+
         # Validate SL is on the correct side of price
-        if req.direction == "BUY" and req.sl >= price:
+        if req.direction == "BUY" and sl >= price:
             return OrderResult(success=False, error="BUY SL must be below entry price")
-        if req.direction == "SELL" and req.sl <= price:
+        if req.direction == "SELL" and sl <= price:
             return OrderResult(success=False, error="SELL SL must be above entry price")
+
+        # Validate TP is on the correct side of price
+        if req.direction == "BUY" and tp is not None and tp <= price:
+            return OrderResult(success=False, error="BUY TP must be above entry price")
+        if req.direction == "SELL" and tp is not None and tp >= price:
+            return OrderResult(success=False, error="SELL TP must be below entry price")
 
         # Enforce broker minimum stop distance (stops_level * point)
         stops_level = sym_info.trade_stops_level
         if stops_level > 0:
             min_dist = stops_level * sym_info.point
-            sl_dist = abs(price - req.sl)
+            sl_dist = abs(price - sl)
             if sl_dist < min_dist:
                 return OrderResult(
                     success=False,
@@ -119,8 +150,8 @@ class OrderManager:
             "volume":    vol,
             "type":      order_type,
             "price":     price,
-            "sl":        req.sl,
-            "tp":        req.tp if req.tp else 0.0,
+            "sl":        sl,
+            "tp":        tp if tp else 0.0,
             "deviation": 20,       # max price slippage in points
             "magic":     req.magic,
             "comment":   req.comment[:31],  # MT5 limit: 31 chars
@@ -141,7 +172,7 @@ class OrderManager:
 
         logger.info(
             f"Order placed | #{result.order} | {req.symbol} {req.direction} "
-            f"{req.volume} lots | Entry: {result.price} | SL: {req.sl} | TP: {req.tp}"
+            f"{req.volume} lots | Entry: {result.price} | SL: {sl} | TP: {tp}"
         )
         return OrderResult(
             success=True,
