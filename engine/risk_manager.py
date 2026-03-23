@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from datetime import datetime, date, timezone
 from pathlib import Path
 from typing import Optional
@@ -55,6 +56,10 @@ class RiskManager:
         self._cb_enabled = True   # can be toggled via API
         # G-3: optional callback — set from api/main.py to broadcast a WS alert
         self._on_circuit_breaker = None   # Callable[[str, str], None] | None
+
+        # Lock protecting all mutable state that is accessed from both the
+        # async runner loop (update_balance) and _poll_outcome threads.
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Position Sizing
@@ -204,97 +209,102 @@ class RiskManager:
         Call this after every trade close. Tracks daily/weekly balance
         and triggers circuit breakers if thresholds are exceeded.
         """
-        today = date.today()
-        week_num = today.isocalendar().week
+        with self._lock:
+            today = date.today()
+            week_num = today.isocalendar().week
 
-        # Reset daily tracking at start of new day
-        if self._tracking_date != today:
-            self._tracking_date = today
-            self._day_start_balance = current_balance
-            self._daily_halted = False
-            logger.info(f"Daily balance reset: {current_balance}")
+            # Reset daily tracking at start of new day
+            if self._tracking_date != today:
+                self._tracking_date = today
+                self._day_start_balance = current_balance
+                self._daily_halted = False
+                logger.info(f"Daily balance reset: {current_balance}")
 
-        # Reset weekly tracking at start of new week
-        if self._tracking_week != week_num:
-            self._tracking_week = week_num
-            self._week_start_balance = current_balance
-            self._weekly_halted = False
-            logger.info(f"Weekly balance reset: {current_balance}")
+            # Reset weekly tracking at start of new week
+            if self._tracking_week != week_num:
+                self._tracking_week = week_num
+                self._week_start_balance = current_balance
+                self._weekly_halted = False
+                logger.info(f"Weekly balance reset: {current_balance}")
 
-        # Check daily drawdown
-        if self._day_start_balance:
-            daily_dd = (self._day_start_balance - current_balance) / self._day_start_balance * 100
-            daily_limit = self._config["drawdown"]["daily_limit_pct"]
-            if self._cb_enabled and daily_dd >= daily_limit and not self._daily_halted:
-                self._daily_halted = True
-                logger.warning(
-                    f"CIRCUIT BREAKER: Daily drawdown {daily_dd:.2f}% >= {daily_limit}%. "
-                    "All new trades halted for today."
-                )
-                if self._on_circuit_breaker:
-                    self._on_circuit_breaker("daily", f"Daily drawdown {daily_dd:.2f}% reached {daily_limit}% limit")
+            # Check daily drawdown
+            if self._day_start_balance:
+                daily_dd = (self._day_start_balance - current_balance) / self._day_start_balance * 100
+                daily_limit = self._config["drawdown"]["daily_limit_pct"]
+                if self._cb_enabled and daily_dd >= daily_limit and not self._daily_halted:
+                    self._daily_halted = True
+                    logger.warning(
+                        f"CIRCUIT BREAKER: Daily drawdown {daily_dd:.2f}% >= {daily_limit}%. "
+                        "All new trades halted for today."
+                    )
+                    if self._on_circuit_breaker:
+                        self._on_circuit_breaker("daily", f"Daily drawdown {daily_dd:.2f}% reached {daily_limit}% limit")
 
-        # Check weekly drawdown
-        if self._week_start_balance:
-            weekly_dd = (self._week_start_balance - current_balance) / self._week_start_balance * 100
-            weekly_limit = self._config["drawdown"]["weekly_limit_pct"]
-            if self._cb_enabled and weekly_dd >= weekly_limit and not self._weekly_halted:
-                self._weekly_halted = True
-                logger.warning(
-                    f"CIRCUIT BREAKER: Weekly drawdown {weekly_dd:.2f}% >= {weekly_limit}%. "
-                    "All new trades halted until next Monday."
-                )
-                if self._on_circuit_breaker:
-                    self._on_circuit_breaker("weekly", f"Weekly drawdown {weekly_dd:.2f}% reached {weekly_limit}% limit")
+            # Check weekly drawdown
+            if self._week_start_balance:
+                weekly_dd = (self._week_start_balance - current_balance) / self._week_start_balance * 100
+                weekly_limit = self._config["drawdown"]["weekly_limit_pct"]
+                if self._cb_enabled and weekly_dd >= weekly_limit and not self._weekly_halted:
+                    self._weekly_halted = True
+                    logger.warning(
+                        f"CIRCUIT BREAKER: Weekly drawdown {weekly_dd:.2f}% >= {weekly_limit}%. "
+                        "All new trades halted until next Monday."
+                    )
+                    if self._on_circuit_breaker:
+                        self._on_circuit_breaker("weekly", f"Weekly drawdown {weekly_dd:.2f}% reached {weekly_limit}% limit")
 
     def record_loss(self, trading_mode: str) -> None:
         """Increment consecutive loss counter for a mode. Pauses mode if limit hit."""
         mode = trading_mode.lower()
-        self._consecutive_losses[mode] = self._consecutive_losses.get(mode, 0) + 1
-        if not self._cb_enabled:
-            return
-        limit = self._config["drawdown"]["max_consecutive_losses"]
-        pause_hours = self._config["drawdown"]["consecutive_loss_pause_hours"]
-
-        if self._consecutive_losses[mode] >= limit:
-            self._paused_modes[mode] = datetime.now(tz=timezone.utc)
-            logger.warning(
-                f"Mode '{mode}' paused for {pause_hours}h after "
-                f"{self._consecutive_losses[mode]} consecutive losses."
-            )
+        with self._lock:
+            self._consecutive_losses[mode] = self._consecutive_losses.get(mode, 0) + 1
+            if not self._cb_enabled:
+                return
+            limit = self._config["drawdown"]["max_consecutive_losses"]
+            pause_hours = self._config["drawdown"]["consecutive_loss_pause_hours"]
+            if self._consecutive_losses[mode] >= limit:
+                self._paused_modes[mode] = datetime.now(tz=timezone.utc)
+                logger.warning(
+                    f"Mode '{mode}' paused for {pause_hours}h after "
+                    f"{self._consecutive_losses[mode]} consecutive losses."
+                )
 
     def record_win(self, trading_mode: str) -> None:
         """Reset consecutive loss counter on a win."""
-        self._consecutive_losses[trading_mode.lower()] = 0
+        with self._lock:
+            self._consecutive_losses[trading_mode.lower()] = 0
 
     def reset_drawdown(self, current_balance: Optional[float] = None) -> None:
         """Manually clear daily/weekly circuit-breaker halts."""
-        self._daily_halted = False
-        self._weekly_halted = False
-        if current_balance is not None:
-            self._day_start_balance = current_balance
-            self._week_start_balance = current_balance
+        with self._lock:
+            self._daily_halted = False
+            self._weekly_halted = False
+            if current_balance is not None:
+                self._day_start_balance = current_balance
+                self._week_start_balance = current_balance
         logger.info("Circuit breaker: drawdown halts manually cleared.")
 
     def reset_consecutive_losses(self) -> None:
         """Clear all consecutive-loss counters and mode pauses."""
-        for mode in self._consecutive_losses:
-            self._consecutive_losses[mode] = 0
-            self._paused_modes[mode] = None
+        with self._lock:
+            for mode in self._consecutive_losses:
+                self._consecutive_losses[mode] = 0
+                self._paused_modes[mode] = None
         logger.info("Circuit breaker: consecutive-loss counters reset.")
 
     def reset_for_mode_switch(self) -> None:
         """Reset all state when switching between paper and live modes.
         Prevents losses accumulated in one mode from blocking the other."""
-        self._daily_halted = False
-        self._weekly_halted = False
-        self._day_start_balance = None
-        self._week_start_balance = None
-        self._tracking_date = None
-        self._tracking_week = None
-        for mode in self._consecutive_losses:
-            self._consecutive_losses[mode] = 0
-            self._paused_modes[mode] = None
+        with self._lock:
+            self._daily_halted = False
+            self._weekly_halted = False
+            self._day_start_balance = None
+            self._week_start_balance = None
+            self._tracking_date = None
+            self._tracking_week = None
+            for mode in self._consecutive_losses:
+                self._consecutive_losses[mode] = 0
+                self._paused_modes[mode] = None
         logger.info("RiskManager: all state reset for mode switch.")
 
     def set_circuit_breaker_enabled(self, enabled: bool) -> None:
@@ -304,29 +314,30 @@ class RiskManager:
 
     def is_trading_allowed(self, trading_mode: str) -> tuple[bool, str]:
         """Returns (allowed, reason). Check before opening any new trade."""
-        if not self._cb_enabled:
+        with self._lock:
+            if not self._cb_enabled:
+                return True, ""
+
+            if self._daily_halted:
+                return False, "Daily drawdown circuit breaker active — no new trades today"
+
+            if self._weekly_halted:
+                return False, "Weekly drawdown circuit breaker active — no new trades this week"
+
+            mode = trading_mode.lower()
+            pause_time = self._paused_modes.get(mode)
+            if pause_time:
+                pause_hours = self._config["drawdown"]["consecutive_loss_pause_hours"]
+                elapsed = (datetime.now(tz=timezone.utc) - pause_time).total_seconds() / 3600
+                if elapsed < pause_hours:
+                    remaining = pause_hours - elapsed
+                    return False, f"Mode '{mode}' paused — {remaining:.1f}h remaining"
+                else:
+                    self._paused_modes[mode] = None
+                    self._consecutive_losses[mode] = 0
+                    logger.info(f"Mode '{mode}' pause lifted.")
+
             return True, ""
-
-        if self._daily_halted:
-            return False, "Daily drawdown circuit breaker active — no new trades today"
-
-        if self._weekly_halted:
-            return False, "Weekly drawdown circuit breaker active — no new trades this week"
-
-        mode = trading_mode.lower()
-        pause_time = self._paused_modes.get(mode)
-        if pause_time:
-            pause_hours = self._config["drawdown"]["consecutive_loss_pause_hours"]
-            elapsed = (datetime.now(tz=timezone.utc) - pause_time).total_seconds() / 3600
-            if elapsed < pause_hours:
-                remaining = pause_hours - elapsed
-                return False, f"Mode '{mode}' paused — {remaining:.1f}h remaining"
-            else:
-                self._paused_modes[mode] = None
-                self._consecutive_losses[mode] = 0
-                logger.info(f"Mode '{mode}' pause lifted.")
-
-        return True, ""
 
     # ------------------------------------------------------------------
     # Concurrent Trade Limit

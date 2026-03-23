@@ -447,6 +447,7 @@ class StrategyRunner:
             volume=sig.lot_size,
             sl=sig.sl_price,
             tp=sig.tp_price,
+            entry_price=sig.entry_price,   # enables SL/TP reanchor to live fill price
             comment=sig.comment,
         )
         result = self.order_manager.place_market_order(req)
