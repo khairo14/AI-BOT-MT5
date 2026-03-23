@@ -807,12 +807,14 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             entry_px   = float(signal.get("fill_price") or signal.get("entry_price", 0))
             sym        = signal["symbol"]
             pip_val    = 0.0001 if "JPY" not in sym else 0.01
-            # Use a symbol-aware pip tolerance: 3 pips for forex, 300 points for BTC/XAUUSD
-            _sym_upper = sym.upper()
-            if any(x in _sym_upper for x in ("BTC", "XAU", "GOLD", "US30", "US100", "DAX", "UK100")):
-                tol = abs(close_px) * 0.001   # 0.1% of price
-            else:
-                tol = pip_val * 3   # 3-pip tolerance for forex
+            # Outcome-matching tolerance: max(0.1% of price, 3 pips).
+            # This handles all instrument classes without a hardcoded list:
+            #   forex (~1.10)  → max(0.0011, 0.0003) = 0.0011
+            #   gold  (~3000)  → max(3.0,    0.0003) = 3.0
+            #   ETH   (~2000)  → max(2.0,    0.0003) = 2.0
+            #   SOL   (~89)    → max(0.089,  0.0003) = 0.089
+            #   SILVER(~67)    → max(0.067,  0.0003) = 0.067
+            tol = max(abs(close_px) * 0.001, pip_val * 3)
             direction  = signal["direction"].upper()
             pips       = ((close_px - entry_px) if direction == "BUY" else (entry_px - close_px)) / pip_val
             # Use deal.time corrected for broker server-clock offset to store true UTC
@@ -822,12 +824,23 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             # Determine outcome type
             sl = float(signal.get("sl", 0))
             tp = float(signal.get("tp") or 0)
-            if tp and abs(close_px - tp) <= tol:
+            tp2_sig = float(signal.get("tp2") or 0)
+            # Day trading: after TP1 partial-close fires the runner targets tp2.
+            # _tp1_triggered carries over from the polling loop above.
+            _check_tp = tp2_sig if _tp1_triggered and tp2_sig else tp
+            if _check_tp and abs(close_px - _check_tp) <= tol:
                 outcome_type = "tp_hit"
             elif sl and abs(close_px - sl) <= tol:
                 outcome_type = "sl_hit"
+            elif profit > 0:
+                # EA/ATR trailing stop locked in profit, or price closed at an
+                # unrecognised TP level (slippage, partial closes, etc.)
+                outcome_type = "tp_hit"
+            elif profit < 0:
+                # Trailing stop hit at loss, or slippage past SL.
+                outcome_type = "sl_hit"
             else:
-                outcome_type = "manual_close"
+                outcome_type = "manual_close"  # breakeven or confirmed manual
 
             # H-1 fix: derive close_dt from close_time (already broker-offset-corrected)
             # rather than raw deal.time so both endpoints share the same UTC clock.
@@ -845,7 +858,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 entry_price=entry_px,
                 close_price=close_px,
                 sl_price=sl,
-                tp_price=tp,
+                tp_price=_check_tp,
                 volume=float(signal.get("lot_size", 0.01)),
                 profit=profit,
                 profit_pips=round(pips, 1),
