@@ -503,7 +503,7 @@ async def recover_unclosed_trades(client) -> None:
 
         closed = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
         if not closed:
-            logger.debug(f"Recovery: no close deal found for ticket #{ticket} — skipping")
+            logger.warning(f"Recovery: no close deal found for ticket #{ticket} ({symbol}) — skipping")
             continue
 
         deal      = closed[-1]
@@ -790,8 +790,9 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
                 continue   # still open
 
-            # Look in history by position ID — more reliable than time range
-            deals = await asyncio.to_thread(mt5.history_deals_get, position=ticket)
+            # Look in history by position ID — use the client method which has a
+            # date-range fallback for brokers that require history pre-loading.
+            deals = await asyncio.to_thread(client.get_deals_by_position, ticket)
             if deals is None:
                 deals = []
 

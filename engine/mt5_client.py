@@ -356,10 +356,29 @@ class MT5Client:
         ]
 
     def get_deals_by_position(self, position_ticket: int) -> list:
-        """Return raw deal objects for a given position ticket (acquires SDK lock)."""
+        """Return raw deal objects for a given position ticket (acquires SDK lock).
+
+        Primary: position-based lookup (fast, no date range needed).
+        Fallback: date-range search over the last 30 days filtered by position_id.
+        Some brokers (e.g. XM demo) return nothing from the position-based call
+        unless the corresponding history window has already been loaded locally —
+        the date-range fallback guarantees we always find the deal.
+        """
+        from datetime import datetime, timedelta, timezone as _tz
+
         with self._lock:
             deals = mt5.history_deals_get(position=position_ticket)
-        return list(deals) if deals else []
+        if deals:
+            return list(deals)
+
+        # Fallback: load last 30 days of history and filter by position_id
+        to_dt   = datetime.now(_tz.utc)
+        from_dt = to_dt - timedelta(days=30)
+        with self._lock:
+            all_deals = mt5.history_deals_get(from_dt, to_dt)
+        if not all_deals:
+            return []
+        return [d for d in all_deals if d.position_id == position_ticket]
 
     # ------------------------------------------------------------------
     # Context manager support
