@@ -269,6 +269,21 @@ def get_journal(
         raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
 
     entries = trade_journal.get(account=account, trading_type=trading_type, event=event, limit=limit)
+
+    # Ensure every close event has its paired open event in the response.
+    # Without this, long-lived trades (e.g. swing trades held for days) whose open
+    # event is older than `limit` will show the wrong entry time in the dashboard
+    # (the dashboard merge falls back to the close event's open_time = logged_at).
+    if event != "open":
+        open_tickets  = {e["ticket"] for e in entries if e.get("event") == "open"}
+        close_tickets = {e["ticket"] for e in entries if e.get("event") == "close"}
+        missing = close_tickets - open_tickets
+        if missing:
+            all_opens = trade_journal.get(account="all", event="open", limit=10_000)
+            paired = [e for e in all_opens if e["ticket"] in missing]
+            entries = list(entries) + paired
+            entries.sort(key=lambda x: x.get("logged_at", ""), reverse=True)
+
     return {
         "entries": entries,
         "count":   len(entries),

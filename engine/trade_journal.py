@@ -74,7 +74,9 @@ class TradeJournal:
             "account_mode": account_mode,
             "comment":      comment,
             "event":        event,
-            "open_time":    open_time or datetime.now(tz=timezone.utc).isoformat(),
+            # open events default open_time to now(); close/other events store null
+            # so the dashboard always uses the open event as the authoritative source.
+            "open_time":    (open_time or datetime.now(tz=timezone.utc).isoformat()) if event == "open" else open_time,
             "close_time":   close_time,
             "logged_at":    datetime.now(tz=timezone.utc).isoformat(),
         }
