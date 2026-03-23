@@ -653,10 +653,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                             _c3 = _gclient3()
                             if _c3:
                                 _om3 = _OM(_c3)
-                                # 50% partial close — rounds down to broker min step
-                                _half_vol = round(pos.volume * 0.5, 2)
-                                if _half_vol >= 0.01:
-                                    _om3.partial_close(ticket, _half_vol)
+                                # 50% partial close — pass fraction; partial_close handles lot rounding
+                                _om3.partial_close(ticket, 0.5)
                                 # Move SL to break-even
                                 _be = float(signal.get("fill_price") or signal.get("entry_price", 0))
                                 if _be:
