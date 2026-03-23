@@ -589,6 +589,7 @@ async def recover_unclosed_trades(client) -> None:
                 open_time=entry.get("open_time", ""),
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
+                extra={"source": "live"},
             )
             memory.record(outcome)
             _stats = memory.stats(trading_type=trading_type, live_only=True)
@@ -885,6 +886,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 open_time=open_time,
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
+                extra={"source": "live"},
             )
             memory.record(outcome)
 
