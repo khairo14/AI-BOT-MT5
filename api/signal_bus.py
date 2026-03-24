@@ -1060,7 +1060,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     from api.main import get_mt5_client as _gclient
                     _client2 = _gclient()
                     if _client2 and _client2.is_connected():
-                        _df2 = await asyncio.to_thread(_client2.get_ohlcv, _sym, _tf_str2, 1500)
+                        _df2 = await asyncio.to_thread(_client2.get_ohlcv, _sym, _tf_str2, 3000)
                         if _df2 is not None and not _df2.empty:
                             _opt.optimize_async(_strat, _sym, _df2, trading_type)
                             logger.info(f"Auto param optimizer triggered: {_strat}/{_sym}")

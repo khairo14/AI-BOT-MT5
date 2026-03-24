@@ -195,6 +195,11 @@ def run_backtest(
     # Determine if primary df has a parseable time column for lookahead-safe slicing
     _has_time = "time" in df.columns
 
+    # Rolling window size: strategies only need the last N bars for indicator look-back.
+    # Using a fixed window instead of df.iloc[:i+1] keeps each bar O(window) instead
+    # of O(i), turning the overall loop from O(n²) to O(n).
+    SIGNAL_WINDOW = 350
+
     trades: list[BacktestTrade] = []
     equity   = initial_balance
     i        = warmup
@@ -209,19 +214,24 @@ def run_backtest(
     while i < len(df) - 1:
         # Slice secondary dataframes up to (and including) the current bar time
         # to prevent lookahead bias.
+        # Rolling window: only pass the last SIGNAL_WINDOW bars to the strategy.
+        window_start = max(0, i + 1 - SIGNAL_WINDOW)
+        df_window    = df.iloc[window_start : i + 1]
+
         if _extra_dfs and _has_time:
             bar_time = df.iloc[i]["time"]
             sliced_extra = {
-                k: v[v["time"] < bar_time] if "time" in v.columns else v
+                k: (v[v["time"] < bar_time].iloc[-SIGNAL_WINDOW:] if "time" in v.columns
+                    else v.iloc[-SIGNAL_WINDOW:])
                 for k, v in _extra_dfs.items()
             }
         else:
-            sliced_extra = _extra_dfs
+            sliced_extra = {k: v.iloc[-SIGNAL_WINDOW:] for k, v in _extra_dfs.items()} if _extra_dfs else _extra_dfs
 
-        # Run strategy on bars 0..i
+        # Run strategy on windowed slice
         try:
             strat  = strategy_cls(symbol=symbol, params=_strat_params)
-            result = dispatch(strat, df.iloc[: i + 1], sliced_extra)
+            result = dispatch(strat, df_window, sliced_extra)
             sig    = result.signal
         except Exception as exc:
             logger.debug(f"Backtester signal error at bar {i}: {exc}")

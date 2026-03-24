@@ -195,7 +195,7 @@ export const fetchBacktestStrategies = () =>
   api.get("/backtest/strategies").then((r) => r.data as Record<string, string[]>);
 
 export const runBacktest = (req: BacktestRequest) =>
-  api.post("/backtest/run", req).then((r) => r.data);
+  api.post("/backtest/run", req, { timeout: 120_000 }).then((r) => r.data);
 
 export const fetchBacktestHistory = (params?: {
   page?: number; page_size?: number;

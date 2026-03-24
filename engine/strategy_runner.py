@@ -21,7 +21,7 @@ from loguru import logger
 
 from engine.mt5_client import MT5Client
 from engine.news_filter import news_filter
-from engine.order_manager import OrderManager, OrderRequest
+from engine.order_manager import BOT_MAGIC, OrderManager, OrderRequest
 from engine.risk_manager import RiskManager
 from engine.session_filter import session_filter
 from engine.strategies.base_strategy import StrategyResult
@@ -568,6 +568,41 @@ class StrategyRunner:
 
     def _execute(self, sig: StrategySignal) -> bool:
         open_positions = self.client.get_open_positions()
+
+        # Scalping close-and-reverse: when there is an existing position in the
+        # OPPOSITE direction for the same symbol and the new signal meets both:
+        #   • confidence > 67%  (high-conviction reversal)
+        #   • RR ≥ 2.5          (reward justifies closing the existing trade early)
+        # …close the conflicting position so the concurrent limit won't block the
+        # new signal.  Day-trading and swing keep the original block-on-conflict.
+        if sig.trading_type == "scalping" and sig.tp_price and sig.sl_price:
+            _sl_dist = abs(sig.entry_price - sig.sl_price)
+            _tp_dist = abs(sig.entry_price - sig.tp_price)
+            _new_rr  = _tp_dist / _sl_dist if _sl_dist > 0 else 0.0
+            _opposite_type = "sell" if sig.direction == "BUY" else "buy"
+            if sig.confidence >= 0.67 and _new_rr >= 2.5:
+                for _pos in open_positions:
+                    if (
+                        _pos.get("symbol") == sig.symbol
+                        and _pos.get("type") == _opposite_type
+                        and _pos.get("magic") == BOT_MAGIC
+                    ):
+                        _ticket = _pos.get("ticket")
+                        if _ticket:
+                            _closed = self.order_manager.close_position(
+                                _ticket, reason="scalp_reversal"
+                            )
+                            if _closed:
+                                logger.info(
+                                    f"Scalp reversal: closed {_opposite_type.upper()} "
+                                    f"#{_ticket} on {sig.symbol} "
+                                    f"(conf={sig.confidence:.2f} rr={_new_rr:.2f}) "
+                                    f"→ opening {sig.direction}"
+                                )
+                                # Refresh positions so concurrent-limit sees the closed trade
+                                open_positions = self.client.get_open_positions()
+                        break
+
         allowed, _reason = self.risk_manager.check_concurrent_limit(
             sig.trading_type, open_positions, symbol=sig.symbol
         )

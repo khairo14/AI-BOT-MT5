@@ -237,7 +237,7 @@ def optimizer_status():
 
 class OptimizeRequest(BaseModel):
     trading_type: TRADING_TYPE = "day_trading"
-    bars: int = 1500
+    bars: int = 3000
 
 
 @router.post("/optimizer/run/{strategy_name}/{symbol}")

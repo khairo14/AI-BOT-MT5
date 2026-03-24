@@ -442,7 +442,7 @@ class ParamOptimizer:
             best_params, score, n, regime_best_params = self._run_backtest(
                 strategy_name, symbol, df, trading_type
             )
-            if best_params is not None:
+            if best_params is not None and best_score > 0.0:
                 self._save_params(strategy_name, symbol, best_params, regime_best_params)
                 with self._lock:
                     self._status[key] = {
