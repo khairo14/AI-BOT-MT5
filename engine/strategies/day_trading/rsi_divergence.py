@@ -1,12 +1,10 @@
 """
-D3 — RSI Divergence + Session Open
+D3 — RSI Divergence
 Timeframe: H1 (divergence), M30 (entry)
 Symbols: GBPUSD, EURJPY, GOLD, GBPJPY, GER40Cash
 """
 
 from __future__ import annotations
-
-from datetime import time as dtime, timezone
 
 import ta
 import pandas as pd
@@ -17,14 +15,10 @@ from engine.strategies.base_strategy import BaseStrategy, Signal, StrategyResult
 DEFAULT_PARAMS = {
     "rsi_period": 14,
     "ema_bias_period": 50,
-    "session_window_hours": 2,
     "divergence_lookback": 20,
     "atr_period": 14,
     "tp_rr": 1.5,
 }
-
-# Session opens in UTC
-SESSION_OPENS_UTC = [dtime(7, 0), dtime(13, 0)]
 
 
 class RSIDivergence(BaseStrategy):
@@ -37,23 +31,6 @@ class RSIDivergence(BaseStrategy):
         p = {**DEFAULT_PARAMS, **self.params}
 
         if len(df) < 30:
-            return self._no_signal()
-
-        # Session open filter: signal must form within N hours of session open
-        last_time = df["time"].iloc[-1]
-        last_utc = last_time.astimezone(timezone.utc)
-        session_window_mins = int(p["session_window_hours"] * 60)
-        now_t = dtime(last_utc.hour, last_utc.minute)
-
-        def _session_end(s: dtime) -> dtime:
-            total = s.hour * 60 + s.minute + session_window_mins
-            return dtime(min(total // 60, 23), total % 60)
-
-        in_session_window = any(
-            s <= now_t <= _session_end(s)
-            for s in SESSION_OPENS_UTC
-        )
-        if not in_session_window:
             return self._no_signal()
 
         close = df["close"]
@@ -123,7 +100,6 @@ class RSIDivergence(BaseStrategy):
             "bullish_div": bullish_div,
             "bearish_div": bearish_div,
             "ema_bias": round(curr_ema, 5),
-            "in_session_window": in_session_window,
         }
 
         if bullish_div and rsi_cross_up:

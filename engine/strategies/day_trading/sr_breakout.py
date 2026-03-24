@@ -16,7 +16,7 @@ DEFAULT_PARAMS = {
     "lookback_bars": 50,
     "atr_period": 14,
     "rsi_period": 14,
-    "retest_mode": True,
+    "retest_mode": False,
     "sl_buffer_atr": 0.3,
     "tp_rr": 1.8,
 }

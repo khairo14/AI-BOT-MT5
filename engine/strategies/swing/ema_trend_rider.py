@@ -19,7 +19,7 @@ DEFAULT_PARAMS = {
     "adx_period": 14,
     "adx_threshold": 25,
     "atr_period": 14,
-    "pullback_atr_tolerance": 0.3,
+    "pullback_atr_tolerance": 0.5,
     "sl_atr_mult": 1.5,
     "tp_rr": 2.5,
 }
