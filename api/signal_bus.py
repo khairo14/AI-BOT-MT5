@@ -248,6 +248,21 @@ class SignalBus:
         signal = self.queue.get(signal_id)
         if signal is None:
             raise KeyError(signal_id)
+        # GAP-5: reject stale signals at approval time, not just at queue time.
+        expires_at = signal.get("expires_at")
+        if expires_at:
+            try:
+                exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                if datetime.now(tz=timezone.utc) > exp_dt:
+                    signal["status"] = "expired"
+                    signal["rejection_reason"] = "Signal expired before manual approval"
+                    raise ValueError(
+                        f"Signal {signal_id} expired at {expires_at} — cannot execute"
+                    )
+            except ValueError:
+                raise
+            except Exception:
+                pass  # malformed expires_at — allow execution
         # Status may already be "executing" if set by approve_signal under lock —
         # only update if it is still "pending" (direct call path).
         if signal.get("status") != "executing":
@@ -374,10 +389,44 @@ class SignalBus:
             # entry_price: runner_loop uses key "entry_price"; HTTP route uses "entry".
             # Read both so SL/TP reanchoring fires regardless of origin.
             _ep_raw = signal.get("entry_price") or signal.get("entry")
+
+            # LOGIC-3: revalidate lot size using current balance before placing order.
+            # This matters for pending manual signals that may be minutes or hours old.
+            _lot = float(signal.get("lot_size") or 0.01)
+            try:
+                from api.runner_loop import _risk_manager as _rm_lot
+                if _rm_lot is not None and hasattr(self._client, "get_account_info"):
+                    _acct_lot = self._client.get_account_info()
+                    if _acct_lot and _acct_lot.get("balance"):
+                        _cur_bal = float(_acct_lot["balance"])
+                        _sym_info_lot = self._client.get_symbol_info(signal["symbol"])
+                        _sl_lot = float(signal.get("sl") or 0)
+                        _ep_lot = float(_ep_raw) if _ep_raw else 0.0
+                        if _sl_lot and _ep_lot and _sym_info_lot:
+                            _new_lot = _rm_lot.calculate_lot_size(
+                                balance=_cur_bal,
+                                entry=_ep_lot,
+                                sl=_sl_lot,
+                                tick_value=_sym_info_lot.get("pip_value", 1.0),
+                                tick_size=_sym_info_lot.get("tick_size", 0.00001),
+                                min_lot=_sym_info_lot.get("volume_min", 0.01),
+                                max_lot=_sym_info_lot.get("volume_max", 100.0),
+                                lot_step=_sym_info_lot.get("volume_step", 0.01),
+                            )
+                            if abs(_new_lot - _lot) / max(_lot, 1e-8) > 0.10:
+                                logger.info(
+                                    f"Lot revalidated for stale signal {signal.get('id','?')}: "
+                                    f"{_lot} → {_new_lot} (balance={_cur_bal:.2f})"
+                                )
+                                _lot = _new_lot
+                                signal["lot_size"] = _new_lot
+            except Exception as _lot_exc:
+                logger.debug(f"SignalBus: lot revalidation skipped: {_lot_exc}")
+
             req = OrderRequest(
                 symbol=signal["symbol"],
                 direction=signal["direction"].upper(),
-                volume=float(signal.get("lot_size") or 0.01),
+                volume=_lot,
                 sl=float(signal["sl"]),
                 tp=float(signal["tp"]) if signal.get("tp") else None,
                 entry_price=float(_ep_raw) if _ep_raw else None,
@@ -888,6 +937,16 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             close_dt = datetime.fromisoformat(close_time)
             dur_mins = (close_dt - open_dt).total_seconds() / 60
 
+            # GAP-2: derive profit_pct for trade memory using last-known day-start balance
+            # (a fresh balance fetch happens later for RL; this provisional value ensures
+            # analytics / win-rate pct columns are never zero)
+            try:
+                from api.runner_loop import _risk_manager as _rm_pre
+                _pre_bal = _rm_pre._day_start_balance if _rm_pre else None
+            except Exception:
+                _pre_bal = None
+            _mem_profit_pct = (profit / _pre_bal * 100.0) if _pre_bal and _pre_bal > 0 else (profit / 10_000.0 * 100.0)
+
             outcome = TradeOutcome(
                 ticket=ticket,
                 symbol=signal["symbol"],
@@ -902,7 +961,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 volume=float(signal.get("lot_size", 0.01)),
                 profit=profit,
                 profit_pips=round(pips, 1),
-                profit_pct=0.0,   # balance not captured here — RL uses raw profit
+                profit_pct=_mem_profit_pct,
                 outcome=outcome_type,
                 open_time=open_time,
                 close_time=close_time,

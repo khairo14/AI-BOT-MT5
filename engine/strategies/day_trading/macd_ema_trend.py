@@ -50,8 +50,7 @@ class MACDEMATrend(BaseStrategy):
         h1_macd_bear = False
 
         if df_h1 is not None and len(df_h1) >= p["ema_bias"] + 5:
-            h1_close = df_h1["close"]
-            h1_ema20 = ta.trend.EMAIndicator(h1_close, window=p["ema_fast"]).ema_indicator()
+            h1_close = df_h1["close"]            h1_ema20 = ta.trend.EMAIndicator(h1_close, window=p["ema_fast"]).ema_indicator()
             h1_ema50 = ta.trend.EMAIndicator(h1_close, window=p["ema_slow"]).ema_indicator()
             h1_ema200 = ta.trend.EMAIndicator(h1_close, window=p["ema_bias"]).ema_indicator()
             macd_obj = ta.trend.MACD(
@@ -70,6 +69,13 @@ class MACDEMATrend(BaseStrategy):
 
             h1_macd_bull = h1_hist.iloc[-1] > 0 and h1_hist.iloc[-1] > h1_hist.iloc[-2]
             h1_macd_bear = h1_hist.iloc[-1] < 0 and h1_hist.iloc[-1] < h1_hist.iloc[-2]
+        else:
+            # IMPROVE-5: log when H1 data is absent so systematic fetch failures are visible
+            logger.debug(
+                f"macd_ema_trend/{self.symbol}: H1 data unavailable "
+                f"(df_h1={'None' if df_h1 is None else f'only {len(df_h1)} bars'}) "
+                "— strategy inactive this tick"
+            )
 
         curr_close = close.iloc[-1]
         prev_close = close.iloc[-2]

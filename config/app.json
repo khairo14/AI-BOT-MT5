@@ -18,6 +18,7 @@
     "swing": "auto"
   },
   "ea_enabled": false,
+  "bot_magic": 20260318,
   "notifications": {
     "signal_alert": true,
     "trade_opened": true,

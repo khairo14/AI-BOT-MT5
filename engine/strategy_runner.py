@@ -375,7 +375,15 @@ class StrategyRunner:
                 if rf != 1.0:
                     min_lot = sym_info.get("min_lot", 0.01)
                     lot_step = sym_info.get("lot_step", 0.01)
-                    lot = max(min_lot, round(round(lot * rf / lot_step) * lot_step, 2))
+                    _intended_lot = round(round(lot * rf / lot_step) * lot_step, 2)
+                    lot = max(min_lot, _intended_lot)
+                    # LOGIC-1: warn when RL reduction is overridden by broker minimum
+                    if rf < 1.0 and _intended_lot < min_lot:
+                        logger.warning(
+                            f"RL risk factor {rf:.2f} intended lot {_intended_lot:.5f} "
+                            f"but broker min_lot={min_lot} — clamped to min_lot. "
+                            f"Actual risk is higher than RL intended [{symbol}/{trading_type}]."
+                        )
         except Exception as _rl_exc:
             logger.warning(
                 f"RL risk factor skipped [{symbol}/{trading_type}]: {_rl_exc} — using raw lot"

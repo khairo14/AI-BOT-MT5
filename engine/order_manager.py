@@ -14,8 +14,18 @@ from loguru import logger
 
 from engine.mt5_client import MT5Client
 
-# Magic number — identifies all orders placed by this bot
-BOT_MAGIC = 20260318
+# IMPROVE-2: read from config/app.json at import time so the magic number is
+# configurable without any source-code changes. Fallback keeps backward compat.
+def _load_bot_magic() -> int:
+    try:
+        import json
+        from pathlib import Path
+        cfg = json.loads((Path(__file__).parent.parent / "config" / "app.json").read_text(encoding="utf-8"))
+        return int(cfg.get("bot_magic", 20260318))
+    except Exception:
+        return 20260318
+
+BOT_MAGIC: int = _load_bot_magic()
 
 
 @dataclass
@@ -329,9 +339,11 @@ class OrderManager:
         if close_volume < symbol_info.volume_min:
             close_volume = symbol_info.volume_min
 
-        # Round to lot step
+        # BUG-1: use floor (not round) so close_volume never exceeds the requested
+        # fraction of the position (rounds up to nearest lot step = closes too much).
+        import math as _math
         step = symbol_info.volume_step
-        close_volume = round(round(close_volume / step) * step, 8)
+        close_volume = round(_math.floor(close_volume / step) * step, 8)
 
         with self._client._lock:
             tick = mt5.symbol_info_tick(pos.symbol)

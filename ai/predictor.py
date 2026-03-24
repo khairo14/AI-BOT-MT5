@@ -228,7 +228,8 @@ class PricePredictor:
 
         # Accuracy gate: refuse to swap in a coin-flip model.
         # Keeps the previous trained version (if any) rather than degrading it.
-        _MIN_ACCURACY = 0.55
+        # MATH-1: raised from 0.55 — 55% has no positive EV after spread/slippage.
+        _MIN_ACCURACY = 0.58
         if accuracy < _MIN_ACCURACY:
             logger.warning(
                 f"LSTM {key}: val accuracy {accuracy:.2%} < {_MIN_ACCURACY:.0%} threshold — "

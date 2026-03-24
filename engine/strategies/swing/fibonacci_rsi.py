@@ -72,8 +72,14 @@ class FibonacciRSI(BaseStrategy):
         # Bullish impulse: low formed before high → retracement pulls back down into golden zone
         # Bearish impulse: high formed before low → retracement bounces up into golden zone
 
-        high_pos = int(df.index.get_loc(swing_high_idx)) if swing_high_idx in df.index else -1  # type: ignore[arg-type]
-        low_pos  = int(df.index.get_loc(swing_low_idx))  if swing_low_idx  in df.index else -1  # type: ignore[arg-type]
+        try:
+            high_pos = int(df.index.get_loc(swing_high_idx))
+        except (KeyError, TypeError, ValueError):
+            high_pos = -1
+        try:
+            low_pos = int(df.index.get_loc(swing_low_idx))
+        except (KeyError, TypeError, ValueError):
+            low_pos = -1
 
         fibs_bull = _compute_fibs(swing_low, swing_high)   # retracement of up-move
         fibs_bear = _compute_fibs(swing_high, swing_low)   # retracement of down-move (inverted)

@@ -16,6 +16,7 @@ from typing import Optional
 from loguru import logger
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
+_STATE_PATH = Path(__file__).parent.parent / "data" / "risk_state.json"
 
 
 def _load_config() -> dict:
@@ -60,6 +61,59 @@ class RiskManager:
         # Lock protecting all mutable state that is accessed from both the
         # async runner loop (update_balance) and _poll_outcome threads.
         self._lock = threading.Lock()
+
+        # GAP-1: restore state from disk so circuit breakers survive restarts.
+        # Only auto-load when using the production config (no explicit config dict
+        # passed) — tests that supply a config dict get a clean in-memory state.
+        if config is None:
+            self._load_state()
+
+    # ------------------------------------------------------------------
+    # State Persistence (GAP-1)
+    # ------------------------------------------------------------------
+
+    def _save_state(self) -> None:
+        """Persist circuit breaker state to disk (called inside self._lock)."""
+        try:
+            state = {
+                "daily_halted":        self._daily_halted,
+                "weekly_halted":       self._weekly_halted,
+                "day_start_balance":   self._day_start_balance,
+                "week_start_balance":  self._week_start_balance,
+                "tracking_date":       self._tracking_date.isoformat() if self._tracking_date else None,
+                "tracking_week":       self._tracking_week,
+                "consecutive_losses":  self._consecutive_losses,
+                "paused_modes":        {
+                    k: v.isoformat() if v else None
+                    for k, v in self._paused_modes.items()
+                },
+            }
+            _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _STATE_PATH.write_text(json.dumps(state), encoding="utf-8")
+        except Exception as exc:
+            logger.warning(f"RiskManager: could not save state: {exc}")
+
+    def _load_state(self) -> None:
+        """Restore circuit breaker state from disk if available."""
+        if not _STATE_PATH.exists():
+            return
+        try:
+            state = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+            self._daily_halted       = bool(state.get("daily_halted", False))
+            self._weekly_halted      = bool(state.get("weekly_halted", False))
+            self._day_start_balance  = state.get("day_start_balance")
+            self._week_start_balance = state.get("week_start_balance")
+            self._tracking_date      = date.fromisoformat(state["tracking_date"]) if state.get("tracking_date") else None
+            self._tracking_week      = state.get("tracking_week")
+            for k, v in state.get("consecutive_losses", {}).items():
+                if k in self._consecutive_losses:
+                    self._consecutive_losses[k] = int(v)
+            for k, v in state.get("paused_modes", {}).items():
+                if k in self._paused_modes:
+                    self._paused_modes[k] = datetime.fromisoformat(v) if v else None
+            logger.info("RiskManager: circuit breaker state restored from disk")
+        except Exception as exc:
+            logger.warning(f"RiskManager: could not restore state: {exc}")
 
     # ------------------------------------------------------------------
     # Position Sizing
@@ -252,6 +306,7 @@ class RiskManager:
                     )
                     if self._on_circuit_breaker:
                         self._on_circuit_breaker("weekly", f"Weekly drawdown {weekly_dd:.2f}% reached {weekly_limit}% limit")
+            self._save_state()
 
     def record_loss(self, trading_mode: str) -> None:
         """Increment consecutive loss counter for a mode. Pauses mode if limit hit."""
@@ -268,11 +323,13 @@ class RiskManager:
                     f"Mode '{mode}' paused for {pause_hours}h after "
                     f"{self._consecutive_losses[mode]} consecutive losses."
                 )
+            self._save_state()
 
     def record_win(self, trading_mode: str) -> None:
         """Reset consecutive loss counter on a win."""
         with self._lock:
             self._consecutive_losses[trading_mode.lower()] = 0
+            self._save_state()
 
     def reset_drawdown(self, current_balance: Optional[float] = None) -> None:
         """Manually clear daily/weekly circuit-breaker halts."""
@@ -282,6 +339,7 @@ class RiskManager:
             if current_balance is not None:
                 self._day_start_balance = current_balance
                 self._week_start_balance = current_balance
+            self._save_state()
         logger.info("Circuit breaker: drawdown halts manually cleared.")
 
     def reset_consecutive_losses(self) -> None:
@@ -290,6 +348,7 @@ class RiskManager:
             for mode in self._consecutive_losses:
                 self._consecutive_losses[mode] = 0
                 self._paused_modes[mode] = None
+            self._save_state()
         logger.info("Circuit breaker: consecutive-loss counters reset.")
 
     def reset_for_mode_switch(self) -> None:
@@ -305,6 +364,7 @@ class RiskManager:
             for mode in self._consecutive_losses:
                 self._consecutive_losses[mode] = 0
                 self._paused_modes[mode] = None
+            self._save_state()
         logger.info("RiskManager: all state reset for mode switch.")
 
     def set_circuit_breaker_enabled(self, enabled: bool) -> None:

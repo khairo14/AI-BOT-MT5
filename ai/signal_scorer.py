@@ -211,7 +211,9 @@ class SignalScorer:
         ema200 = _ema(close, 200)
         eps    = max(abs(ema200[-1]), 1e-8)
         gap_pct        = (ema50[-1] - ema200[-1]) / eps
-        trend_strength = float(np.clip(gap_pct / 0.02, -1.0, 1.0))
+        # MATH-2: normalise over 5% gap (was 2%). A 2% gap now scores 0.6 and a 5%+
+        # gap scores 1.0, preserving discrimination for strong vs moderate trends.
+        trend_strength = float(np.clip(gap_pct / 0.05, -1.0, 1.0))
         raw_score      = round(0.5 + 0.4 * trend_strength, 4)   # [0.1, 0.9]
         if direction.upper() == "BUY":
             return raw_score

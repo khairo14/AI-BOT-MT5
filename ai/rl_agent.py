@@ -174,8 +174,10 @@ class RLAgent:
         vol_pct      = SL-distance as % of entry price (ATR proxy for volatility regime).
         """
         with self._lock:
-            # Normalise reward: clip extreme values so Q-table stays stable
-            reward = max(-0.10, min(0.10, float(reward)))
+            # Normalise reward: asymmetric clip — tighter floor captures moderate losses
+            # more precisely; looser ceiling lets strong wins register clearly.
+            # MATH-3: was ±0.10 (symmetric) — extreme losses clipped same as moderate.
+            reward = max(-0.05, min(0.15, float(reward)))
             self._n_updates += 1
             new_state = _state(win_rate, avg_conf, drawdown_pct, vol_pct)
             self._update_q(new_state, reward)
@@ -199,12 +201,14 @@ class RLAgent:
                 "n_updates":    self._n_updates,
             }
             _save_path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
-        # Disk write happens outside the lock to avoid blocking concurrent reads
-        try:
-            with open(_save_path, "w", encoding="utf-8") as f:
-                json.dump(_save_payload, f)
-        except Exception as exc:
-            logger.warning(f"RL save failed [{self.trading_type}]: {exc}")
+        # Disk write happens outside the lock to avoid blocking concurrent reads.
+        # IMPROVE-1: only write every 10 updates to reduce I/O on busy sessions.
+        if self._n_updates % 10 == 0:
+            try:
+                with open(_save_path, "w", encoding="utf-8") as f:
+                    json.dump(_save_payload, f)
+            except Exception as exc:
+                logger.warning(f"RL save failed [{self.trading_type}]: {exc}")
         logger.debug(
             f"RL [{self.trading_type}] reward={reward:+.4f} "
             f"conf_thresh={self._conf_thresh:.2f} "

@@ -64,7 +64,7 @@ class TradeJournal:
         record = {
             "ticket":       ticket,
             "symbol":       symbol,
-            "direction":    direction.lower(),
+            "direction":    direction.upper(),
             "volume":       volume,
             "entry":        entry,
             "sl":           sl,
