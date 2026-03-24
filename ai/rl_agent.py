@@ -226,13 +226,21 @@ class RLAgent:
 
     # ── internal ──────────────────────────────────────────────────────────────
 
+    _HOLD_ACTION = 4  # index of (0.0, 0.0) in ACTIONS — hold both parameters
+
     def _choose_action(self, state: str) -> int:
-        """Epsilon-greedy action selection with exponential decay."""
+        """Epsilon-greedy action selection with exponential decay.
+        Ties (including all-zero untrained states) break toward hold so that
+        a brand-new agent doesn't blindly decrease parameters on its first update.
+        """
         current_eps = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self._n_updates))
         if random.random() < current_eps:
             return random.randrange(len(ACTIONS))
         q_vals = self._q.get(state, [0.0] * len(ACTIONS))
-        return int(max(range(len(ACTIONS)), key=lambda i: q_vals[i]))
+        best_q = max(q_vals)
+        best_indices = [i for i, v in enumerate(q_vals) if v == best_q]
+        # Prefer hold when multiple actions are tied (especially the all-zero initial state)
+        return self._HOLD_ACTION if self._HOLD_ACTION in best_indices else best_indices[0]
 
     def _update_q(self, new_state: str, reward: float) -> None:
         """Bellman update for the previous (state, action) pair."""

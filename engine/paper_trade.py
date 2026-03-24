@@ -182,6 +182,29 @@ class PaperTradeEngine:
                     f"Paper position closed: {pos.symbol} {pos.direction} "
                     f"ticket={ticket} profit={pos.profit:.2f}"
                 )
+                # Notify RL agent so it can learn from every paper trade close,
+                # not only on server-restart recovery.
+                try:
+                    from ai.rl_agent import rl_manager as _rl_pt
+                    from ai.trade_memory import memory as _mem_pt
+                    _stats_pt = _mem_pt.stats(trading_type=pos.trading_type, live_only=False)
+                    _bal_pt = 0.0
+                    try:
+                        from engine.risk_manager import risk_manager as _rm_pt
+                        _bal_pt = _rm_pt._day_start_balance or 0.0
+                    except Exception:
+                        pass
+                    _pnl_pct = (pos.profit / _bal_pt * 100.0) if _bal_pt > 0 else (pos.profit / 10000.0 * 100.0)
+                    _vol_pct = abs(pos.open_price - pos.sl_price) / max(abs(pos.open_price), 1e-8) * 100.0 if pos.sl_price else 0.0
+                    _rl_pt.on_trade_closed(
+                        trading_type=pos.trading_type,
+                        profit_pct=_pnl_pct,
+                        win_rate=_stats_pt.get("win_rate", 0.5),
+                        avg_conf=_stats_pt.get("avg_conf", 0.5),
+                        vol_pct=_vol_pct,
+                    )
+                except Exception as _rl_err:
+                    logger.warning(f"RL update skipped for paper #{ticket}: {_rl_err}")
 
     def get_open_positions(self) -> list[dict]:
         with self._lock:
