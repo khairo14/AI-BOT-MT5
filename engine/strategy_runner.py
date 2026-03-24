@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -380,15 +381,46 @@ class StrategyRunner:
                 f"RL risk factor skipped [{symbol}/{trading_type}]: {_rl_exc} — using raw lot"
             )
 
+        # For scalping: snap the stale bar-close entry to the live market quote.
+        # SL/TP distances (in price) are preserved; only the anchor shifts.
+        _entry_price = sig.entry_price
+        _sl_price    = sig.sl_price
+        _tp_price    = sig.tp_price
+        _tp2_price   = sig.tp2_price
+        if trading_type == "scalping":
+            try:
+                _tick = self.client.get_current_price(symbol)
+                if _tick:
+                    _live     = _tick["ask"] if sig.direction == "BUY" else _tick["bid"]
+                    _sl_dist  = abs(_entry_price - _sl_price)
+                    _tp_dist  = abs(_entry_price - _tp_price)  if _tp_price  is not None else None
+                    _tp2_dist = abs(_entry_price - _tp2_price) if _tp2_price is not None else None
+                    _pip  = sym_info.get("tick_size", 0.00001)
+                    _prec = max(0, round(-math.log10(_pip))) if _pip > 0 else 5
+                    if sig.direction == "BUY":
+                        _sl_price  = round(_live - _sl_dist,  _prec)
+                        _tp_price  = round(_live + _tp_dist,  _prec) if _tp_dist  is not None else None
+                        _tp2_price = round(_live + _tp2_dist, _prec) if _tp2_dist is not None else None
+                    else:
+                        _sl_price  = round(_live + _sl_dist,  _prec)
+                        _tp_price  = round(_live - _tp_dist,  _prec) if _tp_dist  is not None else None
+                        _tp2_price = round(_live - _tp2_dist, _prec) if _tp2_dist is not None else None
+                    _entry_price = round(_live, _prec)
+                    logger.debug(
+                        f"Live tick anchor {symbol}: bar_close={sig.entry_price} → live={_entry_price}"
+                    )
+            except Exception as _tick_exc:
+                logger.debug(f"Live tick fetch skipped for {symbol}: {_tick_exc}")
+
         strat_sig = StrategySignal(
             trading_type=trading_type,
             symbol=symbol,
             strategy=strat_name,
             direction=sig.direction,
-            entry_price=sig.entry_price,
-            sl_price=sig.sl_price,
-            tp_price=sig.tp_price,
-            tp2_price=sig.tp2_price,
+            entry_price=_entry_price,
+            sl_price=_sl_price,
+            tp_price=_tp_price,
+            tp2_price=_tp2_price,
             lot_size=lot,
             timeframe=sig.timeframe,
             comment=sig.comment,
@@ -403,9 +435,9 @@ class StrategyRunner:
             strat_sig.confidence = scorer.score(
                 symbol=symbol,
                 direction=sig.direction,
-                entry=sig.entry_price,
-                sl=sig.sl_price,
-                tp=sig.tp_price or sig.entry_price,
+                entry=_entry_price,
+                sl=_sl_price,
+                tp=_tp_price or _entry_price,
                 df=primary_df,
                 trading_type=trading_type,
                 regime=_regime,

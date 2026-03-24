@@ -27,7 +27,7 @@ from loguru import logger
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 INTERVALS: dict[str, int] = {
-    "scalping":    30,
+    "scalping":    5,    # M1 bars close every 60 s — 5 s keeps latency within 1 bar
     "day_trading": 60,
     "swing":       300,
 }
