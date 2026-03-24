@@ -182,20 +182,51 @@ class PaperTradeEngine:
                     f"Paper position closed: {pos.symbol} {pos.direction} "
                     f"ticket={ticket} profit={pos.profit:.2f}"
                 )
-                # Notify RL agent so it can learn from every paper trade close,
-                # not only on server-restart recovery.
+                # Record to TradeMemory (feeds LSTM retrains, RL stats, analytics).
+                # This was missing — paper closes only wrote to the journal, so
+                # trade_memory and RL were only updated on server-restart recovery.
                 try:
-                    from ai.rl_agent import rl_manager as _rl_pt
-                    from ai.trade_memory import memory as _mem_pt
-                    _stats_pt = _mem_pt.stats(trading_type=pos.trading_type, live_only=False)
-                    _bal_pt = 0.0
+                    from ai.trade_memory import memory as _mem_pt, TradeOutcome as _TO
+                    from datetime import datetime, timezone as _tz
+                    _open_iso  = datetime.fromtimestamp(pos.open_time,  tz=_tz.utc).isoformat()
+                    _close_iso = datetime.fromtimestamp(pos.close_time, tz=_tz.utc).isoformat()
+                    _dur_mins  = (pos.close_time - pos.open_time) / 60.0
+                    _outcome_t = "tp_hit" if pos.profit > 0 else "sl_hit"
+                    _bal_pt    = 0.0
                     try:
                         from engine.risk_manager import risk_manager as _rm_pt
                         _bal_pt = _rm_pt._day_start_balance or 0.0
                     except Exception:
                         pass
-                    _pnl_pct = (pos.profit / _bal_pt * 100.0) if _bal_pt > 0 else (pos.profit / 10000.0 * 100.0)
-                    _vol_pct = abs(pos.open_price - pos.sl_price) / max(abs(pos.open_price), 1e-8) * 100.0 if pos.sl_price else 0.0
+                    _pnl_pct   = (pos.profit / _bal_pt * 100.0) if _bal_pt > 0 else (pos.profit / 10000.0 * 100.0)
+                    _entry_px  = pos.open_price or 1e-8
+                    _pips      = (pos.close_price - _entry_px) * (1 if pos.direction.upper() == "BUY" else -1) * 10000
+                    _mem_pt.record(_TO(
+                        ticket=ticket,
+                        symbol=pos.symbol,
+                        strategy=pos.strategy,
+                        trading_type=pos.trading_type,
+                        direction=pos.direction,
+                        confidence=0.5,
+                        entry_price=pos.open_price,
+                        close_price=pos.close_price,
+                        sl_price=pos.sl_price,
+                        tp_price=pos.tp_price,
+                        volume=pos.lot_size,
+                        profit=pos.profit,
+                        profit_pips=round(_pips, 1),
+                        profit_pct=_pnl_pct,
+                        outcome=_outcome_t,
+                        open_time=_open_iso,
+                        close_time=_close_iso,
+                        duration_mins=round(_dur_mins, 1),
+                        mode="paper",
+                        extra={"source": "paper"},
+                    ))
+                    # Notify RL agent using the freshly-updated stats
+                    _stats_pt = _mem_pt.stats(trading_type=pos.trading_type, live_only=False)
+                    _vol_pct  = abs(pos.open_price - pos.sl_price) / max(abs(pos.open_price), 1e-8) * 100.0 if pos.sl_price else 0.0
+                    from ai.rl_agent import rl_manager as _rl_pt
                     _rl_pt.on_trade_closed(
                         trading_type=pos.trading_type,
                         profit_pct=_pnl_pct,
@@ -204,7 +235,7 @@ class PaperTradeEngine:
                         vol_pct=_vol_pct,
                     )
                 except Exception as _rl_err:
-                    logger.warning(f"RL update skipped for paper #{ticket}: {_rl_err}")
+                    logger.warning(f"TradeMemory/RL update skipped for paper #{ticket}: {_rl_err}")
 
     def get_open_positions(self) -> list[dict]:
         with self._lock:
