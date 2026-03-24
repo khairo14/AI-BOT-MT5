@@ -67,9 +67,10 @@ def _sharpe(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
         return 0.0
     arr = np.array(daily_rets) - risk_free_daily
     std = float(np.std(arr, ddof=1))
-    if std == 0:
+    if std == 0 or math.isnan(std):
         return 0.0
-    return float(np.mean(arr) / std * math.sqrt(252))
+    val = float(np.mean(arr) / std * math.sqrt(252))
+    return 0.0 if math.isnan(val) or math.isinf(val) else val
 
 
 def _sortino(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
@@ -78,10 +79,10 @@ def _sortino(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
         return 0.0
     arr = np.array(daily_rets) - risk_free_daily
     downside = arr[arr < 0]
-    if len(downside) == 0:
-        return 0.0  # no losing days — undefined, return 0 (not inf which breaks JSON)
+    if len(downside) < 2:
+        return 0.0  # 0 or 1 losing day → ddof=1 std is undefined; return 0 (not nan/inf)
     down_std = float(np.std(downside, ddof=1))
-    if down_std == 0:
+    if down_std == 0 or math.isnan(down_std):
         return 0.0
     return round(float(np.mean(arr) / down_std * math.sqrt(252)), 3)
 
@@ -285,7 +286,8 @@ def get_performance(
         tp    = e.get("tp") or 0
         if entry and sl and tp and abs(entry - sl) > 0:
             rr_vals.append(abs(tp - entry) / abs(entry - sl))
-    avg_rr = round(float(np.mean(rr_vals)), 3) if rr_vals else 0.0
+    _rr_mean = float(np.mean(rr_vals)) if rr_vals else 0.0
+    avg_rr = 0.0 if math.isnan(_rr_mean) or math.isinf(_rr_mean) else round(_rr_mean, 3)
 
     return {
         "account":          account,
