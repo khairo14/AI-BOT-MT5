@@ -50,7 +50,8 @@ class MACDEMATrend(BaseStrategy):
         h1_macd_bear = False
 
         if df_h1 is not None and len(df_h1) >= p["ema_bias"] + 5:
-            h1_close = df_h1["close"]            h1_ema20 = ta.trend.EMAIndicator(h1_close, window=p["ema_fast"]).ema_indicator()
+            h1_close = df_h1["close"]
+            h1_ema20 = ta.trend.EMAIndicator(h1_close, window=p["ema_fast"]).ema_indicator()
             h1_ema50 = ta.trend.EMAIndicator(h1_close, window=p["ema_slow"]).ema_indicator()
             h1_ema200 = ta.trend.EMAIndicator(h1_close, window=p["ema_bias"]).ema_indicator()
             macd_obj = ta.trend.MACD(
