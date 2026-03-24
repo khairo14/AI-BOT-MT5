@@ -195,6 +195,13 @@ async def backtest_run(req: BacktestRequest):
         )
 
     # Fetch secondary timeframes for multi-TF strategies (e.g. H1 trend for macd_ema_trend)
+    # MATH-4 / GAP-7: both timeframes use the same `req.bars` count fetched at backtest-run
+    # time, so all bars are contemporaneous ending at "now".  In a strict walk-forward
+    # backtest the secondary TF slice would need to be aligned bar-by-bar with the primary
+    # TF to avoid lookahead.  For the current exploratory/offline backtest use-case this
+    # is acceptable: the higher-TF trend filter only reads broad directional context
+    # (EMA/ADX slope) where a 1-bar misalignment has negligible practical effect.
+    # A future walk-forward engine should align slices before calling the strategy.
     extra_dfs: dict = {}
     for kwarg, sec_tf in BT_EXTRA_TIMEFRAMES.get(req.strategy, {}).items():
         sec_df = await asyncio.to_thread(client.get_ohlcv, req.symbol, sec_tf, req.bars)

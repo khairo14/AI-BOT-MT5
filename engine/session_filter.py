@@ -167,10 +167,14 @@ class SessionFilter:
         current = now.time().replace(second=0, microsecond=0)
 
         if open_t <= close_t:
-            in_session = open_t <= current <= close_t
+            # LOGIC-4: use exclusive close boundary — at exactly close_t the session
+            # is considered closed.  Without this, a session closing at 17:00 would
+            # remain "open" for the entire 17:00:xx minute because second=0 rounding
+            # maps any 17:00:xx timestamp to time(17, 0) which is == close_t.
+            in_session = open_t <= current < close_t
         else:
-            # Overnight session (wraps midnight)
-            in_session = current >= open_t or current <= close_t
+            # Overnight session (wraps midnight) — exclusive on the morning close side
+            in_session = current >= open_t or current < close_t
 
         if not in_session:
             return False, (

@@ -22,12 +22,16 @@ higher ATR and ADX readings than forex majors.
 
 from __future__ import annotations
 
+import json
 import threading
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from loguru import logger
+
+_STATE_PATH = Path(__file__).parent.parent / "data" / "regime_state.json"
 
 # ── ADX trend threshold by asset class ──────────────────────────────────────
 # Minimum ADX value considered a "trending" market.
@@ -187,6 +191,36 @@ class RegimeClassifier:
         self._labels:  dict[str, str]  = {}
         # symbol → (pending_label, bars_held)
         self._pending: dict[str, tuple[str, int]] = {}
+        # GAP-4: restore hysteresis state from disk so a restart doesn't
+        # drop the regime context accumulated over many candles.
+        self._load_state()
+
+    # ------------------------------------------------------------------
+    # State persistence (GAP-4)
+    # ------------------------------------------------------------------
+
+    def _load_state(self) -> None:
+        try:
+            data = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+            self._labels  = data.get("labels", {})
+            # pending is stored as {symbol: [label, count]}
+            raw_pending = data.get("pending", {})
+            self._pending = {k: (v[0], v[1]) for k, v in raw_pending.items() if len(v) == 2}
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.debug(f"RegimeClassifier: could not load state: {exc}")
+
+    def _save_state(self) -> None:
+        try:
+            _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "labels":  self._labels,
+                "pending": {k: list(v) for k, v in self._pending.items()},
+            }
+            _STATE_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.debug(f"RegimeClassifier: could not save state: {exc}")
 
     def classify(self, symbol: str, df: pd.DataFrame) -> str:
         """
@@ -223,6 +257,8 @@ class RegimeClassifier:
                 # Promote pending to confirmed
                 self._labels[symbol] = raw
                 confirmed = raw
+                # GAP-4: persist whenever confirmed label changes
+                self._save_state()
 
             self._pending[symbol] = (pending_label, pending_count)
 

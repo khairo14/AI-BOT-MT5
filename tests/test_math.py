@@ -68,12 +68,12 @@ lot_20pip = rm.calculate_lot_size(
 check("20-pip SL ~ half of 10-pip lot", abs(lot_10pip / lot_20pip - 2.0) < 0.1,
       f"10pip={lot_10pip}, 20pip={lot_20pip}, ratio={lot_10pip/lot_20pip:.3f}")
 
-# Zero SL -> min_lot
+# Zero SL -> returns 0.0 (RISK-1 fix: upstream must reject, not silently use min_lot)
 lot_zero_sl = rm.calculate_lot_size(
     balance=10_000, entry=1.10000, sl=1.10000,
     tick_value=1.0, tick_size=0.00001,
 )
-check("Zero SL distance -> min_lot (0.01)", lot_zero_sl == 0.01,
+check("Zero SL distance -> 0.0 (signal rejected upstream)", lot_zero_sl == 0.0,
       f"got {lot_zero_sl}")
 
 # lot stays within bounds

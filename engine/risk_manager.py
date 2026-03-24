@@ -58,6 +58,11 @@ class RiskManager:
         # G-3: optional callback — set from api/main.py to broadcast a WS alert
         self._on_circuit_breaker = None   # Callable[[str, str], None] | None
 
+        # RISK-3: timestamp of last mode-switch; used to apply a brief 1-second
+        # hold in check_concurrent_limit so in-flight orders from the old mode
+        # cannot slip through before the new mode's state is fully settled.
+        self._mode_switch_ts: Optional[datetime] = None
+
         # Lock protecting all mutable state that is accessed from both the
         # async runner loop (update_balance) and _poll_outcome threads.
         self._lock = threading.Lock()
@@ -181,8 +186,8 @@ class RiskManager:
         sl_ticks = abs(_entry - _sl) / _tick_size
 
         if sl_ticks == 0:
-            logger.error("SL distance is zero — cannot calculate lot size")
-            return min_lot
+            logger.error("calculate_lot_size: SL distance is zero — signal must be rejected upstream")
+            return 0.0
 
         raw_lot = risk_amount / (sl_ticks * _tick_value)
 
@@ -364,6 +369,9 @@ class RiskManager:
             for mode in self._consecutive_losses:
                 self._consecutive_losses[mode] = 0
                 self._paused_modes[mode] = None
+            # RISK-3: record switch time so check_concurrent_limit enforces a
+            # brief settling hold for any in-flight requests targeting old state.
+            self._mode_switch_ts = datetime.now(tz=timezone.utc)
             self._save_state()
         logger.info("RiskManager: all state reset for mode switch.")
 
@@ -414,6 +422,12 @@ class RiskManager:
         `open_positions` should be the full list from MT5Client.get_open_positions().
         Pass `symbol` to also enforce the per-symbol concurrent limit.
         """
+        # RISK-3: if a mode-switch happened in the last 1 second, hold new trades
+        # briefly so in-flight orders from the old mode cannot bypass the limit.
+        if self._mode_switch_ts is not None:
+            elapsed = (datetime.now(tz=timezone.utc) - self._mode_switch_ts).total_seconds()
+            if elapsed < 1.0:
+                return False, "Mode switch settling — retry in a moment"
         mode = trading_mode.lower()
         limits = self._config["max_concurrent_trades"]
         mode_limit = limits.get(mode, 999)

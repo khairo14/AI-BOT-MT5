@@ -82,6 +82,11 @@ class SignalBus:
         self.archive: deque[dict] = deque(maxlen=500)
         self._client = None
         self._order_manager = None
+        # LOGIC-2: fast dedup set so concurrent add_signal calls within the same
+        # event-loop tick cannot both pass the queue-scan guard.
+        # Key = (symbol, strategy, direction, trading_mode). Cleared when the
+        # signal reaches a terminal state or the key is evicted from the queue.
+        self._pending_keys: set[tuple] = set()
 
     def init(self, client, order_manager) -> None:
         """Call once at API startup with live MT5 client + OrderManager."""
@@ -111,20 +116,27 @@ class SignalBus:
                         sig["status"] = "expired"
                         sig["rejection_reason"] = "Signal expired — market conditions may have changed"
                         logger.info(f"Signal expired: #{sid[:8]} {sig.get('symbol')} {sig.get('strategy')}")
+                        # LOGIC-2: release fast-dedup key on expiry
+                        _ek = (sig.get("symbol"), sig.get("strategy"), sig.get("direction"), sig.get("trading_mode"))
+                        self._pending_keys.discard(_ek)
                         # Broadcast expiry to dashboard
                         try:
                             if _event_loop and not _event_loop.is_closed():
                                 asyncio.run_coroutine_threadsafe(
                                     self._broadcast_expired(dict(sig)), _event_loop
                                 )
-                        except Exception:
-                            pass
+                        except Exception as _be:
+                            logger.warning(f"Signal expiry broadcast failed: {_be}")
                 except Exception:
                     pass
         for sid in to_delete:
             sig = self.queue.pop(sid, None)
             if sig:
                 self.archive.append(dict(sig))
+                # LOGIC-2: release the fast-dedup key so the same symbol/strategy
+                # can be re-signalled after the previous attempt has settled.
+                _k = (sig.get("symbol"), sig.get("strategy"), sig.get("direction"), sig.get("trading_mode"))
+                self._pending_keys.discard(_k)
         if to_delete:
             logger.debug(f"SignalBus: purged {len(to_delete)} stale signals")
         return len(to_delete)
@@ -148,6 +160,19 @@ class SignalBus:
 
         # ── Dedup guard: skip if same symbol+direction+strategy+mode already active ──
         mode = signal.get("trading_mode", "")
+        _dedup_key = (
+            signal.get("symbol"), signal.get("strategy"),
+            signal.get("direction"), mode,
+        )
+        # LOGIC-2: check the fast in-memory set FIRST — catches concurrent calls
+        # within the same event-loop tick before the queue scan below.
+        if _dedup_key in self._pending_keys:
+            logger.debug(
+                f"SignalBus: dedup (fast-set) dropped {signal.get('symbol')}/{signal.get('strategy')} ({mode})"
+            )
+            # IMPROVE-4: always surface why a signal was dropped
+            signal["rejection_reason"] = "Duplicate signal already pending/executing"
+            return signal
         for existing in self.queue.values():
             if existing.get("status") not in ("pending", "executing"):
                 continue
@@ -181,6 +206,8 @@ class SignalBus:
                             f"SignalBus: dedup dropped {sym}/{signal.get('strategy')} "
                             f"— open {direction} {mode} position already exists"
                         )
+                        # IMPROVE-4: surface rejection reason
+                        signal["rejection_reason"] = f"Open {direction} {mode} position already exists for {sym}"
                         return signal
         except Exception:
             pass
@@ -211,10 +238,31 @@ class SignalBus:
                         f"SignalBus: conf-drop {signal.get('symbol')}/{signal.get('strategy')} "
                         f"({mode}) conf={conf:.0%} < {min_conf:.0%} — not queued"
                     )
+                    # IMPROVE-4: record reason even for silent drops
+                    signal["rejection_reason"] = (
+                        f"Confidence {conf:.0%} below minimum {min_conf:.0%} for {mode}"
+                    )
                     return signal
             signal["status"] = "executing"
             self.queue[signal["id"]] = signal
+            self._pending_keys.add(_dedup_key)
             self.purge_stale()
+            # RISK-5: synchronous circuit-breaker pre-check before creating the async
+            # task.  _do_execute_sync repeats this check, but doing it here eliminates
+            # the race window between task creation and the first line of the executor.
+            try:
+                from api.runner_loop import _risk_manager as _rm_pre_check
+                if _rm_pre_check is not None:
+                    _cb_ok, _cb_msg = _rm_pre_check.is_trading_allowed(mode or "day_trading")
+                    if not _cb_ok:
+                        signal["status"] = "rejected"
+                        signal["rejection_reason"] = _cb_msg
+                        self._pending_keys.discard(_dedup_key)
+                        logger.info(f"SignalBus RISK-5 pre-check blocked: {_cb_msg}")
+                        asyncio.create_task(broadcast_signal({**signal, "type": "signal_update"}))
+                        return signal
+            except Exception:
+                pass
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
             asyncio.create_task(self._execute_async(signal))
@@ -234,6 +282,7 @@ class SignalBus:
             ).isoformat()
             signal["status"] = "pending"
             self.queue[signal["id"]] = signal
+            self._pending_keys.add(_dedup_key)
             self.purge_stale()
             # Push to every connected dashboard client
             asyncio.create_task(broadcast_signal(dict(signal)))
@@ -283,6 +332,9 @@ class SignalBus:
             logger.exception(f"SignalBus execution error: {exc}")
             signal["status"] = "failed"
             signal["error"] = str(exc)
+            # IMPROVE-4: ensure rejection_reason is set so dashboard can display it
+            if not signal.get("rejection_reason"):
+                signal["rejection_reason"] = str(exc)
 
         # Notify dashboard of the outcome
         await broadcast_signal({**signal, "type": "signal_update"})
@@ -290,6 +342,8 @@ class SignalBus:
     def _do_execute_sync(self, signal: dict) -> bool:
         """Synchronous order placement — runs in a thread executor."""
         if self._order_manager is None or self._client is None:
+            # IMPROVE-4: populate rejection_reason so dashboard shows why
+            signal["rejection_reason"] = "SignalBus not initialised — order manager or MT5 client missing"
             logger.error("SignalBus: not initialised — cannot execute order")
             return False
 
@@ -331,8 +385,10 @@ class SignalBus:
             # ── MQL5 EA fast-path for scalping ────────────────────────────────
             # If the AIBotScalper EA is running and ea_enabled=true in app.json,
             # dispatch scalping orders through the EA (1–5 ms native execution).
-            # Falls back to Python (place_market_order) automatically if the EA
-            # is not active, times out, or returns an error.
+            # IMPROVE-3: Python fallback is ALWAYS reachable — ea_used stays False
+            # unless EA explicitly returns success.  Fallback triggers automatically
+            # on: EA not active, heartbeat stale, command-file write error, result
+            # timeout, or any unhandled exception inside the try block below.
             ea_used = False
             if trading_mode == "scalping" and self._is_ea_enabled():
                 try:
@@ -423,6 +479,14 @@ class SignalBus:
             except Exception as _lot_exc:
                 logger.debug(f"SignalBus: lot revalidation skipped: {_lot_exc}")
 
+            # RISK-1: reject signal when lot size is 0 (returned by calculate_lot_size
+            # when SL distance is zero — trading with an invalid lot wastes risk budget).
+            if _lot <= 0:
+                err = "Lot size is zero — SL distance is zero or invalid; signal rejected"
+                signal["rejection_reason"] = err
+                logger.error(f"SignalBus: {err} ({signal.get('symbol')} {signal.get('direction')})")
+                return False
+
             req = OrderRequest(
                 symbol=signal["symbol"],
                 direction=signal["direction"].upper(),
@@ -478,6 +542,8 @@ class SignalBus:
                 logger.warning(f"Signal execution failed: {signal['symbol']} {signal['direction']} — {err}")
                 return False
         except Exception as exc:
+            # IMPROVE-4: populate rejection_reason so the dashboard card shows a cause
+            signal["rejection_reason"] = f"Execution error: {exc}"
             logger.exception(f"_do_execute_sync error: {exc}")
             return False
 
@@ -693,6 +759,59 @@ async def recover_unclosed_trades(client) -> None:
             _poll_outcome(ticket=entry["ticket"], signal=fake_signal, client=client)
         )
         logger.info(f"Recovery: re-launched poll for still-open #{entry['ticket']} {entry.get('symbol')}")
+
+    # BUG-4 / GAP-8: reverse reconciliation — find MT5 live positions that have
+    # NO journal "open" entry (opened before the bot started, externally opened,
+    # or from a prior run that never wrote the open-event).  Without this check
+    # such positions would never be polled and their close would be silently missed.
+    journal_open_tickets = {e["ticket"] for e in unclosed}
+    untracked = [p for p in (live_raw or []) if p["ticket"] not in journal_open_tickets]
+    for pos in untracked:
+        _ticket  = pos["ticket"]
+        _symbol  = pos.get("symbol", "")
+        _dir     = "buy" if pos.get("type", "").upper() in ("BUY", "0") else "sell"
+        _entry   = pos.get("open_price") or pos.get("price_open") or 0.0
+        _sl      = pos.get("sl") or 0.0
+        _tp      = pos.get("tp") or 0.0
+        _volume  = pos.get("volume") or 0.01
+        _comment = pos.get("comment", "")
+        # Write an open-event so future restarts see this position in the journal
+        try:
+            trade_journal.log(
+                ticket=_ticket,
+                symbol=_symbol,
+                direction=_dir,
+                volume=float(_volume),
+                entry=float(_entry),
+                sl=float(_sl),
+                tp=float(_tp) if _tp else None,
+                profit=None,
+                trading_type="day_trading",
+                account_mode=current_mode(),
+                comment=_comment,
+                event="open",
+            )
+        except Exception as _jw:
+            logger.debug(f"Recovery: journal write failed for untracked #{_ticket}: {_jw}")
+        fake_signal = {
+            "symbol":       _symbol,
+            "direction":    _dir,
+            "trading_mode": "day_trading",
+            "strategy":     _comment,
+            "fill_price":   float(_entry),
+            "entry_price":  float(_entry),
+            "sl":           float(_sl),
+            "tp":           float(_tp),
+            "lot_size":     float(_volume),
+            "confidence":   0.5,
+        }
+        asyncio.create_task(
+            _poll_outcome(ticket=_ticket, signal=fake_signal, client=client)
+        )
+        logger.info(
+            f"Recovery: found untracked live position #{_ticket} {_symbol} {_dir} "
+            f"— wrote journal open-event and launched poll"
+        )
 
 
 async def _poll_outcome(ticket: int, signal: dict, client) -> None:
@@ -947,6 +1066,20 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 _pre_bal = None
             _mem_profit_pct = (profit / _pre_bal * 100.0) if _pre_bal and _pre_bal > 0 else (profit / 10_000.0 * 100.0)
 
+            # GAP-6: compute execution slippage = |fill_price - signal_entry_price| in pips.
+            # fill_price is set by _do_execute_sync after MT5 order fill.
+            # Stored in extra for analytics and future RL feature use.
+            _signal_entry = float(signal.get("entry_price") or signal.get("entry") or 0.0)
+            _fill         = float(signal.get("fill_price") or 0.0)
+            _slippage_pips: float = 0.0
+            if _signal_entry > 0 and _fill > 0:
+                _slippage_pips = round(abs(_fill - _signal_entry) / pip_val, 1)
+                if _slippage_pips > 0:
+                    logger.debug(
+                        f"Slippage #{ticket} {signal.get('symbol')}: "
+                        f"signal={_signal_entry} fill={_fill} → {_slippage_pips} pips"
+                    )
+
             outcome = TradeOutcome(
                 ticket=ticket,
                 symbol=signal["symbol"],
@@ -966,7 +1099,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 open_time=open_time,
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
-                extra={"source": "live"},
+                extra={"source": "live", "slippage_pips": _slippage_pips},
             )
             memory.record(outcome)
 

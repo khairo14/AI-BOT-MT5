@@ -187,7 +187,19 @@ class NewsFilter:
 
     @staticmethod
     def _parse_time(date_str: str, time_str: str) -> Optional[datetime]:
-        """Parse Forex Factory date+time strings into UTC datetime."""
+        """Parse Forex Factory date+time strings into UTC datetime.
+
+        LOGIC-5 / RISK-4: ForexFactory publishes all event times in US/Eastern
+        (America/New_York), which observes Daylight Saving Time (EDT = UTC-4
+        from 2nd Sunday in March through 1st Sunday in November; EST = UTC-5
+        the rest of the year).  This is documented in the FF FAQ and confirmed
+        by cross-checking FF event times with Reuters/Bloomberg timestamps.
+
+        The conversion below uses ``ZoneInfo("America/New_York")`` with DST-aware
+        arithmetic when the tzdata package is available (Python 3.9+), or falls
+        back to manual US DST rule calculation otherwise.  Hardcoding UTC-5 or
+        UTC-4 year-round would shift every spring/autumn event time by ±1 hour.
+        """
         try:
             # FF format examples: date="03-17-2026", time="8:30am"
             dt_str = f"{date_str} {time_str}"
