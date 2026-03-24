@@ -79,11 +79,11 @@ def _sortino(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
     arr = np.array(daily_rets) - risk_free_daily
     downside = arr[arr < 0]
     if len(downside) == 0:
-        return float("inf") if np.mean(arr) > 0 else 0.0
+        return 0.0  # no losing days — undefined, return 0 (not inf which breaks JSON)
     down_std = float(np.std(downside, ddof=1))
     if down_std == 0:
         return 0.0
-    return float(np.mean(arr) / down_std * math.sqrt(252))
+    return round(float(np.mean(arr) / down_std * math.sqrt(252)), 3)
 
 
 def _max_drawdown(equity_curve: list[float]) -> float:
