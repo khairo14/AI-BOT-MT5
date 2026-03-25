@@ -189,12 +189,14 @@ class PricePredictor:
         scaler = StandardScaler()
         scaled = scaler.fit_transform(features)
 
-        # Build sequences: X[i] = seq of SEQUENCE_LEN bars, y[i] = 1 if next close > current
+        # Build sequences: X[i] = seq of SEQUENCE_LEN bars, y[i] = 1 if next bar close > current close
+        # col 0 is the close return: (close[t] - close[t-1]) / close[t-1]
+        # A positive return means price went up — that is the correct up/down label.
         X, y = [], []
         for i in range(len(scaled) - SEQUENCE_LEN):
             X.append(scaled[i: i + SEQUENCE_LEN])
             y.append(
-                1.0 if features[i + SEQUENCE_LEN, 0] > features[i + SEQUENCE_LEN - 1, 0]
+                1.0 if features[i + SEQUENCE_LEN, 0] > 0
                 else 0.0
             )
 
@@ -339,7 +341,8 @@ def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_
             tf_minutes = {"scalping": 5, "day_trading": 60, "swing": 240}.get(trading_type, 5)
             news_window_bars = max(1, 45 // tf_minutes)  # 45-min window (30 before + 15 after)
             news_flag[-news_window_bars:] = 1.0
-    except Exception:
+    except Exception as _news_exc:
+        logger.warning(f"News filter unavailable for {symbol}, news_flag zeroed: {_news_exc}")
         news_flag = np.zeros(len(close))
 
     # ATR(14) normalised by close — volatility regime indicator (7th feature)

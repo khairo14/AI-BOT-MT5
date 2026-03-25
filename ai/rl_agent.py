@@ -268,6 +268,28 @@ class RLAgent:
                 except Exception:
                     pass
         if not path.exists():
+            # Bootstrap live agent from paper learning on first live run.
+            # Paper uses identical live market data (same prices, spreads, volatility),
+            # so everything the agent learned in paper is directly applicable to live.
+            # This means the full Q-table, conf_thresh, and risk_factor all carry over.
+            if self._mode == "live":
+                paper_path = DATA_DIR / f"rl_qtable_{self.trading_type}_paper.json"
+                if paper_path.exists():
+                    try:
+                        with open(paper_path, "r", encoding="utf-8") as f:
+                            paper_data = json.load(f)
+                        self._q           = paper_data.get("q", {})
+                        self._conf_thresh = paper_data.get("conf_thresh", DEFAULT_CONF_THRESH)
+                        self._risk_factor = paper_data.get("risk_factor", DEFAULT_RISK_FACTOR)
+                        self._n_updates   = paper_data.get("n_updates", 0)
+                        logger.info(
+                            f"RL live agent bootstrapped from paper [{self.trading_type}]: "
+                            f"conf_thresh={self._conf_thresh:.2f} "
+                            f"risk_factor={self._risk_factor:.2f} "
+                            f"n_updates={self._n_updates}"
+                        )
+                    except Exception as exc:
+                        logger.warning(f"RL: could not bootstrap live from paper [{self.trading_type}]: {exc}")
             return
         try:
             with open(path, "r", encoding="utf-8") as f:

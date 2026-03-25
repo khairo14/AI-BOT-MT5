@@ -74,6 +74,7 @@ class BacktestTrade:
     rr:           float  # R-multiple achieved (positive = profitable)
     pnl_pct:      float  # % of equity at entry (positive = gain)
     equity:       float  # running equity after this trade closes
+    conf_score:   float = 0.0  # AI confidence score (0–1); 0.0 when filters disabled
 
 
 @dataclass
@@ -99,6 +100,8 @@ class BacktestResult:
     worst_trade_pct:  float
     avg_trade_pct:    float
     expectancy_pct:   float  # expected return per trade
+    ai_filters_applied: bool  = False  # True when LSTM+RL scored and gated every trade
+    avg_confidence:     float = 0.0   # mean AI score across accepted trades (0 if disabled)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -156,6 +159,7 @@ def run_backtest(
     initial_balance: float = 10_000.0,
     risk_pct: float = 1.0,
     extra_dfs: dict[str, pd.DataFrame] | None = None,
+    use_ai_filters: bool = True,
 ) -> Optional[BacktestResult]:
     """
     Walk-forward backtest a strategy on historical OHLCV data.
@@ -173,6 +177,10 @@ def run_backtest(
         risk_pct:        percent of current equity risked per trade (e.g. 1.0 = 1%)
         extra_dfs:       secondary TF dataframes keyed by strategy kwarg name,
                          e.g. {"df_h1": h1_df} for macd_ema_trend
+        use_ai_filters:  when True, apply LSTM confidence scoring and RL agent gate
+                         to every signal — matching live execution conditions.
+                         Low-confidence or RL-rejected signals are skipped.
+                         The RL risk_factor also scales per-trade P&L as in live.
 
     Returns:
         BacktestResult or None if strategy_name is unknown.
@@ -211,6 +219,18 @@ def run_backtest(
     except Exception:
         _strat_params = {}
 
+    # Lazy-load AI components once outside the loop for efficiency
+    _scorer     = None
+    _rl_manager = None
+    if use_ai_filters:
+        try:
+            from ai.signal_scorer import scorer as _scorer
+            from ai.rl_agent import rl_manager as _rl_manager
+        except Exception as exc:
+            logger.warning(f"Backtester: AI imports failed, filters disabled: {exc}")
+            _scorer = None
+            _rl_manager = None
+
     while i < len(df) - 1:
         # Slice secondary dataframes up to (and including) the current bar time
         # to prevent lookahead bias.
@@ -242,6 +262,26 @@ def run_backtest(
             i += step
             continue
 
+        # ── AI filters (LSTM confidence + RL gate) ────────────────────────
+        _conf_score    = 0.0
+        _ai_risk_scale = 1.0
+        if _scorer is not None:
+            try:
+                _conf_score = _scorer.score(
+                    symbol, sig.direction,
+                    sig.entry_price, sig.sl_price, sig.tp_price,
+                    df_window, trading_type,
+                )
+                # RL gate: skip signal if confidence is below learned threshold
+                if _rl_manager is not None and not _scorer.is_tradeable(_conf_score, trading_type):
+                    i += step
+                    continue
+                # RL risk factor: scale position size as the live engine does
+                if _rl_manager is not None:
+                    _ai_risk_scale = _rl_manager.risk_factor(trading_type)
+            except Exception as exc:
+                logger.debug(f"Backtester AI filter error at bar {i}: {exc}")
+
         outcome, exit_price, exit_bar = _sim_trade(
             df, i,
             sig.direction, sig.entry_price, sig.sl_price, sig.tp_price,
@@ -266,13 +306,15 @@ def run_backtest(
 
         # P&L as % of equity: risk_pct% is the downside; scale gain by actual RR.
         # Deduct spread cost (same as param_optimizer) so results are not overly optimistic.
+        # Apply RL risk_factor scaling so undersized positions match live execution.
+        effective_risk = risk_pct * _ai_risk_scale
         if outcome == "tp_hit":
             tp_rr    = abs((sig.tp_price - sig.entry_price)) / risk
-            pnl_pct  = risk_pct * (tp_rr - spread_r)
+            pnl_pct  = effective_risk * (tp_rr - spread_r)
         elif outcome == "sl_hit":
-            pnl_pct  = -risk_pct * (1.0 + spread_r)
+            pnl_pct  = -effective_risk * (1.0 + spread_r)
         else:   # timeout
-            pnl_pct  = risk_pct * (rr - spread_r)
+            pnl_pct  = effective_risk * (rr - spread_r)
 
         equity    *= 1.0 + pnl_pct / 100.0
         trade_num += 1
@@ -288,6 +330,7 @@ def run_backtest(
             entry_price = round(float(sig.entry_price), 6),
             exit_price  = round(float(exit_price),       6),
             sl_price    = round(float(sig.sl_price),      6),
+            conf_score  = round(_conf_score, 4),
             tp_price    = round(float(sig.tp_price or 0), 6),
             outcome     = outcome,
             rr          = round(rr, 3),
@@ -352,26 +395,32 @@ def run_backtest(
     avg_win  = gross_win  / max(len(wins),   1)
     avg_loss = gross_loss / max(len(losses), 1)
 
+    _ai_filters_on = use_ai_filters and _scorer is not None
+    _scored = [t.conf_score for t in trades if t.conf_score > 0.0]
+    _avg_conf = round(float(np.mean(_scored)), 4) if _scored else 0.0
+
     return BacktestResult(
-        symbol            = symbol,
-        strategy          = strategy_name,
-        trading_type      = trading_type,
-        timeframe         = tf_label,
-        bars_tested       = len(df),
-        initial_balance   = initial_balance,
-        trades            = trades,
-        equity_curve      = equity_curve,
-        total_trades      = n,
-        win_rate          = round(win_rate, 4),
-        profit_factor     = round(profit_factor, 3),
-        max_drawdown_pct  = round(max_dd, 2),
-        sharpe_ratio      = round(sharpe, 3),
-        total_pnl_pct     = round(total_pnl_pct, 2),
-        avg_rr            = round(float(np.mean([t.rr for t in trades])), 3),
-        best_trade_pct    = round(max(pnls), 4),
-        worst_trade_pct   = round(min(pnls), 4),
-        avg_trade_pct     = round(float(np.mean(pnls)), 4),
-        expectancy_pct    = round(
+        symbol              = symbol,
+        strategy            = strategy_name,
+        trading_type        = trading_type,
+        timeframe           = tf_label,
+        bars_tested         = len(df),
+        initial_balance     = initial_balance,
+        trades              = trades,
+        equity_curve        = equity_curve,
+        total_trades        = n,
+        win_rate            = round(win_rate, 4),
+        profit_factor       = round(profit_factor, 3),
+        max_drawdown_pct    = round(max_dd, 2),
+        sharpe_ratio        = round(sharpe, 3),
+        total_pnl_pct       = round(total_pnl_pct, 2),
+        avg_rr              = round(float(np.mean([t.rr for t in trades])), 3),
+        best_trade_pct      = round(max(pnls), 4),
+        worst_trade_pct     = round(min(pnls), 4),
+        avg_trade_pct       = round(float(np.mean(pnls)), 4),
+        expectancy_pct      = round(
             win_rate * avg_win - (1.0 - win_rate) * avg_loss, 4
         ),
+        ai_filters_applied  = _ai_filters_on,
+        avg_confidence      = _avg_conf,
     )

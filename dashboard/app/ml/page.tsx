@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import {
   fetchAIStatus,
   fetchRLStatus,
-  resetRLAgent,
   fetchMemoryStats,
   fetchOptimizerStatus,
   trainSymbol,
@@ -298,19 +297,6 @@ export default function MLPage() {
               <div key={mode} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="font-semibold text-white capitalize">{mode.replace("_", " ")}</p>
-                  <button
-                    onClick={async () => {
-                      if (!confirm(`Reset RL agent for ${mode.replace("_", " ")}? This clears its Q-table and returns to default thresholds.`)) return;
-                      try {
-                        await resetRLAgent(mode);
-                        const updated = await fetchRLStatus();
-                        setRlStatus(updated ?? {});
-                      } catch (_) {}
-                    }}
-                    className="px-2 py-0.5 text-xs bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white rounded transition-colors"
-                  >
-                    Reset
-                  </button>
                 </div>
                 <div className="text-sm space-y-1 text-gray-400">
                   <div className="flex justify-between">

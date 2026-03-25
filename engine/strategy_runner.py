@@ -162,7 +162,7 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
     "vwap_reversion":  {"M5": 250},
     "macd_ema_trend":  {"H1": 250, "M15": 250},
     "sr_breakout":     {"H1": 250},
-    "rsi_divergence":  {"M30": 250, "H1": 250},
+    "rsi_divergence":  {"M30": 250},
     "ema_trend_rider": {"H1": 250, "H4": 250, "D1": 60},
     "fibonacci_rsi":   {"H4": 250},
     "weekly_breakout": {"H4": 250, "D1": 60},

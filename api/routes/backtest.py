@@ -100,12 +100,13 @@ def _prune_history() -> None:
 # ── Request model ─────────────────────────────────────────────────────────
 
 class BacktestRequest(BaseModel):
-    symbol:          str          = "EURUSD"
-    strategy:        str          = "ema_scalp"
-    trading_type:    TRADING_TYPE = "scalping"
-    bars:            int          = Field(default=2000, ge=200, le=10000)
-    initial_balance: float        = Field(default=10_000.0, gt=0)
-    risk_pct:        float        = Field(default=1.0, gt=0, le=10)
+    symbol:           str          = "EURUSD"
+    strategy:         str          = "ema_scalp"
+    trading_type:     TRADING_TYPE = "scalping"
+    bars:             int          = Field(default=2000, ge=200, le=10000)
+    initial_balance:  float        = Field(default=10_000.0, gt=0)
+    risk_pct:         float        = Field(default=1.0, gt=0, le=10)
+    use_ai_filters:   bool         = True   # apply LSTM+RL gate to match live conditions
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
@@ -217,6 +218,7 @@ async def backtest_run(req: BacktestRequest):
         req.initial_balance,
         req.risk_pct,
         extra_dfs if extra_dfs else None,
+        req.use_ai_filters,
     )
 
     if result is None:
@@ -255,38 +257,6 @@ async def backtest_run(req: BacktestRequest):
     }
     await asyncio.to_thread(_append_index, index_entry)
     await asyncio.to_thread(_prune_history)
-
-    # ── Feed simulated trades into trade memory ───────────────────────────
-    # Each BacktestTrade becomes a TradeOutcome with source="backtest" so the
-    # RL agent can learn from historical simulation data (not just live trades).
-    try:
-        from ai.trade_memory import memory, TradeOutcome
-        for t in result.trades:
-            outcome = TradeOutcome(
-                ticket=0,
-                symbol=result.symbol,
-                strategy=result.strategy,
-                trading_type=result.trading_type,
-                direction=t.direction,
-                confidence=0.5,          # no live confidence score in backtest
-                entry_price=t.entry_price,
-                close_price=t.exit_price,
-                sl_price=t.sl_price,
-                tp_price=t.tp_price,
-                volume=0.0,
-                profit=t.pnl_pct,        # store pnl_pct as proxy (no lot/pip data)
-                profit_pips=0.0,
-                profit_pct=t.pnl_pct,
-                outcome=t.outcome,
-                open_time=t.entry_time,
-                close_time=t.exit_time,
-                duration_mins=0.0,
-                mode="backtest",
-                extra={"source": "backtest", "run_id": run_id, "rr": t.rr},
-            )
-            memory.record(outcome)
-    except Exception:
-        pass  # never block the response if memory write fails
 
     # ── Auto-trigger param optimizer if enough backtest data accumulated ──
     # Only re-optimize if this run had meaningful trade volume (≥ 30 trades).

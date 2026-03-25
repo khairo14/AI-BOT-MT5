@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ta
 import pandas as pd
+from loguru import logger
 
 from engine.strategies.base_strategy import BaseStrategy, Signal, StrategyResult
 

@@ -299,8 +299,8 @@ def _backtest_combo(
 
                 i += max(max_hold // 4, step)
                 continue
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug(f"Backtest signal skipped at bar {i} ({strategy_name}/{symbol}): {_exc}")
         i += step
 
     n = len(wins)
@@ -363,7 +363,8 @@ class ParamOptimizer:
           3. Global best: data[strategy]["__global__"]
           4. Empty dict (use strategy defaults)
         """
-        data  = self._load_opt()
+        with self._lock:
+            data = self._load_opt()
         strat = data.get(strategy_name, {})
         sym_entry = strat.get(symbol) or strat.get("__global__") or {}
 
@@ -390,9 +391,14 @@ class ParamOptimizer:
         last = info.get("last_optimized_at")
         if not last:
             return True
+        try:
+            last_dt = datetime.fromisoformat(last)
+        except (ValueError, TypeError):
+            logger.warning(f"Optimizer: invalid timestamp for {strategy_name}/{symbol}: {last!r}")
+            return True
         hours_ago = (
             datetime.now(tz=timezone.utc) -
-            datetime.fromisoformat(last)
+            last_dt
         ).total_seconds() / 3600
         if hours_ago < BACKTEST_COOLDOWN_HOURS:
             return False
@@ -442,7 +448,7 @@ class ParamOptimizer:
             best_params, score, n, regime_best_params = self._run_backtest(
                 strategy_name, symbol, df, trading_type
             )
-            if best_params is not None and best_score > 0.0:
+            if best_params is not None and score > 0.0:
                 self._save_params(strategy_name, symbol, best_params, regime_best_params)
                 with self._lock:
                     self._status[key] = {
@@ -463,6 +469,16 @@ class ParamOptimizer:
                 )
             else:
                 logger.warning(f"Optimizer: no valid combos found for {strategy_name}/{symbol}")
+                with self._lock:
+                    self._status[key] = {
+                        "strategy":           strategy_name,
+                        "symbol":             symbol,
+                        "trading_type":       trading_type,
+                        "last_attempted_at":  datetime.now(tz=timezone.utc).isoformat(),
+                        "best_score":         0.0,
+                        "bars_used":          len(df),
+                    }
+                self._save_status()
         except Exception as exc:
             logger.exception(f"Optimizer error {strategy_name}/{symbol}: {exc}")
         finally:
@@ -494,9 +510,6 @@ class ParamOptimizer:
 
         # Per-regime tracking: {regime: (best_score, best_params)}
         regime_best: dict[str, tuple[float, dict]] = {}
-        # Accumulated regime stats across all combos to find best per-regime params
-        # {combo_idx: {regime: stats}}
-        combo_regime_stats: list[tuple[dict, dict[str, dict]]] = []
 
         spread_r = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
 
@@ -532,8 +545,8 @@ class ParamOptimizer:
         try:
             if OPT_FILE.exists():
                 return json.loads(OPT_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Optimizer: could not load params file: {exc}")
         return {}
 
     def _save_params(
@@ -579,8 +592,8 @@ class ParamOptimizer:
                 json.dumps(self._status, indent=2),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"Optimizer: could not save status: {exc}")
 
 
 # Application singleton
