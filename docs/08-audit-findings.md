@@ -361,14 +361,16 @@ All 15 findings have been addressed in the same session. Tests pass (30/30).
 **Risk:** Low — session filter will self-correct within 5 minutes; existing TTL pattern is already used for `app.json`.  
 **Status:** Accepted – 5-minute eventual-consistency is consistent with the rest of the TTL caching strategy in this codebase.
 
-### Open Gaps (still unaddressed, carried forward)
+### Fixed Gaps — Round 4 (commit `a5d32b3`)
 
-| ID | File | Issue | Risk |
+All 7 previously-open gaps closed.
+
+| ID | File | Fix Applied | Commit |
 |---|---|---|---|
-| NEW-4 | `engine/paper_trade.py` | `self._history` list grows unbounded — no eviction | Low |
-| NEW-5 | `api/signal_bus.py` | `_poll_outcome` max 7 days; swing > 7 days miss close record | Medium |
-| NEW-6 | `api/signal_bus.py` | Fire-and-forget tasks can lose journal write on crash | Low |
-| NEW-7 | `api/runner_loop.py` | Task accumulation if MT5 slow | Low |
-| NEW-8 | `ai/trade_memory.py` | Corrupt JSONL line drops subsequent entries | Low |
-| NEW-9 | `ai/rl_agent.py` | Up to 9 Q-table updates lost on ungraceful shutdown | Very Low |
-| NEW-10 | `engine/news_filter.py` | `_SYMBOL_CURRENCIES` incomplete for stocks/crypto/commodities | Low |
+| NEW-4 | `engine/paper_trade.py` | `_history` capped at `_HISTORY_MAX = 1_000` — FIFO eviction on append | `a5d32b3` |
+| NEW-5 | `api/signal_bus.py` | `MAX_POLLS` now per-trading-type: scalping=2d, day_trading=14d, swing=45d | `a5d32b3` |
+| NEW-6 | `api/signal_bus.py` | `_execute_async` tasks tracked in `self._active_tasks` set; discard-on-done callback | `a5d32b3` |
+| NEW-7 | `api/runner_loop.py` | Per-mode `_mode_tasks` dict — skip tick if prior task still running | `a5d32b3` |
+| NEW-8 | `ai/trade_memory.py` | `_load()` now uses per-line `try/except` — corrupt lines skipped, rest loaded | `a5d32b3` |
+| NEW-9 | `ai/rl_agent.py` | `RLAgent.shutdown()` + `RLAgentManager.shutdown()` force-save; wired from `api/main.py` lifespan | `a5d32b3` |
+| NEW-10 | `engine/news_filter.py` | `_SYMBOL_CURRENCIES` extended with all scanner symbols (stocks, indices, commodities, crypto) | `a5d32b3` |
