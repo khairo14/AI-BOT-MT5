@@ -24,6 +24,9 @@ from engine.strategy_runner import StrategyRunner, StrategySignal
 # Module-level singleton — set by main.py at startup
 paper_engine: "PaperTradeEngine | None" = None
 
+# Cap on in-memory closed-trade history (FIFO eviction beyond this)
+_HISTORY_MAX = 1_000
+
 
 @dataclass
 class PaperPosition:
@@ -157,6 +160,8 @@ class PaperTradeEngine:
                 pos.close_price = actual_close if actual_close is not None else pos.current_price
                 with self._lock:
                     self._history.append(pos)
+                    if len(self._history) > _HISTORY_MAX:
+                        self._history = self._history[-_HISTORY_MAX:]
                 try:
                     from engine.trade_journal import trade_journal
                     from engine.account_store import current_mode

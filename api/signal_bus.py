@@ -87,6 +87,9 @@ class SignalBus:
         # Key = (symbol, strategy, direction, trading_mode). Cleared when the
         # signal reaches a terminal state or the key is evicted from the queue.
         self._pending_keys: set[tuple] = set()
+        # NEW-6: track fire-and-forget execution tasks so they are not silently
+        # dropped if the event loop is closed while a journal write is in-flight.
+        self._active_tasks: set[asyncio.Task] = set()
 
     def init(self, client, order_manager) -> None:
         """Call once at API startup with live MT5 client + OrderManager."""
@@ -265,7 +268,9 @@ class SignalBus:
                 pass
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
-            asyncio.create_task(self._execute_async(signal))
+            _exec_task = asyncio.create_task(self._execute_async(signal))
+            self._active_tasks.add(_exec_task)
+            _exec_task.add_done_callback(self._active_tasks.discard)
         else:
             # Compute expiry for manual pending signals — keyed by timeframe, not mode
             try:
@@ -316,7 +321,9 @@ class SignalBus:
         # only update if it is still "pending" (direct call path).
         if signal.get("status") != "executing":
             signal["status"] = "executing"
-        asyncio.create_task(self._execute_async(signal))
+        _exec_task = asyncio.create_task(self._execute_async(signal))
+        self._active_tasks.add(_exec_task)
+        _exec_task.add_done_callback(self._active_tasks.discard)
         return signal
 
     # ── internals ───────────────────────────────────────────────────────────
@@ -819,13 +826,16 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     Poll MT5 every 30 s until the position is closed, then record
     the outcome in TradeMemory and feed the result to the RL agent.
 
-    Stops polling after 7 days (swing trade max hold time).
+    Stops polling after 2 days (scalping), 14 days (day trading), or 45 days (swing).
     """
     import MetaTrader5 as mt5
     from ai.trade_memory import memory, TradeOutcome
     from ai.rl_agent import rl_manager
 
-    MAX_POLLS  = 7 * 24 * 120   # 7 days at 30 s intervals
+    # NEW-5: per-trading-type poll budget (30 s intervals)
+    # scalping: 2 days, day_trading: 14 days, swing: 45 days
+    _MAX_POLLS_BY_TYPE = {"scalping": 2*24*120, "day_trading": 14*24*120, "swing": 45*24*120}
+    MAX_POLLS  = _MAX_POLLS_BY_TYPE.get(signal.get("trading_mode", "day_trading"), 14*24*120)
     open_time  = datetime.now(tz=timezone.utc).isoformat()
 
     # H-6 fix: fetch broker server-clock UTC offset ONCE per trade (it's a session constant).

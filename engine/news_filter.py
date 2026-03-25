@@ -37,14 +37,27 @@ _FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
 # Map MT5 symbol prefixes → currency codes
 _SYMBOL_CURRENCIES: dict[str, list[str]] = {
+    # Forex majors
     "EURUSD": ["EUR", "USD"], "GBPUSD": ["GBP", "USD"],
     "USDJPY": ["USD", "JPY"], "USDCHF": ["USD", "CHF"],
     "USDCAD": ["USD", "CAD"], "AUDUSD": ["AUD", "USD"],
     "NZDUSD": ["NZD", "USD"], "EURJPY": ["EUR", "JPY"],
     "GBPJPY": ["GBP", "JPY"], "EURGBP": ["EUR", "GBP"],
+    # Metals / commodities (USD-denominated)
     "XAUUSD": ["XAU", "USD"], "GOLD"  : ["XAU", "USD"],
-    "SILVER": ["XAG", "USD"], "BTCUSD": ["BTC", "USD"],
-    "ETHUSD": ["ETH", "USD"],
+    "SILVER": ["XAG", "USD"],
+    "OILCASH": ["USD"],   "BRENTCASH": ["USD"],   "NGASCASH": ["USD"],
+    # Crypto (USD-denominated)
+    "BTCUSD": ["BTC", "USD"], "ETHUSD": ["ETH", "USD"],
+    "SOLUSD": ["USD"],        "XRPUSD": ["USD"],
+    # US equities (USD macro news matters)
+    "APPLE": ["USD"],   "AMAZON": ["USD"],    "TESLA": ["USD"],
+    "MICROSOFT": ["USD"], "GOOGLE": ["USD"],  "FACEBOOK": ["USD"],
+    "NETFLIX": ["USD"], "NVIDIA": ["USD"],    "ADVMICRODEV": ["USD"],
+    # US indices (USD macro-driven)
+    "US30CASH": ["USD"], "US100CASH": ["USD"], "US500CASH": ["USD"],
+    # EU / UK indices
+    "GER40CASH": ["EUR"], "UK100CASH": ["GBP"],
 }
 
 UTC = timezone.utc
@@ -52,10 +65,14 @@ UTC = timezone.utc
 
 def _currencies_for(symbol: str) -> list[str]:
     """Return the currency codes affected by a symbol."""
-    # Direct lookup first
-    upper = symbol.upper().replace(".OQ", "").replace("CASH", "")
+    # Normalize: upper-case, strip common MT5 suffixes
+    upper = symbol.upper().replace(".OQ", "").replace("CASH", "").rstrip(".,;")
     if upper in _SYMBOL_CURRENCIES:
         return _SYMBOL_CURRENCIES[upper]
+    # Try with "CASH" suffix preserved (e.g. "US30Cash" → "US30CASH")
+    upper2 = symbol.upper().replace(".OQ", "")
+    if upper2 in _SYMBOL_CURRENCIES:
+        return _SYMBOL_CURRENCIES[upper2]
     # Indices / stocks / commodities → USD is the base
     return ["USD"]
 

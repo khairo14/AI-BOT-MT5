@@ -116,6 +116,11 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_mt5_watchdog())
     yield
     # Shutdown
+    try:
+        from ai.rl_agent import rl_manager as _rl_manager
+        _rl_manager.shutdown()
+    except Exception as _rl_exc:
+        logger.warning(f"RL shutdown save failed: {_rl_exc}")
     if mt5_client:
         mt5_client.disconnect()
     logger.info("API shutdown complete.")

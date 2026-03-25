@@ -33,6 +33,7 @@ INTERVALS: dict[str, int] = {
 }
 
 _runner_task: Optional[asyncio.Task] = None
+_mode_tasks: dict[str, asyncio.Task] = {}  # NEW-7: per-mode task refs to detect accumulation
 _risk_manager = None  # exposed so /risk/status can read live state
 _paused: bool = False  # set True during account mode switch
 
@@ -136,7 +137,14 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                     logger.warning(f"scanner.json corrupt/invalid [{mode}]: {_err} — scanning all symbols")
                 except Exception as _err:
                     logger.debug(f"Scanner config read error [{mode}]: {_err}")
-                asyncio.create_task(_run_one_mode(runner, bus, mode, _sym_override))
+                # NEW-7: skip if previous task for this mode is still running —
+                # prevents task accumulation under high MT5 latency.
+                _prev = _mode_tasks.get(mode)
+                if _prev and not _prev.done():
+                    logger.debug(f"Runner [{mode}]: previous task still running — skipping tick")
+                    continue
+                _t = asyncio.create_task(_run_one_mode(runner, bus, mode, _sym_override))
+                _mode_tasks[mode] = _t
 
 
 def _signal_to_dict(sig, mode: str) -> dict:

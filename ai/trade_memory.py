@@ -125,18 +125,24 @@ class TradeMemory:
         """Load existing JSONL file into memory buffer at startup."""
         if not MEMORY_FILE.exists():
             return
+        parsed = []
         try:
             with open(MEMORY_FILE, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            parsed = []
-            for line in lines:
-                line = line.strip()
-                if line:
-                    parsed.append(json.loads(line))
-            self._buffer = parsed[-self.MAX_BUFFER:]
         except Exception as exc:
             from loguru import logger
-            logger.warning(f"TradeMemory: could not load {MEMORY_FILE}: {exc}")
+            logger.warning(f"TradeMemory: could not open {MEMORY_FILE}: {exc}")
+            return
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed.append(json.loads(line))
+            except Exception as exc:
+                from loguru import logger
+                logger.warning(f"TradeMemory: skipping corrupt line in {MEMORY_FILE}: {exc}")
+        self._buffer = parsed[-self.MAX_BUFFER:]
 
 
 # Application-level singleton

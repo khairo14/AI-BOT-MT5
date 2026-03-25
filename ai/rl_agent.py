@@ -228,9 +228,33 @@ class RLAgent:
             "epsilon":              round(current_eps, 4),
         }
 
+    def shutdown(self) -> None:
+        """Force-save Q-table to disk — call on application shutdown to avoid
+        losing up to 9 updates that accumulate between periodic saves."""
+        self._force_save()
+        logger.info(f"RL agent saved on shutdown [{self.trading_type}/{self._mode}]")
+
     # ── internal ──────────────────────────────────────────────────────────────
 
     _HOLD_ACTION = 4  # index of (0.0, 0.0) in ACTIONS — hold both parameters
+
+    def _force_save(self) -> None:
+        """Write the current Q-table and parameters to disk unconditionally."""
+        with self._lock:
+            _payload = {
+                "q":           dict(self._q),
+                "conf_thresh": self._conf_thresh,
+                "risk_factor": self._risk_factor,
+                "last_state":  self._last_state,
+                "last_action": self._last_action,
+                "n_updates":   self._n_updates,
+            }
+        _path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
+        try:
+            with open(_path, "w", encoding="utf-8") as f:
+                json.dump(_payload, f)
+        except Exception as exc:
+            logger.warning(f"RL force-save failed [{self.trading_type}/{self._mode}]: {exc}")
 
     def _choose_action(self, state: str) -> int:
         """Epsilon-greedy action selection with exponential decay.
@@ -348,6 +372,12 @@ class RLAgentManager:
 
     def risk_factor(self, trading_type: str) -> float:
         return self.agent(trading_type).risk_factor
+
+    def shutdown(self) -> None:
+        """Force-save all Q-tables — called from API lifespan shutdown so that
+        up to 9 pending updates are not lost on ungraceful termination."""
+        for ag in self._agents.values():
+            ag.shutdown()
 
     def on_trade_closed(
         self,
