@@ -354,6 +354,18 @@ class StrategyRunner:
         if sym_info is None:
             return None
 
+        # Spread gate — enforce max_spread_pips if the strategy declares it.
+        # Prevents entries during news spikes when spread can reach 3–8+ pips.
+        _max_spread = params.get("max_spread_pips")
+        if _max_spread is not None:
+            _current_spread = sym_info.get("spread_pips") or 0.0
+            if _current_spread > _max_spread:
+                logger.debug(
+                    f"{strat_name}/{symbol}: spread {_current_spread:.2f}pip > "
+                    f"max {_max_spread}pip — signal skipped"
+                )
+                return None
+
         lot = self.risk_manager.calculate_lot_size(
             balance=balance,
             entry=sig.entry_price,

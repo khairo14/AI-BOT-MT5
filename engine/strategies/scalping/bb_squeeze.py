@@ -19,6 +19,7 @@ DEFAULT_PARAMS = {
     "min_squeeze_bars": 5,
     "sl_atr_mult": 1.5,
     "tp_atr_mult": 2.5,
+    "max_spread_pips": 2.0,
 }
 
 

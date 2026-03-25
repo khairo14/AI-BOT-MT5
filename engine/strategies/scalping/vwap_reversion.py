@@ -19,8 +19,9 @@ DEFAULT_PARAMS = {
     "stoch_k": 5,
     "stoch_d": 3,
     "stoch_smooth": 3,
-    "rsi_oversold": 35,
-    "rsi_overbought": 65,
+    "rsi_oversold": 28,
+    "rsi_overbought": 72,
+    "max_spread_pips": 2.5,
 }
 
 

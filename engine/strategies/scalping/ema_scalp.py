@@ -16,7 +16,7 @@ DEFAULT_PARAMS = {
     "ema_slow": 21,
     "ema_bias_period": 50,
     "rsi_period": 7,
-    "rsi_min": 40,
+    "rsi_min": 52,
     "rsi_max": 65,
     "max_spread_pips": 1.5,
     "sl_pips": 4,
@@ -71,7 +71,7 @@ class EMAScalp(BaseStrategy):
         if (
             prev_fast <= prev_slow
             and curr_fast > curr_slow
-            and (bias == "BULL" or bias == "NONE")
+            and bias == "BULL"
             and p["rsi_min"] <= curr_rsi <= p["rsi_max"]
         ):
             pip = self._pip_size()
@@ -97,7 +97,7 @@ class EMAScalp(BaseStrategy):
         if (
             prev_fast >= prev_slow
             and curr_fast < curr_slow
-            and (bias == "BEAR" or bias == "NONE")
+            and bias == "BEAR"
             and sell_rsi_min <= curr_rsi <= sell_rsi_max
         ):
             pip = self._pip_size()

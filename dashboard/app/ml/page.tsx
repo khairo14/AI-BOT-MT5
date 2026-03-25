@@ -86,6 +86,8 @@ export default function MLPage() {
   const [gateSaving, setGateSaving]     = useState(false);
   const [scorerWeights, setScorerWeights] = useState({ lstm: 40, rr: 25, trend: 20, volume: 15 });
   const [scorerSaving, setScorerSaving] = useState(false);
+  const [scalScorerWeights, setScalScorerWeights] = useState({ lstm: 15, rr: 25, trend: 40, volume: 20 });
+  const [scalScorerSaving, setScalScorerSaving] = useState(false);
 
   // LSTM table filter/sort
   const [lstmSearch, setLstmSearch] = useState("");
@@ -123,6 +125,15 @@ export default function MLPage() {
               rr:     Math.round((Number(w.rr)     || 0.25) * 100),
               trend:  Math.round((Number(w.trend)  || 0.20) * 100),
               volume: Math.round((Number(w.volume) || 0.15) * 100),
+            });
+          }
+          const sw = ai_cfg.scalping_scorer_weights;
+          if (sw) {
+            setScalScorerWeights({
+              lstm:   Math.round((Number(sw.lstm)   || 0.15) * 100),
+              rr:     Math.round((Number(sw.rr)     || 0.25) * 100),
+              trend:  Math.round((Number(sw.trend)  || 0.40) * 100),
+              volume: Math.round((Number(sw.volume) || 0.20) * 100),
             });
           }
         }
@@ -592,18 +603,18 @@ export default function MLPage() {
 
           {gateSaving && <p className="text-xs text-gray-500">Saving…</p>}
 
-          {/* Scorer weights */}
+          {/* General scorer weights */}
           <div className="border-t border-gray-800 pt-4 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-white font-medium">Signal Scorer Weights</p>
+              <p className="text-sm text-white font-medium">Signal Scorer Weights <span className="text-xs text-gray-500 ml-1">(Day Trading &amp; Swing)</span></p>
               <p className="text-xs text-gray-500">Auto-normalised — any ratio works.</p>
             </div>
             {(["lstm", "rr", "trend", "volume"] as const).map((k) => {
               const labels: Record<string, string> = {
-                lstm: "LSTM Prediction (40%)",
-                rr: "Risk:Reward Quality (25%)",
-                trend: "Trend Alignment (20%)",
-                volume: "Volume Confirmation (15%)",
+                lstm: "LSTM Prediction",
+                rr: "Risk:Reward Quality",
+                trend: "Trend Alignment",
+                volume: "Volume Confirmation",
               };
               return (
                 <div key={k} className="space-y-1">
@@ -640,6 +651,56 @@ export default function MLPage() {
               );
             })}
             {scorerSaving && <p className="text-xs text-gray-500">Saving weights…</p>}
+          </div>
+
+          {/* Scalping-specific scorer weights */}
+          <div className="border-t border-gray-800 pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-white font-medium">Signal Scorer Weights <span className="text-xs text-orange-400 ml-1">(Scalping)</span></p>
+              <p className="text-xs text-gray-500">Overrides general weights for scalping signals only.</p>
+            </div>
+            {(["lstm", "rr", "trend", "volume"] as const).map((k) => {
+              const labels: Record<string, string> = {
+                lstm: "LSTM Prediction",
+                rr: "Risk:Reward Quality",
+                trend: "Trend Alignment",
+                volume: "Volume Confirmation",
+              };
+              return (
+                <div key={k} className="space-y-1">
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>{labels[k]}</span>
+                    <span className="text-white font-medium">{scalScorerWeights[k]}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={60}
+                    step={1}
+                    value={scalScorerWeights[k]}
+                    onChange={(e) => setScalScorerWeights((prev) => ({ ...prev, [k]: Number(e.target.value) }))}
+                    onMouseUp={async () => {
+                      setScalScorerSaving(true);
+                      try {
+                        await patchAppConfig({
+                          ai: {
+                            scalping_scorer_weights: {
+                              lstm:   scalScorerWeights.lstm   / 100,
+                              rr:     scalScorerWeights.rr     / 100,
+                              trend:  scalScorerWeights.trend  / 100,
+                              volume: scalScorerWeights.volume / 100,
+                            },
+                          },
+                        });
+                      } catch (_) {}
+                      setScalScorerSaving(false);
+                    }}
+                    className="w-full accent-orange-500"
+                  />
+                </div>
+              );
+            })}
+            {scalScorerSaving && <p className="text-xs text-gray-500">Saving scalping weights…</p>}
           </div>
         </div>
       </section>

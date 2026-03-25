@@ -63,13 +63,14 @@ class SignalScorer:
     def __init__(self, pred: PricePredictor):
         self.predictor = pred
 
-    def _weights(self, regime: str | None = None) -> tuple[float, float, float, float]:
-        """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) for the given regime.
+    def _weights(self, regime: str | None = None, trading_type: str = "day_trading") -> tuple[float, float, float, float]:
+        """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) for the given regime and trading_type.
 
         Resolution order:
-          1. app.json ai.regime_weights[regime]  — adaptive per-regime profile
-          2. app.json ai.scorer_weights           — static base (now Balanced)
-          3. Class defaults
+          1. app.json ai.regime_weights[regime]        — adaptive per-regime profile
+          2. app.json ai.scalping_scorer_weights        — scalping-specific base weights
+          3. app.json ai.scorer_weights                 — static base (day_trading / swing)
+          4. Class defaults
         """
         try:
             cfg = _get_app_cfg()
@@ -83,6 +84,18 @@ class SignalScorer:
                     wr = float(rw.get("rr",     self._DEFAULT_W_RR))
                     wt = float(rw.get("trend",  self._DEFAULT_W_TREND))
                     wv = float(rw.get("volume", self._DEFAULT_W_VOLUME))
+                    total = wl + wr + wt + wv
+                    if total > 0:
+                        return wl / total, wr / total, wt / total, wv / total
+
+            # Scalping-specific weights take priority over generic scorer_weights
+            if trading_type == "scalping":
+                sw = ai.get("scalping_scorer_weights", {})
+                if sw:
+                    wl = float(sw.get("lstm",   0.15))
+                    wr = float(sw.get("rr",     0.25))
+                    wt = float(sw.get("trend",  0.40))
+                    wv = float(sw.get("volume", 0.20))
                     total = wl + wr + wt + wv
                     if total > 0:
                         return wl / total, wr / total, wt / total, wv / total
@@ -127,7 +140,7 @@ class SignalScorer:
             trend  = self._trend_score(direction, df)
             volume = self._volume_score(df)
 
-            W_LSTM, W_RR, W_TREND, W_VOLUME = self._weights(regime)
+            W_LSTM, W_RR, W_TREND, W_VOLUME = self._weights(regime, trading_type)
             score = (
                 W_LSTM   * lstm   +
                 W_RR     * rr     +

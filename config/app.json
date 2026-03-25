@@ -2,8 +2,8 @@
   "trading_mode": "paper",
   "accounts": {
     "paper": {
-      "login": 168442709,
-      "server": "XMGlobal-MT5 2",
+      "login": 1301109267,
+      "server": "XMGlobal-MT5 6",
       "comment": "XM Demo Account"
     },
     "live": {
@@ -17,7 +17,7 @@
     "day_trading": "auto",
     "swing": "auto"
   },
-  "ea_enabled": false,
+  "ea_enabled": true,
   "bot_magic": 20260318,
   "notifications": {
     "signal_alert": true,
@@ -39,6 +39,12 @@
       "rr": 0.35,
       "trend": 0.20,
       "volume": 0.15
+    },
+    "scalping_scorer_weights": {
+      "lstm": 0.15,
+      "rr": 0.25,
+      "trend": 0.40,
+      "volume": 0.20
     },
     "regime_weights": {
       "trending_bull":     { "lstm": 0.35, "rr": 0.25, "trend": 0.30, "volume": 0.10 },
