@@ -107,6 +107,12 @@ export interface AppConfig {
       trend?:  number;
       volume?: number;
     };
+    scalping_scorer_weights?: {
+      lstm?:   number;
+      rr?:     number;
+      trend?:  number;
+      volume?: number;
+    };
   };
 }
 
