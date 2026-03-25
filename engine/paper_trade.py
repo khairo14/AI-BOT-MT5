@@ -140,10 +140,12 @@ class PaperTradeEngine:
                 # Position no longer in MT5 — mark as closed.
                 # H-7 fix: query deal history to get the actual fill price rather than
                 # using pos.current_price which may be up to 60 s stale.
+                # NEW-11 fix: use self.client.get_deals_by_position() which acquires
+                # MT5Client._lock, preventing concurrent MT5 SDK calls.
                 actual_close = None
                 try:
                     import MetaTrader5 as _mt5
-                    deals = _mt5.history_deals_get(position=ticket)
+                    deals = self.client.get_deals_by_position(ticket)
                     if deals:
                         close_deals = [d for d in deals if d.entry == _mt5.DEAL_ENTRY_OUT]
                         if close_deals:

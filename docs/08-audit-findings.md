@@ -334,3 +334,41 @@ All 35 findings have been addressed. A re-audit and test run should be performed
 ## Post-Audit-2 Status
 
 All 15 findings have been addressed in the same session. Tests pass (30/30).
+
+---
+
+## Audit Round 3 — March 25, 2026
+
+**Scope:** Full codebase (40 files). Triggered after session fixes to LSTM labels, optimizer NameError, RL paper→live bootstrap, backtest AI-filter integration.
+
+| Severity | Count | Fixed |
+|----------|-------|-------|
+| High     | 1     | ✅ Fixed same session |
+| Low      | 1     | Open (acceptable) |
+| **Total**| **2** | |
+
+### NEW-11 — `engine/paper_trade.py` — High ✅ Fixed
+**Category:** Concurrency Safety  
+**Description:** `sync_positions()` called `mt5.history_deals_get(position=ticket)` directly via `import MetaTrader5 as _mt5`, bypassing `MT5Client._lock`. This created race conditions when `sync_positions()` ran in a thread executor every 60 s while `OrderManager` was also executing MT5 calls.  
+**Trigger condition:** Any paper-trade position close while `OrderManager.place_market_order()` or `close_position()` is concurrently running.  
+**Risk:** High — MT5 Python SDK is not thread-safe; concurrent calls can crash or silently return incorrect data.  
+**Fix applied:** Replaced `_mt5.history_deals_get(position=ticket)` with `self.client.get_deals_by_position(ticket)`, which acquires `MT5Client._lock` internally.
+
+### NEW-12 — `engine/session_filter.py` — Low (Open)
+**Category:** Configuration Coverage / Cache Staleness  
+**Description:** `_get_category()` caches symbol→category mappings with a 5-minute TTL. Dashboard changes to `config/symbols.json` (adding/recategorising a symbol) do not take effect until the cache expires.  
+**Trigger condition:** User modifies symbol-to-category mapping via dashboard settings → session filter continues enforcing old market hours for up to 5 minutes.  
+**Risk:** Low — session filter will self-correct within 5 minutes; existing TTL pattern is already used for `app.json`.  
+**Status:** Accepted – 5-minute eventual-consistency is consistent with the rest of the TTL caching strategy in this codebase.
+
+### Open Gaps (still unaddressed, carried forward)
+
+| ID | File | Issue | Risk |
+|---|---|---|---|
+| NEW-4 | `engine/paper_trade.py` | `self._history` list grows unbounded — no eviction | Low |
+| NEW-5 | `api/signal_bus.py` | `_poll_outcome` max 7 days; swing > 7 days miss close record | Medium |
+| NEW-6 | `api/signal_bus.py` | Fire-and-forget tasks can lose journal write on crash | Low |
+| NEW-7 | `api/runner_loop.py` | Task accumulation if MT5 slow | Low |
+| NEW-8 | `ai/trade_memory.py` | Corrupt JSONL line drops subsequent entries | Low |
+| NEW-9 | `ai/rl_agent.py` | Up to 9 Q-table updates lost on ungraceful shutdown | Very Low |
+| NEW-10 | `engine/news_filter.py` | `_SYMBOL_CURRENCIES` incomplete for stocks/crypto/commodities | Low |
