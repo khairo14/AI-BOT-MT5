@@ -327,6 +327,7 @@ class StrategyRunner:
             entry_price=sig.entry_price,
             sl_price=sig.sl_price,
             tp_price=sig.tp_price,
+            trading_type=trading_type,
         )
         if not sl_ok:
             logger.debug(f"{strat_name}/{symbol}: R:R validation failed — signal skipped")

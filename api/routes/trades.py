@@ -138,7 +138,7 @@ def place_order(
         raise HTTPException(status_code=422, detail="sl or sl_pips is required")
 
     # Validate SL/TP
-    valid, err = _risk_manager.validate_sl_tp(direction, entry, sl, tp)
+    valid, err = _risk_manager.validate_sl_tp(direction, entry, sl, tp, trading_mode)
     if not valid:
         raise HTTPException(status_code=400, detail=err)
 

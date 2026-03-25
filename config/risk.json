@@ -2,6 +2,11 @@
   "risk_per_trade_pct": 1.5,
   "max_risk_per_trade_pct": 2,
   "risk_reward_min": 1.5,
+  "risk_reward_min_by_mode": {
+    "scalping":    1.0,
+    "day_trading": 1.5,
+    "swing":       1.5
+  },
   "sl_required": true,
   "tp_required": false,
   "position_sizing_method": "fixed_fractional",

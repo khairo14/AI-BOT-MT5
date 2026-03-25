@@ -433,10 +433,22 @@ export default function SettingsPage() {
           min={0.5} max={10} step={0.1} unit="%"
         />
         <NumField
-          label="Minimum R:R ratio"
-          value={riskNum("risk_reward_min")}
-          onChange={(v) => setRiskKey("risk_reward_min", v)}
-          min={1} max={5} step={0.1} unit=":1"
+          label="Min R:R — Scalping"
+          value={(risk?.risk_reward_min_by_mode as Record<string,number> | undefined)?.scalping ?? 1.0}
+          onChange={(v) => setRisk((r) => ({ ...(r ?? {}), risk_reward_min_by_mode: { ...(r?.risk_reward_min_by_mode as object ?? {}), scalping: v } }))}
+          min={0.5} max={3} step={0.1} unit=":1"
+        />
+        <NumField
+          label="Min R:R — Day Trading"
+          value={(risk?.risk_reward_min_by_mode as Record<string,number> | undefined)?.day_trading ?? 1.5}
+          onChange={(v) => setRisk((r) => ({ ...(r ?? {}), risk_reward_min_by_mode: { ...(r?.risk_reward_min_by_mode as object ?? {}), day_trading: v } }))}
+          min={0.5} max={5} step={0.1} unit=":1"
+        />
+        <NumField
+          label="Min R:R — Swing"
+          value={(risk?.risk_reward_min_by_mode as Record<string,number> | undefined)?.swing ?? 1.5}
+          onChange={(v) => setRisk((r) => ({ ...(r ?? {}), risk_reward_min_by_mode: { ...(r?.risk_reward_min_by_mode as object ?? {}), swing: v } }))}
+          min={0.5} max={5} step={0.1} unit=":1"
         />
         <SaveBtn onClick={saveRisk} saving={riskSaving} saved={riskSaved} />
       </Section>

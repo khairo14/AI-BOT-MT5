@@ -225,10 +225,12 @@ class RiskManager:
         entry_price: float,
         sl_price: Optional[float],
         tp_price: Optional[float],
+        trading_type: Optional[str] = None,
     ) -> tuple[bool, str]:
         """
         Returns (is_valid, error_message).
         Checks: SL is required, SL is on correct side, R:R meets minimum.
+        Per-mode minimums are read from risk_reward_min_by_mode (falls back to risk_reward_min).
         """
         if sl_price is None or sl_price == 0:
             return False, "SL is required on every trade"
@@ -253,9 +255,10 @@ class RiskManager:
                 tp_dist = entry_price - tp_price
 
             rr = tp_dist / sl_dist if sl_dist > 0 else 0
-            min_rr = self._config["risk_reward_min"]
+            _by_mode = self._config.get("risk_reward_min_by_mode", {})
+            min_rr = _by_mode.get(trading_type, self._config["risk_reward_min"]) if trading_type else self._config["risk_reward_min"]
             if rr < min_rr - 1e-9:  # tolerance for floating-point precision
-                return False, f"R:R {rr:.2f} is below minimum {min_rr}"
+                return False, f"R:R {rr:.2f} is below minimum {min_rr} for {trading_type or 'trade'}"
 
         return True, ""
 
