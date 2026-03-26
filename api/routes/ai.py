@@ -32,10 +32,18 @@ router = APIRouter()
 
 TRADING_TYPE = Literal["scalping", "day_trading", "swing"]
 
+# Default bar counts per trading type — match run_retrain.py.
+# These are capped at the MT5 per-request limit (~99k for M5).
+_TRAIN_BARS: dict[str, int] = {
+    "scalping":    99_000,  # M5  ≈ 1 yr
+    "day_trading": 17_000,  # H1  ≈ 2 yr
+    "swing":        5_000,  # H4  ≈ 2 yr
+}
+
 
 class TrainRequest(BaseModel):
     trading_type: TRADING_TYPE = "day_trading"
-    bars: int = 1000   # bars of the trading_type timeframe
+    bars: int = 0   # 0 = auto-select by trading_type (recommended)
 
 
 @router.get("/status")
@@ -49,7 +57,7 @@ def ai_status():
 # ───────────────────────────────────
 
 class TrainAllRequest(BaseModel):
-    bars: int = 1000
+    bars: int = 0   # 0 = auto-select by trading_type (recommended)
 
 
 @router.post("/train/all")
@@ -89,11 +97,12 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
             ]
 
             # ── Phase 1: fetch each symbol, 300 ms between pairs ──────────────
+            mode_bars = req.bars if req.bars > 0 else _TRAIN_BARS.get(trading_type, 5_000)
             ohlcv: dict[str, object] = {}
             for symbol in entries:
                 if not symbol or predictor.is_training(symbol, trading_type):
                     continue
-                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
+                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, mode_bars)
                 ohlcv[symbol] = df
                 await asyncio.sleep(0.3)  # rest between pairs
 
@@ -132,7 +141,8 @@ async def train_symbol(symbol: str, req: TrainRequest = TrainRequest()):
         return {"status": "already_training", "symbol": symbol, "trading_type": req.trading_type}
 
     tf_str = TRADING_TYPE_TF.get(req.trading_type, "H1")
-    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
+    bars   = req.bars if req.bars > 0 else _TRAIN_BARS.get(req.trading_type, 5_000)
+    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, bars)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol} ({tf_str})")
 
@@ -235,9 +245,19 @@ def optimizer_status():
     }
 
 
+# Bars to fetch per trading type — matches run_optimizer.py standalone values.
+# These cover 2+ years of history so UI-triggered optimizations are consistent
+# with the standalone run and will NOT downgrade already-optimized results.
+_OPT_BARS: dict[str, int] = {
+    "scalping":    99_000,   # M5  ~2 years
+    "day_trading": 17_000,   # H1  ~2 years
+    "swing":        5_000,   # H4  ~2 years
+}
+
+
 class OptimizeRequest(BaseModel):
     trading_type: TRADING_TYPE = "day_trading"
-    bars: int = 3000
+    bars: int = 0  # 0 = auto (uses _OPT_BARS[trading_type]); set explicitly to override
 
 
 @router.post("/optimizer/run/{strategy_name}/{symbol}")
@@ -259,8 +279,9 @@ async def run_optimizer(
     if client is None or not client.is_connected():
         raise HTTPException(status_code=503, detail="MT5 not connected")
 
-    tf_str = TRADING_TYPE_TF.get(req.trading_type, "H1")
-    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
+    tf_str  = TRADING_TYPE_TF.get(req.trading_type, "H1")
+    n_bars  = req.bars or _OPT_BARS.get(req.trading_type, 17_000)
+    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol}/{tf_str}")
 
@@ -317,12 +338,13 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
             ]
 
             # ── Phase 1: fetch each (symbol, tf) once, 300 ms between pairs ──
+            n_bars = req.bars or _OPT_BARS.get(trading_type, 17_000)
             for symbol in symbols:
                 if not symbol:
                     continue
                 cache_key = (symbol, tf_str)
                 if cache_key not in ohlcv_cache:
-                    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, req.bars)
+                    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
                     ohlcv_cache[cache_key] = df
                 await asyncio.sleep(0.3)  # rest between pairs — gives live bot MT5 lock
 

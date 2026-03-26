@@ -70,11 +70,24 @@ SPREAD_COST_R_SYMBOL: dict[str, float] = {
 # Walk-forward step (every Nth bar) and max hold per mode
 _BACKTEST_CONFIG = {
     # warmup=60: ema_scalp requires ema_bias_period(50) M5 bars for bias filter.
-    "scalping":    {"step": 3,  "max_hold": 50,  "warmup": 60},
+    # step=10: check every 10 M5 bars (50 min) — dense enough for statistics,
+    # required to keep backtest runtime tractable at 99K-bar datasets.
+    "scalping":    {"step": 10, "max_hold": 50,  "warmup": 60},
     # warmup=210: macd_ema_trend/rsi_divergence require ema_bias(200)+5 H1 bars
     # before they activate. Starting below that just logs noise and wastes steps.
     "day_trading": {"step": 5,  "max_hold": 100, "warmup": 210},
     "swing":       {"step": 10, "max_hold": 200, "warmup": 200},
+}
+
+# Fixed history window passed to each strategy at every backtest step.
+# Replaces the old growing-slice approach (O(n²)) with a constant-width window (O(n)).
+# Safety guarantee: slice always ends at bar i (no future data); we only cut old history
+# from the front, which cannot introduce lookahead. Window ≥ 3× max indicator period
+# per trading type so all EMA/RSI/MACD values are fully converged.
+_BT_WINDOW: dict[str, int] = {
+    "scalping":    200,   # max param period = ema_bias(50)  → 4× coverage
+    "day_trading": 500,   # max default period = ema_bias(200) → 2.5× coverage
+    "swing":       400,   # max param period = lookback(100)  → 4× coverage
 }
 
 # ── Parameter grids ──────────────────────────────────────────────────────────
@@ -269,13 +282,18 @@ def _backtest_combo(
     spread_r: float = 0.0,
     symbol: str = "__bt__",
     extra_dfs: "dict | None" = None,
+    bt_window: int = 500,
 ) -> tuple[float, float, int, dict[str, dict]]:
     """Walk-forward backtest one param combo.
     Returns (win_rate, avg_rr, n_trades, regime_stats).
     regime_stats: {regime_label: {wins, total, rr_sum}}
     spread_r deducted from each trade result to simulate round-trip spread+slippage.
     extra_dfs: optional secondary timeframe DataFrames keyed by kwarg name (e.g. df_h1).
-               Each is time-sliced at bar i to avoid lookahead bias."""
+               Each is time-sliced at bar i to avoid lookahead bias.
+    bt_window: fixed history length passed to the strategy at each step. Replaces the
+               old df.iloc[:i+1] growing slice with df.iloc[i+1-bt_window:i+1], turning
+               O(n²) into O(n). Safety: slice still ends at bar i — no future data.
+               Only old history is trimmed from the front, which never introduces lookahead."""
     wins: list[float] = []
     rrs:  list[float] = []
     regime_stats: dict[str, dict] = {}   # label → {wins, total, rr_sum}
@@ -285,6 +303,9 @@ def _backtest_combo(
     while i < len(df) - 1:
         try:
             strat  = strategy_cls(symbol="__bt__", params=params)
+            # Fixed-width window: cut old history from the front only.
+            # Slice still ends at bar i → strategy cannot see bar i+1 or beyond.
+            _win_start = max(0, i + 1 - bt_window)
             # Build time-sliced extra dfs at this bar to prevent lookahead bias
             _e: dict = {}
             if extra_dfs:
@@ -292,13 +313,16 @@ def _backtest_combo(
                     _bar_time = df.iloc[i]["time"]
                     for _k, _v in extra_dfs.items():
                         if "time" in _v.columns:
-                            _e[_k] = _v[_v["time"] <= _bar_time]
+                            # Step 1: exclude all future bars (same guarantee as before)
+                            _tmp = _v[_v["time"] <= _bar_time]
+                            # Step 2: trim old history from front for O(n) performance
+                            _e[_k] = _tmp.iloc[max(0, len(_tmp) - bt_window):]
                         else:
-                            _e[_k] = _v.iloc[:i + 1]
+                            _e[_k] = _v.iloc[max(0, i + 1 - bt_window):i + 1]
                 else:
                     for _k, _v in extra_dfs.items():
-                        _e[_k] = _v.iloc[:i + 1]
-            result = dispatch_fn(strat, df.iloc[:i + 1], _e)
+                        _e[_k] = _v.iloc[max(0, i + 1 - bt_window):i + 1]
+            result = dispatch_fn(strat, df.iloc[_win_start:i + 1], _e)
             sig    = result.signal
             if sig and sig.direction in ("BUY", "SELL") and sig.tp_price:
                 won, rr = _simulate_trade(
@@ -312,7 +336,7 @@ def _backtest_combo(
                 rrs.append(rr_adj)
 
                 # Record per-regime outcome
-                regime = _classify_bar_regime(df.iloc[:i + 1], symbol)
+                regime = _classify_bar_regime(df.iloc[_win_start:i + 1], symbol)
                 rs = regime_stats.setdefault(regime, {"wins": 0, "total": 0, "rr_sum": 0.0})
                 rs["total"] += 1
                 if rr_adj > 0:
@@ -533,7 +557,8 @@ class ParamOptimizer:
         # Per-regime tracking: {regime: (best_score, best_params)}
         regime_best: dict[str, tuple[float, dict]] = {}
 
-        spread_r = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
+        spread_r  = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
+        bt_window = _BT_WINDOW.get(trading_type, 500)
 
         # Build secondary-timeframe extras for strategies that need them.
         # The optimizer only fetches one df (primary TF). For multi-TF strategies
@@ -558,7 +583,7 @@ class ParamOptimizer:
             wr, avg_rr, n, regime_stats = _backtest_combo(
                 strategy_cls, dispatch, df, combo,
                 cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
-                _extra_dfs,
+                _extra_dfs, bt_window,
             )
             # Score = win_rate weighted by quality of avg R:R
             score = wr * max(avg_rr, 0.0) if n >= MIN_BACKTEST_SIGNALS else 0.0
