@@ -263,20 +263,37 @@ def _backtest_combo(
     warmup: int,
     spread_r: float = 0.0,
     symbol: str = "__bt__",
+    extra_dfs: "dict | None" = None,
 ) -> tuple[float, float, int, dict[str, dict]]:
     """Walk-forward backtest one param combo.
     Returns (win_rate, avg_rr, n_trades, regime_stats).
     regime_stats: {regime_label: {wins, total, rr_sum}}
-    spread_r deducted from each trade result to simulate round-trip spread+slippage."""
+    spread_r deducted from each trade result to simulate round-trip spread+slippage.
+    extra_dfs: optional secondary timeframe DataFrames keyed by kwarg name (e.g. df_h1).
+               Each is time-sliced at bar i to avoid lookahead bias."""
     wins: list[float] = []
     rrs:  list[float] = []
     regime_stats: dict[str, dict] = {}   # label → {wins, total, rr_sum}
+    _has_time = "time" in df.columns
     i = warmup
 
     while i < len(df) - 1:
         try:
             strat  = strategy_cls(symbol="__bt__", params=params)
-            result = dispatch_fn(strat, df.iloc[:i + 1])
+            # Build time-sliced extra dfs at this bar to prevent lookahead bias
+            _e: dict = {}
+            if extra_dfs:
+                if _has_time:
+                    _bar_time = df.iloc[i]["time"]
+                    for _k, _v in extra_dfs.items():
+                        if "time" in _v.columns:
+                            _e[_k] = _v[_v["time"] <= _bar_time]
+                        else:
+                            _e[_k] = _v.iloc[:i + 1]
+                else:
+                    for _k, _v in extra_dfs.items():
+                        _e[_k] = _v.iloc[:i + 1]
+            result = dispatch_fn(strat, df.iloc[:i + 1], _e)
             sig    = result.signal
             if sig and sig.direction in ("BUY", "SELL") and sig.tp_price:
                 won, rr = _simulate_trade(
@@ -500,7 +517,7 @@ class ParamOptimizer:
             logger.warning(f"Optimizer: unknown strategy {strategy_name}")
             return None, 0.0, 0, {}
 
-        dispatch = _DISPATCH.get(strategy_name, lambda s, d: s.calculate(d))
+        dispatch = _DISPATCH.get(strategy_name, lambda s, d, e={}: s.calculate(d))
         combos   = _grid_combos(strategy_name)
         cfg      = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
 
@@ -513,11 +530,30 @@ class ParamOptimizer:
 
         spread_r = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
 
+        # Build secondary-timeframe extras for strategies that need them.
+        # The optimizer only fetches one df (primary TF). For multi-TF strategies
+        # we reuse the same df as the secondary TF — it's a reasonable approximation
+        # for parameter search (trend direction changes slowly relative to entry TF).
+        _extra_dfs: dict = {}
+        if strategy_name in ("macd_ema_trend", "rsi_divergence"):
+            # Both strategies use df_h1 for trend confirmation; the optimizer
+            # receives H1 data (TRADING_TYPE_TF["day_trading"] = "H1"), so
+            # pass the same df as df_h1.
+            _extra_dfs = {"df_h1": df}
+        elif strategy_name == "ema_scalp":
+            # ema_scalp wants M5 bias; optimizer provides M5 for scalping.
+            _extra_dfs = {"df_m5": df}
+        elif strategy_name == "ema_trend_rider":
+            _extra_dfs = {"df_h4": df, "df_d1": df}
+        elif strategy_name == "weekly_breakout":
+            _extra_dfs = {"df_daily": df}
+
         for combo in combos:
             time.sleep(0)  # yield CPU between combos to prevent event-loop starvation
             wr, avg_rr, n, regime_stats = _backtest_combo(
                 strategy_cls, dispatch, df, combo,
                 cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
+                _extra_dfs,
             )
             # Score = win_rate weighted by quality of avg R:R
             score = wr * max(avg_rr, 0.0) if n >= MIN_BACKTEST_SIGNALS else 0.0
