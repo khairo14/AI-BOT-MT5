@@ -295,6 +295,15 @@ class MT5Client:
     # Open Positions & History
     # ------------------------------------------------------------------
 
+    def get_position_by_ticket(self, ticket: int):
+        """Return the raw MT5 position object for a specific ticket, or None.
+        Acquires MT5Client._lock — NEW-14 fix so _poll_outcome doesn't call the
+        MT5 SDK directly and bypass the lock used by OrderManager/paper_trade.
+        """
+        with self._lock:
+            positions = mt5.positions_get(ticket=ticket)
+        return positions[0] if positions else None
+
     def get_open_positions(self, symbol: Optional[str] = None) -> list[dict]:
         """Return all open positions, optionally filtered by symbol."""
         with self._lock:

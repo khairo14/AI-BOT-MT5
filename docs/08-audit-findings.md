@@ -374,3 +374,49 @@ All 7 previously-open gaps closed.
 | NEW-8 | `ai/trade_memory.py` | `_load()` now uses per-line `try/except` — corrupt lines skipped, rest loaded | `a5d32b3` |
 | NEW-9 | `ai/rl_agent.py` | `RLAgent.shutdown()` + `RLAgentManager.shutdown()` force-save; wired from `api/main.py` lifespan | `a5d32b3` |
 | NEW-10 | `engine/news_filter.py` | `_SYMBOL_CURRENCIES` extended with all scanner symbols (stocks, indices, commodities, crypto) | `a5d32b3` |
+
+---
+
+# Audit Round 5 — Full System Re-Audit
+
+**Audit Date:** June 2025  
+**Scope:** Full codebase — all major source files read in full: `signal_bus.py`, `runner_loop.py`, `risk_manager.py`, `order_manager.py`, `paper_trade.py`, `strategy_runner.py`, `mt5_client.py`, `rl_agent.py`, `trade_memory.py`, `signal_scorer.py`, `predictor.py`, `news_filter.py`, strategies (sample), all routes.  
+**Trigger:** Continuation of audit after token budget reset. Previous session committed `864b9e1`.
+
+| Severity | Count | Fixed |
+|----------|-------|-------|
+| Medium   | 2     | ✅ Fixed |
+| Low      | 1     | ✅ Fixed |
+| **Total**| **3** | ✅ **All** |
+
+---
+
+## Medium (M)
+
+### NEW-13 — `recover_unclosed_trades` hardcodes `"day_trading"` for untracked positions
+- **File:** `api/signal_bus.py` (`recover_unclosed_trades`)
+- **Problem:** The reverse-reconciliation block — which detects MT5 live positions with no matching journal "open" entry — hardcoded `trading_type="day_trading"` in both the journal write and the fake_signal for `_poll_outcome`. Effects:
+  1. RL update credited to the `day_trading` agent even when the position is a scalp or swing trade.
+  2. Journal `trading_type` is wrong — analytics and reporting are skewed.
+  3. `_poll_outcome` MAX_POLLS = 14 days regardless of actual type (scalping should be 2 days, swing 45 days).
+- **Fix:** Detect trading type from the comment prefix: `scalp|` → `"scalping"`, `swing|` → `"swing"`, anything else → `"day_trading"`. Applied to both the journal write and the fake_signal.
+
+### NEW-14 — `_poll_outcome` calls `mt5.positions_get()` and `mt5.symbol_info()` without `MT5Client._lock`
+- **File:** `api/signal_bus.py` (`_poll_outcome`), `engine/mt5_client.py`
+- **Problem:** The main polling loop called `await asyncio.to_thread(mt5.positions_get, ticket=ticket)` and `await asyncio.to_thread(mt5.symbol_info, ...)` directly, bypassing `MT5Client._lock` (an RLock). This is the same concurrency hazard fixed in NEW-11 for `paper_trade.py` — concurrent `OrderManager` calls and the poller could race on the MT5 SDK.
+- **Fix:** Added `MT5Client.get_position_by_ticket(ticket)` method that acquires `MT5Client._lock` and returns the raw position object (or None). `_poll_outcome` now uses `await asyncio.to_thread(client.get_position_by_ticket, ticket)`. Symbol digits retrieved via `client.get_symbol_info()` (already lock-safe).
+
+---
+
+## Low (L)
+
+### NEW-15 — `_get_exec_mode()` and `_is_ea_enabled()` read `app.json` without TTL cache
+- **File:** `api/signal_bus.py`
+- **Problem:** Both static methods called `json.loads((CONFIG_DIR / "app.json").read_text())` on every invocation. `add_signal()` calls `_get_exec_mode()` on every signal from the runner loop (scalping: 5 s interval × 20+ symbols = 200+ reads/min), with `_is_ea_enabled()` called inside `_do_execute_sync` on every auto-execution. No caching, while every other `app.json` reader in the codebase uses a 5-second TTL.
+- **Fix:** Added module-level `_get_bus_app_cfg()` helper with 5-second TTL cache (consistent with `strategy_runner.py` `_get_app_config()` and `signal_scorer.py` `_get_app_cfg()`). Both methods now call through the cache instead of reading disk directly.
+
+---
+
+## Post-Audit-5 Status
+
+All 3 findings fixed. Codebase is clean across all 5 audit rounds (50+ total findings, all resolved).

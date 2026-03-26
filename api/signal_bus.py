@@ -53,6 +53,26 @@ from loguru import logger
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
+# NEW-15: module-level TTL cache for app.json so _get_exec_mode / _is_ea_enabled
+# don't read the file on every add_signal call (up to 200+ reads/min at high scan rate).
+_app_cfg_cache_bus: dict = {}
+_app_cfg_loaded_at_bus: float = 0.0
+_APP_CFG_TTL_BUS = 5.0  # seconds — consistent with strategy_runner.py TTL
+
+
+def _get_bus_app_cfg() -> dict:
+    global _app_cfg_cache_bus, _app_cfg_loaded_at_bus
+    now = time.monotonic()
+    if now - _app_cfg_loaded_at_bus < _APP_CFG_TTL_BUS:
+        return _app_cfg_cache_bus
+    try:
+        _app_cfg_cache_bus = json.loads((CONFIG_DIR / "app.json").read_text(encoding="utf-8-sig"))
+    except Exception:
+        pass  # return stale cache on read error
+    _app_cfg_loaded_at_bus = now
+    return _app_cfg_cache_bus
+
+
 # Retrain dedup: track when each symbol×mode key last triggered an LSTM retrain.
 # Prevents a burst of simultaneous _poll_outcome completions from queuing redundant
 # OHLCV fetches and training jobs before predictor.is_training() is set.
@@ -558,8 +578,9 @@ class SignalBus:
 
     @staticmethod
     def _get_exec_mode(trading_type: str) -> str:
+        # NEW-15: use TTL-cached config read instead of raw file read per call
         try:
-            cfg = json.loads((CONFIG_DIR / "app.json").read_text())
+            cfg = _get_bus_app_cfg()
             return cfg.get("execution_mode", {}).get(trading_type, "manual")
         except Exception:
             return "manual"
@@ -567,8 +588,9 @@ class SignalBus:
     @staticmethod
     def _is_ea_enabled() -> bool:
         """Return True if ea_enabled=true in app.json."""
+        # NEW-15: use TTL-cached config read instead of raw file read per call
         try:
-            cfg = json.loads((CONFIG_DIR / "app.json").read_text())
+            cfg = _get_bus_app_cfg()
             return bool(cfg.get("ea_enabled", False))
         except Exception:
             return False
@@ -810,6 +832,15 @@ async def recover_unclosed_trades(client) -> None:
         _tp      = pos.get("tp") or 0.0
         _volume  = pos.get("volume") or 0.01
         _comment = pos.get("comment", "")
+        # NEW-13: detect trading type from the comment prefix (scalp|, day|, swing|)
+        # so the correct RL agent is updated and the correct MAX_POLLS budget is used.
+        _cmt_lower = _comment.lower()
+        if _cmt_lower.startswith("scalp"):
+            _trading_type_untracked = "scalping"
+        elif _cmt_lower.startswith("swing"):
+            _trading_type_untracked = "swing"
+        else:
+            _trading_type_untracked = "day_trading"
         # Write an open-event so future restarts see this position in the journal
         try:
             trade_journal.log(
@@ -821,7 +852,7 @@ async def recover_unclosed_trades(client) -> None:
                 sl=float(_sl),
                 tp=float(_tp) if _tp else None,
                 profit=None,
-                trading_type="day_trading",
+                trading_type=_trading_type_untracked,
                 account_mode=current_mode(),
                 comment=_comment,
                 event="open",
@@ -831,7 +862,7 @@ async def recover_unclosed_trades(client) -> None:
         fake_signal = {
             "symbol":       _symbol,
             "direction":    _dir,
-            "trading_mode": "day_trading",
+            "trading_mode": _trading_type_untracked,
             "strategy":     _comment,
             "fill_price":   float(_entry),
             "entry_price":  float(_entry),
@@ -872,11 +903,13 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
     # Fetch symbol digits ONCE — used to round SL to the instrument's correct precision
     # (5 for EURUSD, 3 for USDJPY, 2 for XAUUSD/BTCUSD, etc.)
+    # NEW-14: use client.get_symbol_info() which acquires MT5Client._lock, consistent
+    # with the lock pattern enforced everywhere else (fixes same issue as NEW-11).
     _sym_digits = 5
     try:
-        _sinfo = await asyncio.to_thread(mt5.symbol_info, signal.get("symbol", "EURUSD"))
-        if _sinfo:
-            _sym_digits = _sinfo.digits
+        _si_dict = await asyncio.to_thread(client.get_symbol_info, signal.get("symbol", "EURUSD"))
+        if _si_dict:
+            _sym_digits = int(_si_dict.get("digits", 5))
     except Exception:
         pass
 
@@ -893,9 +926,10 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
         await asyncio.sleep(30)
         try:
             # Position still open?
-            positions = await asyncio.to_thread(mt5.positions_get, ticket=ticket)
-            if positions:
-                pos       = positions[0]
+            # NEW-14: use client.get_position_by_ticket() which acquires MT5Client._lock
+            # instead of calling mt5.positions_get() directly (consistent with NEW-11 fix).
+            pos = await asyncio.to_thread(client.get_position_by_ticket, ticket)
+            if pos:
                 direction = signal.get("direction", "").upper()
                 entry_px  = float(signal.get("fill_price") or signal.get("entry_price", 0))
                 orig_sl   = float(signal.get("sl", 0))
