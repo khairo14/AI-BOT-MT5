@@ -69,8 +69,11 @@ SPREAD_COST_R_SYMBOL: dict[str, float] = {
 
 # Walk-forward step (every Nth bar) and max hold per mode
 _BACKTEST_CONFIG = {
-    "scalping":    {"step": 3,  "max_hold": 50,  "warmup": 50},
-    "day_trading": {"step": 5,  "max_hold": 100, "warmup": 100},
+    # warmup=60: ema_scalp requires ema_bias_period(50) M5 bars for bias filter.
+    "scalping":    {"step": 3,  "max_hold": 50,  "warmup": 60},
+    # warmup=210: macd_ema_trend/rsi_divergence require ema_bias(200)+5 H1 bars
+    # before they activate. Starting below that just logs noise and wastes steps.
+    "day_trading": {"step": 5,  "max_hold": 100, "warmup": 210},
     "swing":       {"step": 10, "max_hold": 200, "warmup": 200},
 }
 
@@ -80,6 +83,8 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
     "ema_scalp": {
         "ema_fast": [5, 8, 10, 13],
         "ema_slow": [18, 21, 26, 34],
+        "rsi_min":  [40, 45, 50, 52],
+        "rsi_max":  [60, 65, 70],
         "sl_pips":  [4, 6, 8, 10, 12],
         "rr":       [1.5, 2.0, 2.5, 3.0],
     },
@@ -317,7 +322,7 @@ def _backtest_combo(
                 i += max(max_hold // 4, step)
                 continue
         except Exception as _exc:
-            logger.debug(f"Backtest signal skipped at bar {i} ({strategy_name}/{symbol}): {_exc}")
+            logger.debug(f"Backtest signal skipped at bar {i} ({strategy_cls.__name__}/{symbol}): {_exc}")
         i += step
 
     n = len(wins)

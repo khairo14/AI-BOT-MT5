@@ -176,7 +176,7 @@ _PRIMARY_TF: dict[str, str] = {
     "vwap_reversion":  "M5",
     "macd_ema_trend":  "H1",
     "sr_breakout":     "H1",
-    "rsi_divergence":  "H1",
+    "rsi_divergence":  "M30",  # entry TF is M30 — H1 was wrong: LSTM trained and scored on M30
     "ema_trend_rider": "H1",
     "fibonacci_rsi":   "H4",
     "weekly_breakout": "H4",

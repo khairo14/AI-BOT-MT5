@@ -244,8 +244,7 @@ class SignalBus:
             # ticks (every 30 s) don't flood the queue/archive with rejected
             # entries and don't generate any notification noise on the dashboard.
             try:
-                _ai_cfg = json.loads((CONFIG_DIR / "app.json").read_text()).get("ai", {})
-                _conf_filter_on = bool(_ai_cfg.get("confidence_filter_enabled", True))
+                _conf_filter_on = bool(_get_bus_app_cfg().get("ai", {}).get("confidence_filter_enabled", True))
             except Exception:
                 _conf_filter_on = True
             if _conf_filter_on:
@@ -294,9 +293,7 @@ class SignalBus:
         else:
             # Compute expiry for manual pending signals — keyed by timeframe, not mode
             try:
-                exp_cfg = json.loads((CONFIG_DIR / "app.json").read_text()).get(
-                    "signal_expiry_seconds", {}
-                )
+                exp_cfg = _get_bus_app_cfg().get("signal_expiry_seconds", {})
             except Exception:
                 exp_cfg = {}
             tf = signal.get("timeframe", "")
