@@ -673,13 +673,32 @@ async def recover_unclosed_trades(client) -> None:
 
         sl = float(entry.get("sl") or 0)
         tp = float(entry.get("tp") or 0)
-        tol = pip_val * 3
-        if tp and abs(close_px - tp) <= tol:
-            outcome_type = "tp_hit"
-        elif sl and abs(close_px - sl) <= tol:
-            outcome_type = "sl_hit"
-        else:
-            outcome_type = "manual_close"
+        # Same tol + direction-aware logic as _poll_outcome (0.01% of price, min 2 pips).
+        # The old tol=pip_val*3 had no profit fallback so ATR-trailed closes were
+        # always labelled manual_close regardless of whether they were wins or losses.
+        tol = max(abs(close_px) * 0.0001, pip_val * 2)
+        if direction == "BUY":
+            if tp and close_px >= tp - tol:
+                outcome_type = "tp_hit"
+            elif sl and close_px <= sl + tol:
+                outcome_type = "sl_hit"
+            elif profit > 0:
+                outcome_type = "tp_hit"
+            elif profit < 0:
+                outcome_type = "sl_hit"
+            else:
+                outcome_type = "manual_close"
+        else:  # SELL
+            if tp and close_px <= tp + tol:
+                outcome_type = "tp_hit"
+            elif sl and close_px >= sl - tol:
+                outcome_type = "sl_hit"
+            elif profit > 0:
+                outcome_type = "tp_hit"
+            elif profit < 0:
+                outcome_type = "sl_hit"
+            else:
+                outcome_type = "manual_close"
 
         open_dt2  = datetime.fromisoformat(entry.get("open_time", close_time).replace("Z", "+00:00"))
         # Use the offset-corrected close_time ISO string (not raw deal.time) so both
@@ -706,6 +725,14 @@ async def recover_unclosed_trades(client) -> None:
 
         # Feed to trade memory and RL
         try:
+            # Compute profit_pct so trade memory never stores 0.0 for recovered trades
+            try:
+                from engine.risk_manager import risk_manager as _rm_rec2
+                _rec2_bal = _rm_rec2._day_start_balance or 0.0
+            except Exception:
+                _rec2_bal = 0.0
+            _rec2_pct = (profit / _rec2_bal * 100.0) if _rec2_bal > 0 else (profit / 10000.0 * 100.0)
+
             outcome = TradeOutcome(
                 ticket=ticket,
                 symbol=symbol,
@@ -720,11 +747,12 @@ async def recover_unclosed_trades(client) -> None:
                 volume=float(entry.get("volume") or 0.01),
                 profit=profit,
                 profit_pips=round(pips, 1),
-                profit_pct=0.0,
+                profit_pct=round(_rec2_pct, 4),
                 outcome=outcome_type,
                 open_time=entry.get("open_time", ""),
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
+                mode=entry.get("account_mode") or current_mode(),
                 extra={"source": "live"},
             )
             memory.record(outcome)
@@ -880,17 +908,19 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     _cx = _gmc()
                     return _OMx(_cx) if _cx else None
 
-                def _try_trail(new_sl: float) -> None:
-                    """Move SL only if it improves (never widen the stop)."""
+                async def _try_trail(new_sl: float) -> None:
+                    """Move SL only if it improves (never widen the stop).
+                    Runs modify_position via asyncio.to_thread so the event loop
+                    is not blocked by the blocking MT5 SDK call."""
                     om = _get_om()
                     if not om:
                         return
                     _rounded = round(new_sl, _sym_digits)
                     if direction == "BUY" and _rounded > pos.sl + 1e-9:
-                        om.modify_position(ticket, sl=_rounded)
+                        await asyncio.to_thread(om.modify_position, ticket, _rounded)
                         logger.info(f"Trail SL → {_rounded} | #{ticket} {signal.get('symbol')}")
                     elif direction == "SELL" and (pos.sl == 0 or _rounded < pos.sl - 1e-9):
-                        om.modify_position(ticket, sl=_rounded)
+                        await asyncio.to_thread(om.modify_position, ticket, _rounded)
                         logger.info(f"Trail SL → {_rounded} | #{ticket} {signal.get('symbol')}")
 
                 async def _get_atr(timeframe: str, period: int = 14) -> float:
@@ -940,8 +970,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         try:
                             om = _get_om()
                             if om and entry_px:
-                                om.partial_close(ticket, 0.5)
-                                om.modify_position(ticket, sl=entry_px, tp=tp2)
+                                await asyncio.to_thread(om.partial_close, ticket, 0.5)
+                                await asyncio.to_thread(om.modify_position, ticket, entry_px, tp2)
                                 logger.info(
                                     f"TP1 partial-close fired: #{ticket} {signal.get('symbol')} "
                                     f"BE={entry_px} → targeting TP2={tp2}"
@@ -961,7 +991,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                             max(pos.price_current - _trail_dist, entry_px) if direction == "BUY"
                             else min(pos.price_current + _trail_dist, entry_px)
                         )
-                        _try_trail(_new_sl)
+                        await _try_trail(_new_sl)
                     except Exception as _te:
                         logger.debug(f"Day trail failed #{ticket}: {_te}")
 
@@ -986,7 +1016,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                             try:
                                 om = _get_om()
                                 if om and entry_px:
-                                    om.modify_position(ticket, sl=entry_px)
+                                    await asyncio.to_thread(om.modify_position, ticket, entry_px)
                                     logger.info(
                                         f"Swing BE fired: #{ticket} {signal.get('symbol')} "
                                         f"SL → entry {entry_px}"
@@ -1001,7 +1031,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                 max(pos.price_current - _trail_dist, entry_px) if direction == "BUY"
                                 else min(pos.price_current + _trail_dist, entry_px)
                             )
-                            _try_trail(_new_sl)
+                            await _try_trail(_new_sl)
                         except Exception as _te:
                             logger.debug(f"Swing trail failed #{ticket}: {_te}")
 
@@ -1025,40 +1055,53 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             entry_px   = float(signal.get("fill_price") or signal.get("entry_price", 0))
             sym        = signal["symbol"]
             pip_val    = 0.0001 if "JPY" not in sym else 0.01
-            # Outcome-matching tolerance: max(0.1% of price, 3 pips).
-            # This handles all instrument classes without a hardcoded list:
-            #   forex (~1.10)  → max(0.0011, 0.0003) = 0.0011
-            #   gold  (~3000)  → max(3.0,    0.0003) = 3.0
-            #   ETH   (~2000)  → max(2.0,    0.0003) = 2.0
-            #   SOL   (~89)    → max(0.089,  0.0003) = 0.089
-            #   SILVER(~67)    → max(0.067,  0.0003) = 0.067
-            tol = max(abs(close_px) * 0.001, pip_val * 3)
+            # Outcome-matching tolerance: max(0.01% of price, 2 pips).
+            # 0.001 (0.1%) was too wide — for EURJPY at ~184 it yielded 18.4 pips,
+            # which exceeded the SL-TP gap on tight scalping setups and caused SL
+            # hits to be mislabelled as TP hits.  0.0001 (0.01%) is sufficient to
+            # absorb normal broker slippage on all instrument classes:
+            #   forex (~1.10)  → max(0.00011, 0.0002) = 0.0002  (2 pips)
+            #   JPY   (~184)   → max(0.01840, 0.0200) = 0.0200  (2 pips)
+            #   gold  (~4400)  → max(0.44,   0.0002) = 0.44
+            #   ETH   (~2000)  → max(0.20,   0.0002) = 0.20
+            tol = max(abs(close_px) * 0.0001, pip_val * 2)
             direction  = signal["direction"].upper()
             pips       = ((close_px - entry_px) if direction == "BUY" else (entry_px - close_px)) / pip_val
             # Use deal.time corrected for broker server-clock offset to store true UTC
             # _srv_offset was fetched once before the loop (H-6 fix)
             close_time = datetime.fromtimestamp(deal.time - _srv_offset, tz=timezone.utc).isoformat()
 
-            # Determine outcome type
+            # Determine outcome type using direction-aware comparison.
+            # Bidirectional abs() checks were also wrong: for a BUY, a TP check
+            # should only fire when close_px is AT OR ABOVE the target, not below.
             sl = float(signal.get("sl", 0))
             tp = float(signal.get("tp") or 0)
             tp2_sig = float(signal.get("tp2") or 0)
             # Day trading: after TP1 partial-close fires the runner targets tp2.
             # _tp1_triggered carries over from the polling loop above.
             _check_tp = tp2_sig if _tp1_triggered and tp2_sig else tp
-            if _check_tp and abs(close_px - _check_tp) <= tol:
-                outcome_type = "tp_hit"
-            elif sl and abs(close_px - sl) <= tol:
-                outcome_type = "sl_hit"
-            elif profit > 0:
-                # EA/ATR trailing stop locked in profit, or price closed at an
-                # unrecognised TP level (slippage, partial closes, etc.)
-                outcome_type = "tp_hit"
-            elif profit < 0:
-                # Trailing stop hit at loss, or slippage past SL.
-                outcome_type = "sl_hit"
-            else:
-                outcome_type = "manual_close"  # breakeven or confirmed manual
+            if direction == "BUY":
+                if _check_tp and close_px >= _check_tp - tol:
+                    outcome_type = "tp_hit"
+                elif sl and close_px <= sl + tol:
+                    outcome_type = "sl_hit"
+                elif profit > 0:
+                    outcome_type = "tp_hit"
+                elif profit < 0:
+                    outcome_type = "sl_hit"
+                else:
+                    outcome_type = "manual_close"
+            else:  # SELL
+                if _check_tp and close_px <= _check_tp + tol:
+                    outcome_type = "tp_hit"
+                elif sl and close_px >= sl - tol:
+                    outcome_type = "sl_hit"
+                elif profit > 0:
+                    outcome_type = "tp_hit"
+                elif profit < 0:
+                    outcome_type = "sl_hit"
+                else:
+                    outcome_type = "manual_close"
 
             # H-1 fix: derive close_dt from close_time (already broker-offset-corrected)
             # rather than raw deal.time so both endpoints share the same UTC clock.
@@ -1090,6 +1133,12 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         f"signal={_signal_entry} fill={_fill} → {_slippage_pips} pips"
                     )
 
+            try:
+                from engine.account_store import current_mode as _poll_cm
+                _poll_mode = _poll_cm()
+            except Exception:
+                _poll_mode = "live"
+
             outcome = TradeOutcome(
                 ticket=ticket,
                 symbol=signal["symbol"],
@@ -1109,6 +1158,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 open_time=open_time,
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
+                mode=signal.get("account_mode") or _poll_mode,
                 extra={"source": "live", "slippage_pips": _slippage_pips},
             )
             memory.record(outcome)

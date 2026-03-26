@@ -198,7 +198,27 @@ class PaperTradeEngine:
                     _open_iso  = datetime.fromtimestamp(pos.open_time,  tz=_tz.utc).isoformat()
                     _close_iso = datetime.fromtimestamp(pos.close_time, tz=_tz.utc).isoformat()
                     _dur_mins  = (pos.close_time - pos.open_time) / 60.0
-                    _outcome_t = "tp_hit" if pos.profit > 0 else "sl_hit"
+                    # Determine outcome by comparing actual close price to SL/TP.
+                    # Using profit sign alone is unreliable — pos.profit is the last
+                    # floating P&L from the previous sync cycle, which may be stale
+                    # (e.g. price briefly went positive then reversed and hit SL).
+                    _pip_val_pt = 0.01 if "JPY" in (pos.symbol or "") else 0.0001
+                    _tol_pt = max(abs(pos.close_price) * 0.0001, _pip_val_pt * 2)
+                    _dir_up = pos.direction.upper() == "BUY"
+                    if _dir_up:
+                        if pos.tp_price and pos.close_price >= pos.tp_price - _tol_pt:
+                            _outcome_t = "tp_hit"
+                        elif pos.sl_price and pos.close_price <= pos.sl_price + _tol_pt:
+                            _outcome_t = "sl_hit"
+                        else:
+                            _outcome_t = "tp_hit" if pos.profit > 0 else "sl_hit"
+                    else:
+                        if pos.tp_price and pos.close_price <= pos.tp_price + _tol_pt:
+                            _outcome_t = "tp_hit"
+                        elif pos.sl_price and pos.close_price >= pos.sl_price - _tol_pt:
+                            _outcome_t = "sl_hit"
+                        else:
+                            _outcome_t = "tp_hit" if pos.profit > 0 else "sl_hit"
                     _bal_pt    = 0.0
                     try:
                         from engine.risk_manager import risk_manager as _rm_pt
