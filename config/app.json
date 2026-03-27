@@ -31,7 +31,7 @@
   },
   "ai": {
     "price_prediction_enabled": true,
-    "confidence_filter_enabled": false,
+    "confidence_filter_enabled": true,
     "confidence_threshold": 60,
     "rl_agent_enabled": true,
     "scorer_weights": {
