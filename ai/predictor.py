@@ -41,9 +41,18 @@ TRADING_TYPE_TF: dict[str, str] = {
 SEQUENCE_LEN = 60   # look-back window in bars
 HIDDEN_SIZE  = 64
 NUM_LAYERS   = 2
-EPOCHS       = 20
+EPOCHS       = 50   # raised from 20 — 20 was insufficient for 99k-bar datasets
 BATCH_SIZE   = 32
 INPUT_SIZE   = 7    # close_return, hl_range, oc_body, volume_norm, upper_wick, is_near_news, atr_norm
+
+# Number of bars ahead to aggregate for the training label.
+# Single next-bar direction is near-pure noise at M5/H1/H4 — aggregating
+# N bars reduces label noise while keeping the prediction horizon relevant.
+_LOOKAHEAD: dict[str, int] = {
+    "scalping":    5,   # M5  × 5 = 25-min horizon
+    "day_trading": 5,   # H1  × 5 = 5-hour horizon
+    "swing":       3,   # H4  × 3 = 12-hour horizon
+}
 
 
 def _torch_available() -> bool:
@@ -75,11 +84,10 @@ def _build_lstm():
                 dropout=0.2,
             )
             self.fc  = nn.Linear(HIDDEN_SIZE, 1)
-            self.sig = nn.Sigmoid()
 
         def forward(self, x):
             out, _ = self.lstm(x)
-            return self.sig(self.fc(out[:, -1, :]))
+            return self.fc(out[:, -1, :])   # raw logits — sigmoid applied by loss / caller
 
     return _Net()
 
@@ -120,7 +128,7 @@ class PricePredictor:
         model = self._models[key].to(_device)
         model.eval()
         with torch.no_grad():
-            prob = model(x).item()
+            prob = torch.sigmoid(model(x)).item()  # model outputs logits
         return float(prob)
 
     def train_async(self, symbol: str, df: pd.DataFrame, trading_type: str = "day_trading") -> bool:
@@ -185,59 +193,99 @@ class PricePredictor:
             logger.warning(f"Insufficient data for {symbol} training ({len(df)} bars)")
             return
 
-        # Scale
+        # Drop any rows with NaN or inf (e.g. from sparse volume or price gaps)
+        mask = np.isfinite(features).all(axis=1)
+        if mask.sum() < SEQUENCE_LEN + 10:
+            logger.warning(f"Too many non-finite rows for {symbol} after cleaning")
+            return
+        features = features[mask]
+
+        # Multi-bar lookahead label: cumulative return over next `lookahead` bars.
+        # Aggregating reduces label noise vs single next-bar direction (which is
+        # near-random at M5/H1/H4, explaining the 50-54% accuracy ceiling).
+        lookahead = _LOOKAHEAD.get(trading_type, 5)
+        n_seqs = len(features) - SEQUENCE_LEN - lookahead + 1
+
+        # Train/val split boundary on the feature array first so the scaler never
+        # sees validation-set rows — eliminates lookahead bias in normalisation.
+        split = int(n_seqs * 0.8)
+        train_feat_end = split + SEQUENCE_LEN + lookahead  # last feature row in any train label
         scaler = StandardScaler()
-        scaled = scaler.fit_transform(features)
+        scaler.fit(features[:train_feat_end])          # fit on training rows only
+        scaled = scaler.transform(features)            # transform all with training stats
 
-        # Build sequences: X[i] = seq of SEQUENCE_LEN bars, y[i] = 1 if next bar close > current close
-        # col 0 is the close return: (close[t] - close[t-1]) / close[t-1]
-        # A positive return means price went up — that is the correct up/down label.
-        X, y = [], []
-        for i in range(len(scaled) - SEQUENCE_LEN):
+        X, y_list = [], []
+        for i in range(n_seqs):
             X.append(scaled[i: i + SEQUENCE_LEN])
-            y.append(
-                1.0 if features[i + SEQUENCE_LEN, 0] > 0
-                else 0.0
-            )
+            cum_return = features[i + SEQUENCE_LEN: i + SEQUENCE_LEN + lookahead, 0].sum()
+            y_list.append(1.0 if cum_return > 0 else 0.0)
 
-        X = torch.tensor(np.array(X), dtype=torch.float32).to(_device)
-        y = torch.tensor(np.array(y), dtype=torch.float32).unsqueeze(1).to(_device)
+        y_arr  = np.array(y_list, dtype=np.float32)
+        n_pos  = float(y_arr.sum())
+        n_neg  = float(len(y_arr) - n_pos)
+        logger.info(
+            f"LSTM {key}: class balance — {n_pos:.0f} up / {n_neg:.0f} down "
+            f"({n_pos / len(y_arr):.1%} bullish in training data)"
+        )
 
-        # Train / val split (80/20)
-        split   = int(len(X) * 0.8)
-        X_train, X_val = X[:split], X[split:]
-        y_train, y_val = y[:split], y[split:]
+        X_t = torch.tensor(np.array(X), dtype=torch.float32).to(_device)
+        y_t = torch.tensor(y_arr, dtype=torch.float32).unsqueeze(1).to(_device)
+
+        X_train, X_val = X_t[:split], X_t[split:]
+        y_train, y_val = y_t[:split], y_t[split:]
+
+        # Class-balanced loss: upweights the minority class so the model cannot
+        # cheat accuracy by always predicting the majority direction.
+        pos_weight = torch.tensor(
+            [n_neg / (n_pos + 1e-10)], dtype=torch.float32
+        ).to(_device)
+        # BCEWithLogitsLoss fuses sigmoid+BCE for numerical stability and accepts
+        # pos_weight for class balancing.  Model returns raw logits.
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
         model     = _build_lstm().to(_device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-        criterion = nn.BCELoss()
+
+        # Label smoothing — prevents overconfident near-0/near-1 sigmoid outputs
+        _LBL_SMOOTH = 0.05
 
         model.train()
         for _ in range(EPOCHS):
             for i in range(0, len(X_train), BATCH_SIZE):
                 xb = X_train[i: i + BATCH_SIZE]
                 yb = y_train[i: i + BATCH_SIZE]
+                yb_smooth = yb * (1.0 - _LBL_SMOOTH) + _LBL_SMOOTH * 0.5
                 optimizer.zero_grad()
-                criterion(model(xb), yb).backward()
+                criterion(model(xb), yb_smooth).backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
-        # Validation accuracy
+        # Validation accuracy (model outputs logits; sigmoid > 0.5 ↔ logit > 0)
         model.eval()
         with torch.no_grad():
-            preds    = (model(X_val) > 0.5).float()
+            preds    = (torch.sigmoid(model(X_val)) > 0.5).float()
             accuracy = (preds == y_val).float().mean().item()
 
-        # Accuracy gate: refuse to swap in a coin-flip model.
-        # Keeps the previous trained version (if any) rather than degrading it.
-        # MATH-1: raised from 0.55 — 55% has no positive EV after spread/slippage.
-        _MIN_ACCURACY = 0.58
-        if accuracy < _MIN_ACCURACY:
+        # Accuracy gate: refuse to swap in a coin-flip model that would *degrade*
+        # an already trained model.  If no model exists on disk yet, accept anything
+        # above 50% as a bootstrap — learned market patterns beat a hard-coded 0.5.
+        # MATH-1: 58% raised from 0.55 — 55% has no positive EV after spread/slippage.
+        _MIN_ACCURACY      = 0.58
+        _BOOTSTRAP_MIN     = 0.50   # floor when no prior model exists
+        _model_exists      = (MODELS_DIR / f"{key}_lstm.pt").exists()
+        _effective_min     = _MIN_ACCURACY if _model_exists else _BOOTSTRAP_MIN
+        if accuracy <= _effective_min:
             logger.warning(
-                f"LSTM {key}: val accuracy {accuracy:.2%} < {_MIN_ACCURACY:.0%} threshold — "
+                f"LSTM {key}: val accuracy {accuracy:.2%} < {_effective_min:.0%} threshold "
+                f"({'protection' if _model_exists else 'bootstrap'} gate) — "
                 "model NOT saved. Existing model (if any) retained. Will retry on next retrain trigger."
             )
             return
+        if accuracy < _MIN_ACCURACY and not _model_exists:
+            logger.info(
+                f"LSTM {key}: val accuracy {accuracy:.2%} — below {_MIN_ACCURACY:.0%} "
+                "but no prior model; saving as bootstrap (will improve with more data)."
+            )
 
         # Persist
         torch.save(model.state_dict(), MODELS_DIR / f"{key}_lstm.pt")

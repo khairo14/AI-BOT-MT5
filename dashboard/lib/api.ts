@@ -150,10 +150,10 @@ export const fetchMemoryStats = (tradingType?: string) => {
 export const fetchOptimizerStatus = () =>
   api.get("/ai/optimizer/status").then((r) => r.data);
 
-export const trainSymbol = (symbol: string, tradingType: string, bars = 1000) =>
+export const trainSymbol = (symbol: string, tradingType: string, bars = 0) =>
   api.post(`/ai/train/${symbol}`, { trading_type: tradingType, bars }).then((r) => r.data);
 
-export const trainAllSymbols = (bars = 1000) =>
+export const trainAllSymbols = (bars = 0) =>
   api.post("/ai/train/all", { bars }).then((r) => r.data);
 
 export const runOptimizer = (strategy: string, symbol: string, tradingType: string, bars = 1500) =>

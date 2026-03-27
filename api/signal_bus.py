@@ -79,6 +79,13 @@ def _get_bus_app_cfg() -> dict:
 _retrain_last_triggered: dict[str, float] = {}
 _RETRAIN_DEDUP_SECS = 120   # 2-minute cooldown window per key
 
+# Bar counts for auto-retrain — match run_retrain.py (MT5 per-request limit ~99k for M5)
+_RETRAIN_BARS: dict[str, int] = {
+    "scalping":    99_000,  # M5  ≈ 1 yr
+    "day_trading": 17_000,  # H1  ≈ 2 yr
+    "swing":        5_000,  # H4  ≈ 2 yr
+}
+
 
 def _set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Called once at startup so the thread executor can schedule coroutines safely."""
@@ -455,6 +462,7 @@ class SignalBus:
                         account_mode=current_mode(),
                         comment=signal.get("strategy", ""),
                         event="open",
+                        confidence=float(signal.get("confidence") or 0.5),
                     )
                 except Exception:
                     pass
@@ -545,6 +553,7 @@ class SignalBus:
                         account_mode=current_mode(),
                         comment=signal.get("strategy", ""),
                         event="open",
+                        confidence=float(signal.get("confidence") or 0.5),
                     )
                 except Exception:
                     pass
@@ -758,7 +767,7 @@ async def recover_unclosed_trades(client) -> None:
                 strategy=entry.get("comment", "unknown"),
                 trading_type=trading_type,
                 direction=direction,
-                confidence=0.5,
+                confidence=float(entry.get("confidence") or 0.5),
                 entry_price=entry_px,
                 close_price=close_px,
                 sl_price=sl,
@@ -807,7 +816,7 @@ async def recover_unclosed_trades(client) -> None:
             "sl":           entry.get("sl"),
             "tp":           entry.get("tp"),
             "lot_size":     entry.get("volume"),
-            "confidence":   0.5,
+            "confidence":   float(entry.get("confidence") or 0.5),
         }
         asyncio.create_task(
             _poll_outcome(ticket=entry["ticket"], signal=fake_signal, client=client)
@@ -1324,7 +1333,10 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     from api.main import get_mt5_client
                     _client = get_mt5_client()
                     if _client and _client.is_connected():
-                        _df = await asyncio.to_thread(_client.get_ohlcv, _sym, _tf_str, 1000)
+                        _df = await asyncio.to_thread(
+                            _client.get_ohlcv, _sym, _tf_str,
+                            _RETRAIN_BARS.get(_type, 5_000)
+                        )
                         if _df is not None and not _df.empty:
                             _retrain_last_triggered[_key] = time.monotonic()   # stamp dedup timer
                             predictor.train_async(_sym, _df, _type)
@@ -1343,7 +1355,10 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     from api.main import get_mt5_client as _gclient
                     _client2 = _gclient()
                     if _client2 and _client2.is_connected():
-                        _df2 = await asyncio.to_thread(_client2.get_ohlcv, _sym, _tf_str2, 3000)
+                        _df2 = await asyncio.to_thread(
+                            _client2.get_ohlcv, _sym, _tf_str2,
+                            _RETRAIN_BARS.get(trading_type, 5_000)
+                        )
                         if _df2 is not None and not _df2.empty:
                             _opt.optimize_async(_strat, _sym, _df2, trading_type)
                             logger.info(f"Auto param optimizer triggered: {_strat}/{_sym}")

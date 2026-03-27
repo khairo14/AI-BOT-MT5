@@ -59,6 +59,7 @@ class TradeJournal:
         open_time: Optional[str] = None,
         close_time: Optional[str] = None,
         event: Literal["open", "close"] = "open",
+        confidence: Optional[float] = None,
     ) -> None:
         """Append a trade event to the journal."""
         record = {
@@ -79,6 +80,7 @@ class TradeJournal:
             "open_time":    (open_time or datetime.now(tz=timezone.utc).isoformat()) if event == "open" else open_time,
             "close_time":   close_time,
             "logged_at":    datetime.now(tz=timezone.utc).isoformat(),
+            "confidence":   confidence,
         }
         with self._lock:
             try:

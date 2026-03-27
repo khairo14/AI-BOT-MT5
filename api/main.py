@@ -104,6 +104,15 @@ async def lifespan(app: FastAPI):
                 _running_loop,
             )
         _risk_manager._on_circuit_breaker = _on_cb
+        # GAP-1: pre-seed day/week start balance immediately so drawdown protection
+        # is active from the very first trade, not only after update_balance() fires.
+        try:
+            _acct_seed = await asyncio.to_thread(mt5_client.get_account_info)
+            if _acct_seed and _acct_seed.get("balance"):
+                _risk_manager.update_balance(float(_acct_seed["balance"]))
+                logger.info(f"RiskManager: seeded start balance = {_acct_seed['balance']:.2f}")
+        except Exception as _seed_exc:
+            logger.warning(f"RiskManager: balance seed failed: {_seed_exc}")
         # Start the strategy runner background loop (passes the same instance)
         start_runner_loop(mt5_client, order_manager, _risk_manager)
         # Recover close events for any trades that closed while server was offline

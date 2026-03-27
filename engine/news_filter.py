@@ -64,16 +64,44 @@ UTC = timezone.utc
 
 
 def _currencies_for(symbol: str) -> list[str]:
-    """Return the currency codes affected by a symbol."""
-    # Normalize: upper-case, strip common MT5 suffixes
-    upper = symbol.upper().replace(".OQ", "").replace("CASH", "").rstrip(".,;")
-    if upper in _SYMBOL_CURRENCIES:
-        return _SYMBOL_CURRENCIES[upper]
-    # Try with "CASH" suffix preserved (e.g. "US30Cash" → "US30CASH")
-    upper2 = symbol.upper().replace(".OQ", "")
-    if upper2 in _SYMBOL_CURRENCIES:
-        return _SYMBOL_CURRENCIES[upper2]
-    # Indices / stocks / commodities → USD is the base
+    """Return the currency codes affected by a symbol.
+
+    Handles broker-specific suffixes such as:
+      - Trailing digits or letters  (e.g. EURUSD.r, EURUSD2, GBPUSD.p)
+      - .OQ / .N / .a / .b / .Z    (Reuters/broker variants)
+      - Cash suffix                 (US30Cash → US30CASH in map)
+      - MT5 hash suffixes           (XAUUSD#, BTCUSD+)
+
+    Resolution order:
+      1. Exact match in _SYMBOL_CURRENCIES (fastest, most common)
+      2. Strip common broker suffixes and retry
+      3. Prefix match — any key that the normalised symbol starts with
+      4. Fallback: USD (covers unlisted instruments that are USD-denominated)
+    """
+    # Step 1: exact match with light normalisation
+    raw_upper = symbol.upper()
+    for candidate in (
+        raw_upper,
+        raw_upper.replace(".OQ", "").replace("CASH", "").rstrip(".,;#+* "),
+        raw_upper.replace(".OQ", ""),
+    ):
+        if candidate in _SYMBOL_CURRENCIES:
+            return _SYMBOL_CURRENCIES[candidate]
+
+    # Step 2: strip broker suffix patterns and retry
+    import re as _re
+    # Remove trailing non-alpha-digit characters, then trailing digits/letters added by broker
+    stripped = _re.sub(r"[#\+\.\-\*;,]+.*$", "", raw_upper)   # cut at first special char
+    stripped = _re.sub(r"[A-Z]?\d+$", "", stripped)            # strip trailing digit(s) + optional letter
+    if stripped and stripped in _SYMBOL_CURRENCIES:
+        return _SYMBOL_CURRENCIES[stripped]
+
+    # Step 3: prefix match (e.g. "EURUSDPRO" → look for "EURUSD")
+    for key in _SYMBOL_CURRENCIES:
+        if stripped.startswith(key) or raw_upper.startswith(key):
+            return _SYMBOL_CURRENCIES[key]
+
+    # Step 4: fallback — most unlisted instruments are USD-denominated
     return ["USD"]
 
 

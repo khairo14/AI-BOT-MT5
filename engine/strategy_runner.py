@@ -162,7 +162,7 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
     "vwap_reversion":  {"M5": 250},
     "macd_ema_trend":  {"H1": 250, "M15": 250},
     "sr_breakout":     {"H1": 250},
-    "rsi_divergence":  {"M30": 250},
+    "rsi_divergence":  {"M30": 250, "H1": 250},  # H1 needed for LSTM scoring (trained on H1)
     "ema_trend_rider": {"H1": 250, "H4": 250, "D1": 60},
     "fibonacci_rsi":   {"H4": 250},
     "weekly_breakout": {"H4": 250, "D1": 60},
@@ -176,10 +176,25 @@ _PRIMARY_TF: dict[str, str] = {
     "vwap_reversion":  "M5",
     "macd_ema_trend":  "H1",
     "sr_breakout":     "H1",
-    "rsi_divergence":  "M30",  # entry TF is M30 — H1 was wrong: LSTM trained and scored on M30
+    "rsi_divergence":  "H1",  # LSTM trained on H1; M30 data passed to strategy via _dispatch()
     "ema_trend_rider": "H1",
     "fibonacci_rsi":   "H4",
     "weekly_breakout": "H4",
+}
+
+# ── Regime gating ─────────────────────────────────────────────────────────────
+# Whitelist of which strategies may run for each market regime.
+# Strategies absent from the current regime's set are blocked before any
+# strategy logic or parameter selection runs — this directly eliminates
+# structurally losing trades (e.g. vwap_reversion in trending markets was
+# the single biggest P&L drag at -15% total across paper trading history).
+_REGIME_STRATEGIES: dict[str, set[str]] = {
+    "trending_bull":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze"},
+    "trending_bear":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze"},
+    "ranging_low_vol":   {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
+    "ranging_high_vol":  {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
+    "volatile_breakout": {"sr_breakout", "weekly_breakout", "bb_squeeze"},
+    "quiet":             set(),   # no trades in quiet / undefined market
 }
 
 MT5_TF = {
@@ -299,6 +314,15 @@ class StrategyRunner:
         except Exception:
             _regime = None
 
+        # Regime gate — block strategies structurally mismatched with the
+        # current market regime before any strategy logic or param selection runs.
+        if _regime and _regime in _REGIME_STRATEGIES:
+            if strat_name not in _REGIME_STRATEGIES[_regime]:
+                logger.debug(
+                    f"Regime gate blocked {strat_name}/{symbol}: regime={_regime}"
+                )
+                return None
+
         params   = self._strategy_params(strat_name, symbol, regime=_regime)
         strategy = strat_cls(symbol=symbol, params=params)
 
@@ -388,7 +412,7 @@ class StrategyRunner:
                 if rf != 1.0:
                     min_lot = sym_info.get("min_lot", 0.01)
                     lot_step = sym_info.get("lot_step", 0.01)
-                    _intended_lot = round(round(lot * rf / lot_step) * lot_step, 2)
+                    _intended_lot = round(math.floor(lot * rf / lot_step) * lot_step, 8)
                     lot = max(min_lot, _intended_lot)
                     # LOGIC-1: warn when RL reduction is overridden by broker minimum
                     if rf < 1.0 and _intended_lot < min_lot:
@@ -662,6 +686,7 @@ class StrategyRunner:
                     account_mode=current_mode(),
                     comment=sig.comment,
                     event="open",
+                    confidence=sig.confidence,
                 )
             except Exception as _je:
                 logger.warning(f"Journal write failed for {sig.strategy}/{sig.symbol}: {_je}")

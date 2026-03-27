@@ -425,43 +425,44 @@ class RiskManager:
         `open_positions` should be the full list from MT5Client.get_open_positions().
         Pass `symbol` to also enforce the per-symbol concurrent limit.
         """
-        # RISK-3: if a mode-switch happened in the last 1 second, hold new trades
-        # briefly so in-flight orders from the old mode cannot bypass the limit.
-        if self._mode_switch_ts is not None:
-            elapsed = (datetime.now(tz=timezone.utc) - self._mode_switch_ts).total_seconds()
-            if elapsed < 1.0:
-                return False, "Mode switch settling — retry in a moment"
-        mode = trading_mode.lower()
-        limits = self._config["max_concurrent_trades"]
-        mode_limit = limits.get(mode, 999)
-        total_limit = limits.get("total", 999)
-        per_symbol_limit = limits.get("per_symbol", 999)
+        with self._lock:
+            # RISK-3: if a mode-switch happened in the last 1 second, hold new trades
+            # briefly so in-flight orders from the old mode cannot bypass the limit.
+            if self._mode_switch_ts is not None:
+                elapsed = (datetime.now(tz=timezone.utc) - self._mode_switch_ts).total_seconds()
+                if elapsed < 1.0:
+                    return False, "Mode switch settling — retry in a moment"
+            mode = trading_mode.lower()
+            limits = self._config["max_concurrent_trades"]
+            mode_limit = limits.get(mode, 999)
+            total_limit = limits.get("total", 999)
+            per_symbol_limit = limits.get("per_symbol", 999)
 
-        # Count positions tagged with bot magic per mode
-        # Mode is stored in the comment prefix: "scalp|", "day|", "swing|"
-        prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(mode, mode)
-        mode_count = sum(
-            1 for p in open_positions
-            if p.get("comment", "").startswith(prefix)
-        )
-        total_count = len(open_positions)
-
-        if mode_count >= mode_limit:
-            return False, f"{trading_mode} limit reached ({mode_count}/{mode_limit})"
-        if total_count >= total_limit:
-            return False, f"Total position limit reached ({total_count}/{total_limit})"
-
-        if symbol is not None:
-            # Scope per-symbol count to the same trading mode so a day-trade
-            # position on GBPUSD does NOT block a scalping signal on GBPUSD.
-            symbol_count = sum(
+            # Count positions tagged with bot magic per mode
+            # Mode is stored in the comment prefix: "scalp|", "day|", "swing|"
+            prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(mode, mode)
+            mode_count = sum(
                 1 for p in open_positions
-                if p.get("symbol") == symbol and p.get("comment", "").startswith(prefix)
+                if p.get("comment", "").startswith(prefix)
             )
-            if symbol_count >= per_symbol_limit:
-                return False, f"Per-symbol limit reached for {symbol} ({symbol_count}/{per_symbol_limit})"
+            total_count = len(open_positions)
 
-        return True, ""
+            if mode_count >= mode_limit:
+                return False, f"{trading_mode} limit reached ({mode_count}/{mode_limit})"
+            if total_count >= total_limit:
+                return False, f"Total position limit reached ({total_count}/{total_limit})"
+
+            if symbol is not None:
+                # Scope per-symbol count to the same trading mode so a day-trade
+                # position on GBPUSD does NOT block a scalping signal on GBPUSD.
+                symbol_count = sum(
+                    1 for p in open_positions
+                    if p.get("symbol") == symbol and p.get("comment", "").startswith(prefix)
+                )
+                if symbol_count >= per_symbol_limit:
+                    return False, f"Per-symbol limit reached for {symbol} ({symbol_count}/{per_symbol_limit})"
+
+            return True, ""
 
     # ------------------------------------------------------------------
     # Status

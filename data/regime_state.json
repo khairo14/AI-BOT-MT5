@@ -1,8 +1,8 @@
 {
   "labels": {
     "EURUSD": "quiet",
-    "BTCUSD": "trending_bull",
-    "ETHUSD": "trending_bull",
+    "BTCUSD": "volatile_breakout",
+    "ETHUSD": "volatile_breakout",
     "USDJPY": "quiet",
     "GBPUSD": "quiet",
     "XRPUSD": "trending_bear",
@@ -12,79 +12,79 @@
     "USDCHF": "quiet",
     "GBPJPY": "quiet",
     "GOLD": "trending_bear",
-    "OILCash": "volatile_breakout",
+    "OILCash": "trending_bear",
     "Nvidia": "trending_bear",
     "Apple": "trending_bear",
     "Amazon": "trending_bear",
     "USDCAD": "trending_bull",
     "NZDUSD": "trending_bear",
-    "SILVER": "trending_bear",
-    "BRENTCash": "volatile_breakout"
+    "SILVER": "volatile_breakout",
+    "BRENTCash": "trending_bull"
   },
   "pending": {
     "EURUSD": [
       "quiet",
-      6
+      33
     ],
     "BTCUSD": [
-      "trending_bull",
-      312
+      "volatile_breakout",
+      20
     ],
     "ETHUSD": [
-      "trending_bull",
-      312
+      "volatile_breakout",
+      126
     ],
     "USDJPY": [
       "quiet",
-      6
+      150
     ],
     "GBPUSD": [
       "quiet",
-      9
+      36
     ],
     "XRPUSD": [
-      "trending_bull",
+      "volatile_breakout",
       2
     ],
     "SOLUSD": [
-      "trending_bull",
-      468
+      "volatile_breakout",
+      2
     ],
     "EURJPY": [
       "quiet",
-      28017
+      85341
     ],
     "AUDUSD": [
       "trending_bear",
-      2805
+      1527
     ],
     "USDCHF": [
       "quiet",
-      9338
+      28440
     ],
     "GBPJPY": [
       "quiet",
-      42
+      2365
     ],
     "GOLD": [
       "trending_bear",
-      2805
+      8547
     ],
     "OILCash": [
-      "volatile_breakout",
-      51
+      "trending_bear",
+      9
     ],
     "Nvidia": [
       "trending_bear",
-      1558
+      4746
     ],
     "Apple": [
       "trending_bear",
-      2337
+      7119
     ],
     "Amazon": [
-      "trending_bear",
-      2337
+      "trending_bull",
+      1
     ],
     "USDCAD": [
       "trending_bull",
@@ -92,15 +92,15 @@
     ],
     "NZDUSD": [
       "trending_bear",
-      468
+      552
     ],
     "SILVER": [
       "trending_bear",
       2
     ],
     "BRENTCash": [
-      "volatile_breakout",
-      2
+      "trending_bull",
+      5
     ]
   }
 }

@@ -46,6 +46,7 @@ class PaperPosition:
     closed: bool = False
     close_price: float = 0.0
     close_time: float = 0.0
+    confidence: float = 0.5  # signal confidence at entry time (for RL/analytics)
 
 
 class PaperTradeEngine:
@@ -115,6 +116,7 @@ class PaperTradeEngine:
             strategy=sig.strategy,
             trading_type=sig.trading_type,
             current_price=result.open_price or 0.0,
+            confidence=float(sig.confidence) if sig.confidence is not None else 0.5,
         )
         with self._lock:
             self._positions[result.ticket or 0] = pos
@@ -234,7 +236,7 @@ class PaperTradeEngine:
                         strategy=pos.strategy,
                         trading_type=pos.trading_type,
                         direction=pos.direction,
-                        confidence=0.5,
+                        confidence=pos.confidence,
                         entry_price=pos.open_price,
                         close_price=pos.close_price,
                         sl_price=pos.sl_price,
