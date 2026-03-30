@@ -246,6 +246,18 @@ class RegimeClassifier:
             confirmed = self._labels.get(symbol)
             pending_label, pending_count = self._pending.get(symbol, (raw, 0))
 
+            # Immediate live recovery from the quiet label.
+            # If the confirmed state is quiet but the new raw regime is no longer
+            # quiet, promote it without waiting for 3 quiet-exit bars.
+            if confirmed == "quiet" and raw != "quiet":
+                self._labels[symbol] = raw
+                self._pending[symbol] = (raw, 1)
+                self._save_state()
+                logger.debug(
+                    f"Regime [{symbol}]: quiet exited immediately -> {raw}"
+                )
+                return raw
+
             if raw == pending_label:
                 pending_count += 1
             else:
