@@ -86,12 +86,14 @@ _RETRAIN_BARS: dict[str, int] = {
     "swing":        5_000,  # H4  ≈ 2 yr
 }
 
-# Bar counts for auto-optimizer triggers — recent data only for fast regime adaptation.
-# When win_rate drops, re-optimize on recent history to adapt quickly (vs. full 2-year backtest).
+# Bar counts for auto-optimizer triggers — same as manual (full 2-year dataset).
+# Option A: Both manual and auto use 2-year data for robustness.
+# Avoids overwriting robust long-term params with recent drawdown data.
+# Frequency: 20 trades + 24hr cooldown ensures fast-enough adaptation without thrashing.
 _AUTO_OPT_BARS: dict[str, int] = {
-    "scalping":    15_000,  # M5  ≈ 4-5 months  (fast adaptation to volatility regime)
-    "day_trading":   750,   # H1  ≈ 6 weeks     (adapt to trend direction changes)
-    "swing":         150,   # H4  ≈ 1 month     (adapt to pattern frequency)
+    "scalping":    99_000,  # M5  ≈ 2 years
+    "day_trading": 17_000,  # H1  ≈ 2 years
+    "swing":        5_000,  # H4  ≈ 2 years
 }
 
 
