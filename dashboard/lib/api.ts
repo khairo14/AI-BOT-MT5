@@ -156,10 +156,10 @@ export const trainSymbol = (symbol: string, tradingType: string, bars = 0) =>
 export const trainAllSymbols = (bars = 0) =>
   api.post("/ai/train/all", { bars }).then((r) => r.data);
 
-export const runOptimizer = (strategy: string, symbol: string, tradingType: string, bars = 1500) =>
+export const runOptimizer = (strategy: string, symbol: string, tradingType: string, bars = 0) =>
   api.post(`/ai/optimizer/run/${strategy}/${symbol}`, { trading_type: tradingType, bars }).then((r) => r.data);
 
-export const runOptimizerAll = (bars = 1500) =>
+export const runOptimizerAll = (bars = 0) =>
   api.post("/ai/optimizer/run/all", { bars }).then((r) => r.data);
 
 // ── Risk / Circuit Breaker -------------------------------------------------

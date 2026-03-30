@@ -79,11 +79,19 @@ def _get_bus_app_cfg() -> dict:
 _retrain_last_triggered: dict[str, float] = {}
 _RETRAIN_DEDUP_SECS = 120   # 2-minute cooldown window per key
 
-# Bar counts for auto-retrain — match run_retrain.py (MT5 per-request limit ~99k for M5)
+# Bar counts for auto-retrain (LSTM) — match run_retrain.py (MT5 per-request limit ~99k for M5)
 _RETRAIN_BARS: dict[str, int] = {
     "scalping":    99_000,  # M5  ≈ 1 yr
     "day_trading": 17_000,  # H1  ≈ 2 yr
     "swing":        5_000,  # H4  ≈ 2 yr
+}
+
+# Bar counts for auto-optimizer triggers — recent data only for fast regime adaptation.
+# When win_rate drops, re-optimize on recent history to adapt quickly (vs. full 2-year backtest).
+_AUTO_OPT_BARS: dict[str, int] = {
+    "scalping":    15_000,  # M5  ≈ 4-5 months  (fast adaptation to volatility regime)
+    "day_trading":   750,   # H1  ≈ 6 weeks     (adapt to trend direction changes)
+    "swing":         150,   # H4  ≈ 1 month     (adapt to pattern frequency)
 }
 
 
@@ -1344,8 +1352,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             except Exception as _exc:
                 logger.debug(f"Auto LSTM retrain skipped: {_exc}")
 
-            # ── Auto param optimizer ──────────────────────────────────────────
-            # Trigger when enough trades exist and win_rate suggests re-optimization
+            # ── Auto param optimizer (recent data) ───────────────────────────────
+            # Trigger when enough trades exist and win_rate suggests re-optimization.
+            # Uses recent 3-6 month data only (not full 2-year) for FAST adaptation
+            # to current market regime — avoids expensive backtest when parameters
+            # are underperforming due to market shift.
             try:
                 from ai.param_optimizer import optimizer as _opt
                 _strat = signal.get("strategy", "")
@@ -1357,11 +1368,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     if _client2 and _client2.is_connected():
                         _df2 = await asyncio.to_thread(
                             _client2.get_ohlcv, _sym, _tf_str2,
-                            _RETRAIN_BARS.get(trading_type, 5_000)
+                            _AUTO_OPT_BARS.get(trading_type, 150)  # Use recent data, not 2-year
                         )
                         if _df2 is not None and not _df2.empty:
                             _opt.optimize_async(_strat, _sym, _df2, trading_type)
-                            logger.info(f"Auto param optimizer triggered: {_strat}/{_sym}")
+                            logger.info(f"Auto param optimizer triggered (recent {_AUTO_OPT_BARS.get(trading_type, 150)} bars): {_strat}/{_sym}")
             except Exception as _exc2:
                 logger.debug(f"Auto param optimizer skipped: {_exc2}")
 
