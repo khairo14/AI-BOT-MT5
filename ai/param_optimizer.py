@@ -25,6 +25,7 @@ so optimizations take effect on the next strategy run without restart.
 
 from __future__ import annotations
 
+import collections
 import itertools
 import json
 import threading
@@ -368,6 +369,7 @@ class ParamOptimizer:
     def __init__(self):
         self._lock    = threading.Lock()
         self._running: set[str] = set()  # keys currently being optimized
+        self._queue: collections.deque = collections.deque()  # (strategy_name, symbol, df, trading_type) tuples pending
         self._status: dict[str, dict] = {}  # key → status dict
         self._load_status()
 
@@ -380,25 +382,33 @@ class ParamOptimizer:
         df: pd.DataFrame,
         trading_type: str,
     ) -> bool:
-        """Start background optimization. Returns False if already running or at concurrency limit."""
+        """Start background optimization or queue if at limit. Returns False if already running/queued (duplicate)."""
         key = f"{strategy_name}__{symbol}"
         with self._lock:
+            # Prevent duplicates: already running or already in queue
             if key in self._running:
+                logger.info(f"Optimizer already running for {key}")
                 return False
-            if len(self._running) >= MAX_CONCURRENT_OPT:
-                logger.info(
-                    f"Optimizer at max concurrency ({MAX_CONCURRENT_OPT}), skipping {key}"
+            if any(item[1] == symbol and item[0] == strategy_name for item in self._queue):
+                logger.info(f"Optimizer already queued for {key}")
+                return False
+            
+            # If we have capacity, start immediately
+            if len(self._running) < MAX_CONCURRENT_OPT:
+                self._running.add(key)
+                t = threading.Thread(
+                    target=self._optimize,
+                    args=(strategy_name, symbol, df, trading_type, key),
+                    daemon=True,
                 )
-                return False
-            self._running.add(key)
-        t = threading.Thread(
-            target=self._optimize,
-            args=(strategy_name, symbol, df, trading_type, key),
-            daemon=True,
-        )
-        t.start()
-        logger.info(f"Param optimizer started: {strategy_name}/{symbol} ({len(df)} bars)")
-        return True
+                t.start()
+                logger.info(f"Param optimizer started: {strategy_name}/{symbol} ({len(df)} bars)")
+                return True
+            else:
+                # Queue it for later
+                self._queue.append((strategy_name, symbol, df, trading_type))
+                logger.info(f"Optimizer queued (position {len(self._queue)}): {key}")
+                return True
 
     def get_params(self, strategy_name: str, symbol: str = "", regime: str | None = None) -> dict:
         """Return best known params for a strategy+symbol.
@@ -465,8 +475,9 @@ class ParamOptimizer:
         with self._lock:
             completed = dict(self._status)
             running   = set(self._running)
-        # Merge: add a `running` flag to in-progress jobs
-        result = {k: {**v, "running": False} for k, v in completed.items()}
+            queued    = [(s, sym) for s, sym, _, _ in self._queue]  # extract strategy_name and symbol
+        # Merge: add `running` and `queued` flags
+        result = {k: {**v, "running": False, "queued": False} for k, v in completed.items()}
         for key in running:
             if key in result:
                 result[key]["running"] = True
@@ -477,10 +488,38 @@ class ParamOptimizer:
                     "strategy": parts[0] if parts else key,
                     "symbol":   parts[1] if len(parts) > 1 else "",
                     "running":  True,
+                    "queued":   False,
+                }
+        for strat, sym in queued:
+            key = f"{strat}__{sym}"
+            if key in result:
+                result[key]["queued"] = True
+            else:
+                result[key] = {
+                    "strategy": strat,
+                    "symbol":   sym,
+                    "running":  False,
+                    "queued":   True,
                 }
         return result
 
     # ── Internal ─────────────────────────────────────────────────────────────
+
+    def _process_queue(self) -> None:
+        """Pop next job from queue and start it if there's capacity."""
+        with self._lock:
+            if not self._queue or len(self._running) >= MAX_CONCURRENT_OPT:
+                return
+            strategy_name, symbol, df, trading_type = self._queue.popleft()
+            key = f"{strategy_name}__{symbol}"
+            self._running.add(key)
+        t = threading.Thread(
+            target=self._optimize,
+            args=(strategy_name, symbol, df, trading_type, key),
+            daemon=True,
+        )
+        t.start()
+        logger.info(f"Param optimizer started from queue: {strategy_name}/{symbol} ({len(df)} bars)")
 
     def _optimize(
         self,
@@ -530,6 +569,8 @@ class ParamOptimizer:
         finally:
             with self._lock:
                 self._running.discard(key)
+            # Try to process queued jobs now that a slot is free
+            self._process_queue()
 
     def _run_backtest(
         self,

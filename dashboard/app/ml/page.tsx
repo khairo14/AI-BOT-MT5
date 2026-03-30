@@ -49,6 +49,7 @@ type OptimizerJob = {
   best_params?: Record<string, unknown>;
   bars_used?: number;
   running?: boolean;
+  queued?: boolean;
 };
 type OptimizerStatus = {
   jobs?: Record<string, OptimizerJob>;
@@ -407,6 +408,8 @@ export default function MLPage() {
                           <td className="py-2 pr-4">
                             {job.running ? (
                               <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-900 text-amber-300 animate-pulse">Running…</span>
+                            ) : job.queued ? (
+                              <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-900 text-blue-300">Queued</span>
                             ) : (
                               job.best_score != null ? job.best_score.toFixed(3) : "—"
                             )}
