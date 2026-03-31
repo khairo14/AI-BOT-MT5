@@ -1,17 +1,17 @@
 {
   "scalping": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "EURUSD",
       "USDJPY",
       "GBPUSD",
-      "EURJPY",
-      "USDCHF"
+      "USDCHF",
+      "EURJPY"
     ],
     "timeframe": "M1/M5"
   },
   "day_trading": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "EURUSD",
       "GBPUSD",
@@ -20,14 +20,14 @@
       "GBPJPY",
       "GOLD",
       "OILCash",
-      "Nvidia",
-      "Apple",
-      "Amazon"
+      "BTCUSD",
+      "ETHUSD",
+      "US100Cash"
     ],
     "timeframe": "M15/H1"
   },
   "swing": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "BTCUSD",
       "ETHUSD",

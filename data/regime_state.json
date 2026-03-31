@@ -1,90 +1,91 @@
 {
   "labels": {
     "EURUSD": "quiet",
-    "BTCUSD": "volatile_breakout",
-    "ETHUSD": "volatile_breakout",
+    "BTCUSD": "trending_bear",
+    "ETHUSD": "trending_bear",
     "USDJPY": "quiet",
     "GBPUSD": "quiet",
     "XRPUSD": "trending_bear",
-    "SOLUSD": "trending_bull",
+    "SOLUSD": "trending_bear",
     "EURJPY": "quiet",
     "AUDUSD": "trending_bear",
     "USDCHF": "quiet",
-    "GBPJPY": "quiet",
+    "GBPJPY": "trending_bear",
     "GOLD": "trending_bear",
-    "OILCash": "trending_bear",
+    "OILCash": "trending_bull",
     "Nvidia": "trending_bear",
     "Apple": "trending_bear",
     "Amazon": "trending_bear",
     "USDCAD": "trending_bull",
     "NZDUSD": "trending_bear",
-    "SILVER": "volatile_breakout",
-    "BRENTCash": "trending_bull"
+    "SILVER": "trending_bear",
+    "BRENTCash": "trending_bull",
+    "US100Cash": "trending_bear"
   },
   "pending": {
     "EURUSD": [
       "quiet",
-      33
+      90
     ],
     "BTCUSD": [
-      "volatile_breakout",
-      20
+      "trending_bear",
+      742
     ],
     "ETHUSD": [
-      "volatile_breakout",
-      126
+      "trending_bear",
+      2456
     ],
     "USDJPY": [
       "quiet",
-      150
+      90
     ],
     "GBPUSD": [
       "quiet",
-      36
+      15
     ],
     "XRPUSD": [
-      "volatile_breakout",
-      2
+      "trending_bear",
+      1209
     ],
     "SOLUSD": [
-      "volatile_breakout",
-      2
+      "trending_bear",
+      918
     ],
     "EURJPY": [
       "quiet",
-      85341
+      244358
     ],
     "AUDUSD": [
       "trending_bear",
-      1527
+      17463
     ],
     "USDCHF": [
       "quiet",
-      28440
+      25828
     ],
     "GBPJPY": [
-      "quiet",
-      2365
+      "trending_bear",
+      945
     ],
     "GOLD": [
       "trending_bear",
-      8547
+      24483
     ],
     "OILCash": [
-      "trending_bear",
-      9
+      "trending_bull",
+      453
     ],
     "Nvidia": [
       "trending_bear",
-      4746
+      9776
     ],
     "Apple": [
       "trending_bear",
-      7119
+      14663
     ],
     "Amazon": [
-      "trending_bull",
-      1
+      "trending_bear",
+      7545
     ],
     "USDCAD": [
       "trending_bull",
@@ -92,7 +93,7 @@
     ],
     "NZDUSD": [
       "trending_bear",
-      552
+      3219
     ],
     "SILVER": [
       "trending_bear",
@@ -100,7 +101,11 @@
     ],
     "BRENTCash": [
       "trending_bull",
-      5
+      305
+    ],
+    "US100Cash": [
+      "trending_bear",
+      69
     ]
   }
 }
