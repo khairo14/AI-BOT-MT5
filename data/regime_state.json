@@ -20,64 +20,67 @@
     "NZDUSD": "trending_bear",
     "SILVER": "trending_bear",
     "BRENTCash": "trending_bull",
-    "US100Cash": "trending_bear"
+    "US100Cash": "trending_bull",
+    "US30Cash": "quiet",
+    "US500Cash": "trending_bear",
+    "Tesla": "trending_bear"
   },
   "pending": {
     "EURUSD": [
       "quiet",
-      90
+      111
     ],
     "BTCUSD": [
       "trending_bear",
-      742
+      748
     ],
     "ETHUSD": [
       "trending_bear",
-      2456
+      2462
     ],
     "USDJPY": [
       "quiet",
-      90
+      111
     ],
     "GBPUSD": [
       "quiet",
-      15
+      36
     ],
     "XRPUSD": [
       "trending_bear",
-      1209
+      1212
     ],
     "SOLUSD": [
       "trending_bear",
-      918
+      921
     ],
     "EURJPY": [
       "quiet",
-      244358
+      244496
     ],
     "AUDUSD": [
       "trending_bear",
-      17463
+      17478
     ],
     "USDCHF": [
       "quiet",
-      25828
+      25874
     ],
     "GBPJPY": [
       "trending_bear",
-      945
+      957
     ],
     "GOLD": [
       "trending_bear",
-      24483
+      24498
     ],
     "OILCash": [
       "trending_bull",
-      453
+      468
     ],
     "Nvidia": [
       "trending_bear",
-      9776
+      9780
     ],
     "Apple": [
       "trending_bear",
@@ -93,7 +96,7 @@
     ],
     "NZDUSD": [
       "trending_bear",
-      3219
+      3222
     ],
     "SILVER": [
       "trending_bear",
@@ -101,11 +104,23 @@
     ],
     "BRENTCash": [
       "trending_bull",
-      305
+      308
     ],
     "US100Cash": [
+      "trending_bull",
+      22
+    ],
+    "US30Cash": [
+      "quiet",
+      21
+    ],
+    "US500Cash": [
       "trending_bear",
-      69
+      6
+    ],
+    "Tesla": [
+      "trending_bear",
+      4
     ]
   }
 }

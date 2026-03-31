@@ -6,7 +6,9 @@
       "USDJPY",
       "GBPUSD",
       "USDCHF",
-      "EURJPY"
+      "EURJPY",
+      "US100Cash",
+      "US30Cash"
     ],
     "timeframe": "M1/M5"
   },
@@ -22,7 +24,11 @@
       "OILCash",
       "BTCUSD",
       "ETHUSD",
-      "US100Cash"
+      "US100Cash",
+      "US30Cash",
+      "US500Cash",
+      "Tesla",
+      "Nvidia"
     ],
     "timeframe": "M15/H1"
   },
@@ -42,7 +48,11 @@
       "GOLD",
       "SILVER",
       "OILCash",
-      "BRENTCash"
+      "BRENTCash",
+      "US100Cash",
+      "Nvidia",
+      "Facebook",
+      "AdvMicroDev"
     ],
     "timeframe": "H4/D1"
   }

@@ -203,7 +203,7 @@ def get_scanner_config():
 def update_scanner_config(body: PatchRequest):
     """Update scanner settings. Enforces per-mode symbol limits."""
     _validate_numeric_fields(body.data)
-    _SCANNER_MAX = {"scalping": 7, "day_trading": 14, "swing": 18}
+    _SCANNER_MAX = {"scalping": 7, "day_trading": 15, "swing": 18}
     current = _load("scanner.json")
     _deep_merge(current, body.data)
     for m, limit in _SCANNER_MAX.items():
