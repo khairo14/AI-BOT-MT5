@@ -45,9 +45,9 @@ from ai.predictor import predictor as global_predictor
 MAX_CONCURRENT_TRAIN = 4   # simultaneous LSTM training jobs (CPU/GPU bound)
 
 _BARS: dict[str, int] = {
-    "scalping":     99_000,   # M5:  ~1 year (MT5 per-request limit is ~99k)
-    "day_trading":  17_000,   # H1:  ~2 years
-    "swing":         5_000,   # H4:  ~2 years
+    "scalping":     200_000,   # M5:  ~2 years
+    "day_trading":  20_000,   # H1:  ~2 years
+    "swing":         15_000,   # H4:  ~2 years
 }
 
 _TF: dict[str, str] = {

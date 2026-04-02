@@ -42,9 +42,9 @@ MAX_WORKERS = 12
 # ---------------------------------------------------------------------------
 
 _BARS: dict[str, int] = {
-    "scalping":     99_000,   # M5:  ~1 year (MT5 per-request cap ~99k)
-    "day_trading":  17_000,   # H1:  ~2 years
-    "swing":         5_000,   # H4:  ~2 years
+    "scalping":     200_000,   # M5:  ~2 years
+    "day_trading":  20_000,   # H1:  ~2 years
+    "swing":         15_000,   # H4:  ~2 years
 }
 
 _TF: dict[str, str] = {

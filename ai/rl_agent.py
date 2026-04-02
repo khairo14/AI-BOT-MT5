@@ -58,7 +58,11 @@ RISK_STEP            = 0.05
 # Default starting values
 DEFAULT_CONF_THRESH  = 0.55
 DEFAULT_RISK_FACTOR  = 1.00
-
+_CONF_MAX_BY_MODE: dict[str, float] = {
+    "scalping":    0.72,   # M5 — you've seen 68%, 72% gives headroom
+    "day_trading": 0.78,   # H1 — slightly higher, more reliable LSTM
+    "swing":       0.78,   # H4 — same as day trading
+}
 
 def _wr_bucket(win_rate: float) -> str:
     if win_rate < 0.40:
@@ -174,6 +178,20 @@ class RLAgent:
         vol_pct      = SL-distance as % of entry price (ATR proxy for volatility regime).
         """
         with self._lock:
+            # Idle decay: if conf_thresh is above default and no trade
+            # has been seen for 6+ hours, drift back by one step.
+            # Prevents permanent deadlock if the threshold gets stuck
+            # near the ceiling with no signals passing to generate trades.
+            _now_ts  = datetime.now(tz=timezone.utc).timestamp()
+            _last_ts = getattr(self, "_last_update_ts", _now_ts)
+            if (_now_ts - _last_ts) / 3600 >= 6.0 and self._conf_thresh > DEFAULT_CONF_THRESH:
+                self._conf_thresh = max(DEFAULT_CONF_THRESH, self._conf_thresh - CONF_STEP)
+                logger.info(
+                    f"RL [{self.trading_type}] idle decay: "
+                    f"conf_thresh → {self._conf_thresh:.2f}"
+                )
+            self._last_update_ts = _now_ts
+          
             # Normalise reward: asymmetric clip — tighter floor captures moderate losses
             # more precisely; looser ceiling lets strong wins register clearly.
             # MATH-3: was ±0.10 (symmetric) — extreme losses clipped same as moderate.
@@ -183,8 +201,9 @@ class RLAgent:
             self._update_q(new_state, reward)
             action_idx = self._choose_action(new_state)
             conf_delta, risk_delta = ACTIONS[action_idx]
+            _conf_max = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
             self._conf_thresh = float(
-                max(CONF_MIN, min(CONF_MAX, self._conf_thresh + conf_delta))
+                max(CONF_MIN, min(_conf_max, self._conf_thresh + conf_delta))
             )
             self._risk_factor = float(
                 max(RISK_MIN, min(RISK_MAX, self._risk_factor + risk_delta))
@@ -303,9 +322,18 @@ class RLAgent:
                         with open(paper_path, "r", encoding="utf-8") as f:
                             paper_data = json.load(f)
                         self._q           = paper_data.get("q", {})
-                        self._conf_thresh = paper_data.get("conf_thresh", DEFAULT_CONF_THRESH)
-                        self._risk_factor = paper_data.get("risk_factor", DEFAULT_RISK_FACTOR)
+                        self._last_state  = paper_data.get("last_state")
+                        self._last_action = paper_data.get("last_action")
                         self._n_updates   = paper_data.get("n_updates", 0)
+                        _conf_max_boot = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
+                        self._conf_thresh = float(min(
+                            paper_data.get("conf_thresh", DEFAULT_CONF_THRESH),
+                            _conf_max_boot
+                        ))
+                        self._risk_factor = float(min(
+                            paper_data.get("risk_factor", DEFAULT_RISK_FACTOR),
+                            RISK_MAX
+                        ))
                         logger.info(
                             f"RL live agent bootstrapped from paper [{self.trading_type}]: "
                             f"conf_thresh={self._conf_thresh:.2f} "
@@ -319,11 +347,14 @@ class RLAgent:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._q           = data.get("q", {})
-            self._conf_thresh = data.get("conf_thresh", DEFAULT_CONF_THRESH)
-            self._risk_factor = data.get("risk_factor", DEFAULT_RISK_FACTOR)
             self._last_state  = data.get("last_state")
             self._last_action = data.get("last_action")
             self._n_updates   = data.get("n_updates", 0)
+            # Enforce per-mode cap on load — prevents a previously saved value
+            # that exceeded the new cap (e.g. 0.85 scalping) from bypassing it.
+            _conf_max_load = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
+            self._conf_thresh = float(min(data.get("conf_thresh", DEFAULT_CONF_THRESH), _conf_max_load))
+            self._risk_factor = float(min(data.get("risk_factor", DEFAULT_RISK_FACTOR), RISK_MAX))
             logger.info(
                 f"RL agent loaded [{self.trading_type}/{self._mode}]: "
                 f"conf_thresh={self._conf_thresh:.2f} "
