@@ -8,7 +8,7 @@
     },
     "live": {
       "login": 420033339,
-      "server": "XMGlobal-MT5 17",
+      "server": "XMGlobal-MT5 18",
       "comment": "XM Live Account"
     }
   },
@@ -32,7 +32,7 @@
   "ai": {
     "price_prediction_enabled": true,
     "confidence_filter_enabled": true,
-    "confidence_threshold": 53,
+    "confidence_threshold": 55,
     "rl_agent_enabled": true,
     "scorer_weights": {
       "lstm": 0.45,

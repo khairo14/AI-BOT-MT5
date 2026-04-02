@@ -304,7 +304,16 @@ class SignalBus:
                 pass
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
-            _exec_task = asyncio.create_task(self._execute_async(signal))
+            
+            # Small delay for swing so UI renders the card before status flips
+            # to "executed". Scalping/day_trading stay at 0 — speed matters there.
+            async def _delayed_execute(sig: dict, delay: float) -> None:
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                await self._execute_async(sig)
+
+            _exec_delay = 2.0 if mode == "swing" else 0.0
+            _exec_task = asyncio.create_task(_delayed_execute(signal, _exec_delay))
             self._active_tasks.add(_exec_task)
             _exec_task.add_done_callback(self._active_tasks.discard)
         else:

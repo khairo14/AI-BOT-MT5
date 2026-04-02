@@ -22,6 +22,7 @@ function normalizeSignal(raw: Record<string, unknown>): Signal {
     status:           (raw.status as Signal["status"]) ?? "pending",
     reason:           (raw.rejection_reason ?? raw.reason) as string | undefined,
     rejection_reason: raw.rejection_reason as string | undefined,
+    expires_at:       raw.expires_at as string | undefined,
   };
 }
 
