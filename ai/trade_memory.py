@@ -57,7 +57,7 @@ class TradeMemory:
     keeps a rolling in-memory buffer for fast RL training reads.
     """
 
-    MAX_BUFFER = 5_000   # keep last N outcomes in memory
+    MAX_BUFFER = 10_000   # keep last N outcomes in memory
 
     def __init__(self):
         self._lock   = threading.Lock()
@@ -74,8 +74,8 @@ class TradeMemory:
             self._buffer.append(entry)
             if len(self._buffer) > self.MAX_BUFFER:
                 self._buffer = self._buffer[-self.MAX_BUFFER:]
-            with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
+        with open(MEMORY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
 
     def recent(self, n: int = 200, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None) -> list[dict]:
         """Return the last N outcomes, optionally filtered by trading_type and/or mode.

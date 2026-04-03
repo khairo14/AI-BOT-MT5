@@ -101,6 +101,7 @@ _ASSET_GROUP_BUY: dict[str, str] = {
     # Oil
     "USOIL":   "OIL_LONG",    "UKOIL":   "OIL_LONG",
     "BRENTCash":"OIL_LONG",   "WTICash": "OIL_LONG",
+    "OILCash":  "OIL_LONG",   "NGASCash": "OIL_LONG",
     "NGAS":    "OIL_LONG",
     # US Indices
     "US30Cash": "US_IDX_LONG",  "US100Cash": "US_IDX_LONG",
@@ -117,6 +118,7 @@ _ASSET_GROUP_BUY: dict[str, str] = {
     "Alphabet":  "TECH_LONG",  "Netflix":   "TECH_LONG",
     "AMD":       "TECH_LONG",  "Intel":     "TECH_LONG",
     "AdvMicroDev":"TECH_LONG",
+    "Google":     "TECH_LONG",  "Facebook":   "TECH_LONG",
 }
 
 

@@ -216,6 +216,7 @@ class MT5Client:
             "min_lot":       info.volume_min,
             "max_lot":       info.volume_max,
             "lot_step":      info.volume_step,
+            "stops_level":   info.trade_stops_level,
         }
 
     def get_current_price(self, symbol: str) -> Optional[dict]:
@@ -326,6 +327,7 @@ class MT5Client:
                 "open_time":     datetime.fromtimestamp(p.time, tz=timezone.utc),
                 "comment":       p.comment,
                 "magic":         p.magic,
+                "stops_level":   p.stops_level,
             }
             for p in positions
         ]

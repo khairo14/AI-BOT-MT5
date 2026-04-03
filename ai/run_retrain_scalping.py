@@ -26,7 +26,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -45,12 +45,7 @@ from ai.predictor import predictor as global_predictor
 # RTX 4060 can handle more concurrent M5 jobs than the default 4
 # since all jobs are the same size (~210k bars) and same architecture.
 # Increase if GPU VRAM allows; decrease if you see OOM errors.
-MAX_CONCURRENT_TRAIN = 6
-
-# 2-year lookback for M5 — covers more market regimes than 1-year
-# which prevents the LSTM from overfitting to recent trends and
-# producing inflated confidence scores that push RL threshold to ceiling.
-LOOKBACK_YEARS = 2
+MAX_CONCURRENT_TRAIN = 2
 
 # Minimum accuracy to consider a retraining run successful enough
 # to trigger RL reset. If fewer than this fraction of models pass
@@ -150,13 +145,8 @@ def main() -> None:
         logger.info(f"  {s}")
 
     # ── Date range: 2 years back from now ────────────────────────────────────
-    date_to   = datetime.now(tz=timezone.utc)
-    date_from = date_to - timedelta(days=365 * LOOKBACK_YEARS)
-    logger.info(f"\nDate range: {date_from.date()} → {date_to.date()} ({LOOKBACK_YEARS} years)")
-
     if args.dry_run:
         logger.info("\n[DRY RUN] — no training will be performed")
-        logger.info(f"Would fetch M5 data from {date_from.date()} to {date_to.date()}")
         logger.info(f"Would train {len(symbols)} scalping models")
         logger.info(f"MAX_CONCURRENT_TRAIN = {MAX_CONCURRENT_TRAIN}")
         return
@@ -171,7 +161,7 @@ def main() -> None:
             sys.exit(1)
 
         for symbol in symbols:
-            df = client.get_ohlcv_range(symbol, "M5", date_from, date_to)
+            df = client.get_ohlcv(symbol, "M5", count=200_000)
             data_cache[symbol] = df
             bar_count = len(df) if df is not None else 0
             status    = f"{bar_count:>9,d} bars" if df is not None else "   NO DATA"

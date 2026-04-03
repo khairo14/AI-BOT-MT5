@@ -46,12 +46,12 @@ from ai.rl_agent import RLAgent, rl_manager as _rl_manager
 
 # 1 year of bars per trading type (enough for Q-table coverage; faster than optimizer's 2 years)
 _BARS: dict[str, int] = {
-    "scalping":     99_000,   # M5  ~1 year (MT5 per-request limit is ~99k)
-    "day_trading":   8_500,   # H1  ~1 year
-    "swing":         2_500,   # H4  ~1 year
+    "scalping":     200_000,   # M5  ~2 years
+    "day_trading":   20_000,   # H1  ~2 years
+    "swing":         15_000,   # H4  ~2 years
 }
 
-_D1_BARS = 260   # 1 year of daily bars (for ema_trend_rider / weekly_breakout)
+_D1_BARS = 800   # 3.5 year of daily bars (for ema_trend_rider / weekly_breakout)
 
 _TF: dict[str, str] = {
     "scalping":    "M5",
@@ -272,7 +272,6 @@ def main() -> None:
     logger.info("RL bootstrap complete.  Q-tables are seeded with real LSTM-scored backtest data.")
     logger.info("Next step: enable confidence_filter_enabled=true in config/app.json")
     logger.info("=" * 70)
-
 
 if __name__ == "__main__":
     main()

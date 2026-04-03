@@ -32,6 +32,40 @@ import pandas as pd
 from loguru import logger
 
 _STATE_PATH = Path(__file__).parent.parent / "data" / "regime_state.json"
+_SYMBOLS_PATH = Path(__file__).parent.parent / "config" / "symbols.json"
+
+# Category → asset class mapping
+_CATEGORY_TO_CLASS: dict[str, str] = {
+    "forex":      "forex",
+    "crypto":     "crypto",
+    "commodity":  "commodities",
+    "us_index":   "indices",
+    "eu_index":   "indices",
+    "stock":      "indices",  # stocks use same ADX thresholds as indices
+}
+
+# Cache: symbol → asset class (built once at first use)
+_symbol_class_cache: dict[str, str] = {}
+_symbol_cache_lock = threading.Lock()
+
+def _build_symbol_cache() -> None:
+    """Load symbol categories from symbols.json into the cache."""
+    global _symbol_class_cache
+    try:
+        data = json.loads(_SYMBOLS_PATH.read_text(encoding="utf-8"))
+        cache: dict[str, str] = {}
+        for mode_symbols in data.values():
+            for entry in mode_symbols:
+                sym = entry.get("symbol", "")
+                cat = entry.get("category", "forex")
+                if sym:
+                    cache[sym] = _CATEGORY_TO_CLASS.get(cat, "forex")
+        with _symbol_cache_lock:
+            _symbol_class_cache = cache
+        logger.debug(f"RegimeClassifier: loaded {len(cache)} symbol categories")
+    except Exception as exc:
+        logger.warning(f"RegimeClassifier: could not load symbols.json: {exc}")
+
 
 # ── ADX trend threshold by asset class ──────────────────────────────────────
 # Minimum ADX value considered a "trending" market.
@@ -61,15 +95,18 @@ _HYSTERESIS_BARS = 3
 
 
 def _asset_class(symbol: str) -> str:
-    """Map a symbol string to its asset class for threshold selection."""
+    """Return asset class for a symbol using symbols.json categories."""
+    with _symbol_cache_lock:
+        cls = _symbol_class_cache.get(symbol)
+    if cls:
+        return cls
+    # Fallback for symbols not in symbols.json
     s = symbol.upper()
-    if any(x in s for x in ("BTC", "ETH", "XRP", "SOL", "ADA", "DOT", "MATIC", "LTC", "BNB")):
+    if any(x in s for x in ("BTC", "ETH", "XRP", "SOL")):
         return "crypto"
-    if any(x in s for x in ("US30", "US100", "US500", "SPX", "NDX",
-                              "GER40", "UK100", "FRA40", "JPN225", "AUS200", "ESP35")):
+    if any(x in s for x in ("US30", "US100", "US500", "GER40", "UK100")):
         return "indices"
-    if any(x in s for x in ("XAU", "GOLD", "XAG", "SILVER", "OIL", "BRENT", "WTI",
-                              "USOIL", "UKOIL", "NGAS", "COPPER")):
+    if any(x in s for x in ("XAU", "GOLD", "XAG", "SILVER", "OIL", "BRENT", "NGAS")):
         return "commodities"
     return "forex"
 
@@ -193,6 +230,7 @@ class RegimeClassifier:
         self._pending: dict[str, tuple[str, int]] = {}
         # GAP-4: restore hysteresis state from disk so a restart doesn't
         # drop the regime context accumulated over many candles.
+        _build_symbol_cache()
         self._load_state()
 
     # ------------------------------------------------------------------

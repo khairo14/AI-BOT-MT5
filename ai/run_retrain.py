@@ -91,16 +91,16 @@ def _get_accuracy_stats(models_dir: Path) -> dict[str, float]:
     for f in models_dir.glob("*_meta.json"):
         try:
             meta = json.loads(f.read_text(encoding="utf-8"))
-            # filename = "EURUSD_day_trading_meta.json"
-            # key      = "EURUSD__day_trading"
-            name = f.stem.replace("_meta", "")              # "EURUSD_day_trading"
-            # last segment is trading_type; everything before is symbol
-            parts = name.rsplit("_", 2)
-            if len(parts) == 3:
-                symbol        = parts[0]
-                trading_type  = f"{parts[1]}_{parts[2]}"   # day_trading / swing etc.
-                key           = f"{symbol}__{trading_type}"
-            else:
+            name = f.stem.replace("_meta", "")
+            # Match trading type suffix first to correctly handle symbols
+            # with underscores in their name (e.g. US100Cash_day_trading)
+            key = None
+            for tt in ("day_trading", "swing", "scalping"):
+                if name.endswith(f"_{tt}"):
+                    symbol = name[:-(len(tt) + 1)]
+                    key    = f"{symbol}__{tt}"
+                    break
+            if key is None:
                 key = name.replace("_", "__", 1)
             stats[key] = float(meta.get("accuracy", 0.0))
         except Exception as exc:

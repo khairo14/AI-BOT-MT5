@@ -1,6 +1,6 @@
 {
   "scalping": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "EURUSD",
       "USDJPY",
@@ -13,7 +13,7 @@
     "timeframe": "M1/M5"
   },
   "day_trading": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "EURUSD",
       "GBPUSD",
@@ -34,7 +34,7 @@
     "timeframe": "M15/H1"
   },
   "swing": {
-    "enabled": false,
+    "enabled": true,
     "symbols": [
       "BTCUSD",
       "ETHUSD",

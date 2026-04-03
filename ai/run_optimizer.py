@@ -60,7 +60,7 @@ _STRATEGIES: dict[str, list[str]] = {
 }
 
 # Jobs with bars_used >= this threshold are treated as already done and skipped.
-_DONE_BARS_THRESHOLD = 5_000
+_DONE_BARS_THRESHOLD = 200_000
 
 
 # ---------------------------------------------------------------------------

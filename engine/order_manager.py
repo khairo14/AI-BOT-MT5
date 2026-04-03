@@ -131,10 +131,14 @@ class OrderManager:
             min_dist = stops_level * sym_info.point
             sl_dist = abs(price - sl)
             if sl_dist < min_dist:
-                return OrderResult(
-                    success=False,
-                    error=f"SL too close: {sl_dist:.5f} < broker minimum {min_dist:.5f} ({stops_level} points)",
+                logger.warning(
+                    f"SL too close for {req.symbol}: {sl_dist:.5f} < min {min_dist:.5f} "
+                    f"({stops_level} pts) — adjusting SL to minimum distance"
                 )
+                if req.direction == "BUY":
+                    sl = round(price - min_dist, sym_info.digits)
+                else:
+                    sl = round(price + min_dist, sym_info.digits)
 
         # Use broker-supported filling mode (filling_mode bitmask: bit0=FOK, bit1=IOC)
         fm = sym_info.filling_mode

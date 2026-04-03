@@ -33,11 +33,10 @@ router = APIRouter()
 TRADING_TYPE = Literal["scalping", "day_trading", "swing"]
 
 # Default bar counts per trading type — match run_retrain.py.
-# These are capped at the MT5 per-request limit (~99k for M5).
 _TRAIN_BARS: dict[str, int] = {
-    "scalping":    99_000,  # M5  ≈ 1 yr
-    "day_trading": 17_000,  # H1  ≈ 2 yr
-    "swing":        5_000,  # H4  ≈ 2 yr
+    "scalping":    200_000,  # M5  ≈ 2 yr
+    "day_trading": 20_000,  # H1  ≈ 2 yr
+    "swing":        15_000,  # H4  ≈ 2 yr
 }
 
 

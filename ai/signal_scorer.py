@@ -67,28 +67,17 @@ class SignalScorer:
         """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) for the given regime and trading_type.
 
         Resolution order:
-          1. app.json ai.regime_weights[regime]        — adaptive per-regime profile
-          2. app.json ai.scalping_scorer_weights        — scalping-specific base weights
-          3. app.json ai.scorer_weights                 — static base (day_trading / swing)
-          4. Class defaults
+        1. app.json ai.scalping_scorer_weights        — scalping always uses this base
+        2. app.json ai.regime_weights[regime]          — regime fine-tuning (non-scalping only)
+        3. app.json ai.scorer_weights                  — static base (day_trading / swing)
+        4. Class defaults
         """
         try:
             cfg = _get_app_cfg()
             ai  = cfg.get("ai", {})
 
-            # Try regime-specific weights first
-            if regime:
-                rw = ai.get("regime_weights", {}).get(regime, {})
-                if rw:
-                    wl = float(rw.get("lstm",   self._DEFAULT_W_LSTM))
-                    wr = float(rw.get("rr",     self._DEFAULT_W_RR))
-                    wt = float(rw.get("trend",  self._DEFAULT_W_TREND))
-                    wv = float(rw.get("volume", self._DEFAULT_W_VOLUME))
-                    total = wl + wr + wt + wv
-                    if total > 0:
-                        return wl / total, wr / total, wt / total, wv / total
-
-            # Scalping-specific weights take priority over generic scorer_weights
+            # Scalping always uses scalping-specific weights — regime never overrides
+            # because M5 LSTM is unreliable and scalping needs its own low lstm weight
             if trading_type == "scalping":
                 sw = ai.get("scalping_scorer_weights", {})
                 if sw:
@@ -100,7 +89,19 @@ class SignalScorer:
                     if total > 0:
                         return wl / total, wr / total, wt / total, wv / total
 
-            # Fall back to static balanced weights
+            # Non-scalping: try regime-specific weights first
+            if regime and trading_type != "scalping":
+                rw = ai.get("regime_weights", {}).get(regime, {})
+                if rw:
+                    wl = float(rw.get("lstm",   self._DEFAULT_W_LSTM))
+                    wr = float(rw.get("rr",     self._DEFAULT_W_RR))
+                    wt = float(rw.get("trend",  self._DEFAULT_W_TREND))
+                    wv = float(rw.get("volume", self._DEFAULT_W_VOLUME))
+                    total = wl + wr + wt + wv
+                    if total > 0:
+                        return wl / total, wr / total, wt / total, wv / total
+
+            # Fall back to static balanced weights (day_trading / swing)
             w = ai.get("scorer_weights", {})
             if w:
                 wl = float(w.get("lstm",   self._DEFAULT_W_LSTM))
@@ -116,7 +117,7 @@ class SignalScorer:
             self._DEFAULT_W_LSTM, self._DEFAULT_W_RR,
             self._DEFAULT_W_TREND, self._DEFAULT_W_VOLUME
         )
-
+    
     def score(
         self,
         symbol:       str,

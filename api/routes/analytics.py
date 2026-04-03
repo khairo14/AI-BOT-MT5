@@ -179,21 +179,11 @@ def _hour_of_day(closed: list[dict]) -> dict[str, dict]:
 
 
 def _trade_quality_distribution(closed: list[dict]) -> dict[str, int]:
-    """Categorise trades by stored confidence score (from comment field fallback)."""
+    """Categorize trades by confidence score stored in journal."""
     high = medium = low = 0
     for e in closed:
-        # confidence may be embedded in comment as JSON or separate field
-        conf_val = None
-        raw_comment = e.get("comment", "")
-        # try to find confidence in comment e.g. "day_trading|macd_ema_trend|conf=0.72"
-        for part in str(raw_comment).split("|"):
-            if part.startswith("conf="):
-                try:
-                    conf_val = float(part[5:])
-                except ValueError:
-                    pass
+        conf_val = e.get("confidence")
         if conf_val is None:
-            # unknown confidence — count as medium
             medium += 1
         elif conf_val >= 0.75:
             high += 1
