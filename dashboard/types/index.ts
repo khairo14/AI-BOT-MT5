@@ -113,6 +113,12 @@ export interface AppConfig {
       trend?:  number;
       volume?: number;
     };
+    swing_scorer_weights?: {
+      lstm?:   number;
+      rr?:     number;
+      trend?:  number;
+      volume?: number;
+    };
   };
 }
 

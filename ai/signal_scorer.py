@@ -67,10 +67,11 @@ class SignalScorer:
         """Return (W_LSTM, W_RR, W_TREND, W_VOLUME) for the given regime and trading_type.
 
         Resolution order:
-        1. app.json ai.scalping_scorer_weights        — scalping always uses this base
-        2. app.json ai.regime_weights[regime]          — regime fine-tuning (non-scalping only)
-        3. app.json ai.scorer_weights                  — static base (day_trading / swing)
-        4. Class defaults
+          1. app.json ai.scalping_scorer_weights  — scalping always uses this base
+          2. app.json ai.swing_scorer_weights      — swing always uses this base
+          3. app.json ai.regime_weights[regime]    — regime fine-tuning (day_trading only)
+          4. app.json ai.scorer_weights            — static base (day_trading)
+          5. Class defaults
         """
         try:
             cfg = _get_app_cfg()
@@ -89,6 +90,19 @@ class SignalScorer:
                     if total > 0:
                         return wl / total, wr / total, wt / total, wv / total
 
+            # Swing uses swing-specific weights — H4 LSTM more reliable,
+            # volume less meaningful on H4, RR critical for multi-day commitment
+            if trading_type == "swing":
+                sw = ai.get("swing_scorer_weights", {})
+                if sw:
+                    wl = float(sw.get("lstm",   0.40))
+                    wr = float(sw.get("rr",     0.30))
+                    wt = float(sw.get("trend",  0.25))
+                    wv = float(sw.get("volume", 0.05))
+                    total = wl + wr + wt + wv
+                    if total > 0:
+                        return wl / total, wr / total, wt / total, wv / total
+                    
             # Non-scalping: try regime-specific weights first
             if regime and trading_type != "scalping":
                 rw = ai.get("regime_weights", {}).get(regime, {})

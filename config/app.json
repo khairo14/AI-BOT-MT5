@@ -34,16 +34,22 @@
     "confidence_filter_enabled": true,
     "confidence_threshold": 55,
     "rl_agent_enabled": true,
+    "swing_scorer_weights": {
+    "lstm":   0.40,
+    "rr":     0.30,
+    "trend":  0.25,
+    "volume": 0.05
+    },
     "scorer_weights": {
-      "lstm": 0.45,
-      "rr": 0.15,
-      "trend": 0.2,
-      "volume": 0.2
+      "lstm": 0.35,
+      "rr": 0.25,
+      "trend": 0.25,
+      "volume": 0.15
     },
     "scalping_scorer_weights": {
-      "lstm": 0.4,
-      "rr": 0.15,
-      "trend": 0.25,
+      "lstm": 0.2,
+      "rr": 0.3,
+      "trend": 0.3,
       "volume": 0.2
     },
     "regime_weights": {

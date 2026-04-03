@@ -89,6 +89,8 @@ export default function MLPage() {
   const [scorerSaving, setScorerSaving] = useState(false);
   const [scalScorerWeights, setScalScorerWeights] = useState({ lstm: 15, rr: 25, trend: 40, volume: 20 });
   const [scalScorerSaving, setScalScorerSaving] = useState(false);
+  const [swingScorerWeights, setSwingScorerWeights] = useState({ lstm: 40, rr: 30, trend: 25, volume: 5 });
+  const [swingScorerSaving, setSwingScorerSaving] = useState(false);
 
   // LSTM table filter/sort
   const [lstmSearch, setLstmSearch] = useState("");
@@ -135,6 +137,15 @@ export default function MLPage() {
               rr:     Math.round((Number(sw.rr)     || 0.25) * 100),
               trend:  Math.round((Number(sw.trend)  || 0.40) * 100),
               volume: Math.round((Number(sw.volume) || 0.20) * 100),
+            });
+          }
+          const sw2 = ai_cfg.swing_scorer_weights;
+          if (sw2) {
+            setSwingScorerWeights({
+              lstm:   Math.round((Number(sw2.lstm)   || 0.40) * 100),
+              rr:     Math.round((Number(sw2.rr)     || 0.30) * 100),
+              trend:  Math.round((Number(sw2.trend)  || 0.25) * 100),
+              volume: Math.round((Number(sw2.volume) || 0.05) * 100),
             });
           }
         }
@@ -609,7 +620,7 @@ export default function MLPage() {
           {/* General scorer weights */}
           <div className="border-t border-gray-800 pt-4 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-white font-medium">Signal Scorer Weights <span className="text-xs text-gray-500 ml-1">(Day Trading &amp; Swing)</span></p>
+              <p className="text-sm text-white font-medium">Signal Scorer Weights <span className="text-xs text-gray-500 ml-1">(Day Trading)</span></p>
               <p className="text-xs text-gray-500">Auto-normalised — any ratio works.</p>
             </div>
             {(["lstm", "rr", "trend", "volume"] as const).map((k) => {
@@ -654,6 +665,56 @@ export default function MLPage() {
               );
             })}
             {scorerSaving && <p className="text-xs text-gray-500">Saving weights…</p>}
+          </div>
+
+          {/* Swing-specific scorer weights */}
+          <div className="border-t border-gray-800 pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-white font-medium">Signal Scorer Weights <span className="text-xs text-teal-400 ml-1">(Swing)</span></p>
+              <p className="text-xs text-gray-500">H4 — RR weighted higher, volume less meaningful.</p>
+            </div>
+            {(["lstm", "rr", "trend", "volume"] as const).map((k) => {
+              const labels: Record<string, string> = {
+                lstm: "LSTM Prediction",
+                rr: "Risk:Reward Quality",
+                trend: "Trend Alignment",
+                volume: "Volume Confirmation",
+              };
+              return (
+                <div key={k} className="space-y-1">
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>{labels[k]}</span>
+                    <span className="text-white font-medium">{swingScorerWeights[k]}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={60}
+                    step={1}
+                    value={swingScorerWeights[k]}
+                    onChange={(e) => setSwingScorerWeights((prev) => ({ ...prev, [k]: Number(e.target.value) }))}
+                    onMouseUp={async () => {
+                      setSwingScorerSaving(true);
+                      try {
+                        await patchAppConfig({
+                          ai: {
+                            swing_scorer_weights: {
+                              lstm:   swingScorerWeights.lstm   / 100,
+                              rr:     swingScorerWeights.rr     / 100,
+                              trend:  swingScorerWeights.trend  / 100,
+                              volume: swingScorerWeights.volume / 100,
+                            },
+                          },
+                        });
+                      } catch (_) {}
+                      setSwingScorerSaving(false);
+                    }}
+                    className="w-full accent-teal-500"
+                  />
+                </div>
+              );
+            })}
+            {swingScorerSaving && <p className="text-xs text-gray-500">Saving swing weights…</p>}
           </div>
 
           {/* Scalping-specific scorer weights */}
