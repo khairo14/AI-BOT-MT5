@@ -10,7 +10,7 @@
     "EURJPY": "quiet",
     "AUDUSD": "trending_bear",
     "USDCHF": "quiet",
-    "GBPJPY": "trending_bear",
+    "GBPJPY": "quiet",
     "GOLD": "trending_bull",
     "OILCash": "trending_bull",
     "Nvidia": "trending_bear",
@@ -31,59 +31,59 @@
   "pending": {
     "EURUSD": [
       "quiet",
-      6
+      21
     ],
     "BTCUSD": [
       "trending_bear",
-      24
+      31
     ],
     "ETHUSD": [
       "trending_bear",
-      2
+      1
     ],
     "USDJPY": [
       "quiet",
-      45
+      21
     ],
     "GBPUSD": [
       "quiet",
-      9
+      21
     ],
     "XRPUSD": [
       "volatile_breakout",
       2
     ],
     "SOLUSD": [
-      "volatile_breakout",
-      2
+      "trending_bear",
+      6
     ],
     "EURJPY": [
       "quiet",
-      314137
+      314215
     ],
     "AUDUSD": [
       "trending_bear",
-      24474
+      2
     ],
     "USDCHF": [
       "quiet",
-      19694
+      19720
     ],
     "GBPJPY": [
-      "trending_bear",
-      6777
+      "quiet",
+      9
     ],
     "GOLD": [
-      "trending_bull",
-      3
+      "trending_bear",
+      2
     ],
     "OILCash": [
-      "trending_bull",
-      3
+      "volatile_breakout",
+      2
     ],
     "Nvidia": [
       "trending_bear",
-      4615
+      4627
     ],
     "Apple": [
       "trending_bear",
@@ -99,7 +99,7 @@
     ],
     "NZDUSD": [
       "trending_bear",
-      4398
+      2
     ],
     "SILVER": [
       "trending_bear",
@@ -107,35 +107,35 @@
     ],
     "BRENTCash": [
       "trending_bull",
-      30
+      36
     ],
     "US100Cash": [
       "quiet",
-      4
+      14
     ],
     "US30Cash": [
       "quiet",
-      3
+      29
     ],
     "US500Cash": [
       "trending_bull",
-      39
+      48
     ],
     "Tesla": [
       "trending_bear",
-      3882
+      3888
     ],
     "Facebook": [
       "trending_bear",
-      1137
+      1143
     ],
     "AdvMicroDev": [
       "trending_bear",
-      369
+      371
     ],
     "UK100Cash": [
       "trending_bull",
-      5809
+      5818
     ]
   }
 }

@@ -327,7 +327,6 @@ class MT5Client:
                 "open_time":     datetime.fromtimestamp(p.time, tz=timezone.utc),
                 "comment":       p.comment,
                 "magic":         p.magic,
-                "stops_level":   p.stops_level,
             }
             for p in positions
         ]
