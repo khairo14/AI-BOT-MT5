@@ -27,6 +27,35 @@ def _load_bot_magic() -> int:
 
 BOT_MAGIC: int = _load_bot_magic()
 
+# TTL cache for app.json — spread gate reads this on every order placement.
+# Caching for 5 s avoids disk reads on high-frequency scalping runs while still
+# picking up dashboard config changes (spread limits) within one scan cycle.
+import time as _time
+import threading as _threading
+_om_cfg_cache: dict = {}
+_om_cfg_loaded_at: float = 0.0
+_OM_CFG_TTL = 5.0
+_om_cfg_lock = _threading.Lock()
+
+def _get_om_app_cfg() -> dict:
+    global _om_cfg_cache, _om_cfg_loaded_at
+    now = _time.monotonic()
+    if now - _om_cfg_loaded_at < _OM_CFG_TTL:
+        return _om_cfg_cache
+    with _om_cfg_lock:
+        if now - _om_cfg_loaded_at < _OM_CFG_TTL:
+            return _om_cfg_cache
+        try:
+            from pathlib import Path as _Path
+            import json as _json
+            _om_cfg_cache = _json.loads(
+                (_Path(__file__).parent.parent / "config" / "app.json")
+                .read_text(encoding="utf-8")
+            )
+        except Exception:
+            pass
+        _om_cfg_loaded_at = now
+    return _om_cfg_cache
 
 @dataclass
 class OrderRequest:
@@ -139,6 +168,27 @@ class OrderManager:
                     sl = round(price - min_dist, sym_info.digits)
                 else:
                     sl = round(price + min_dist, sym_info.digits)
+        # Live spread gate — block entry if current spread exceeds mode limit.
+        # Uses real-time spread from MT5 (not hardcoded) so news spikes are caught.
+        try:
+            _app_cfg = _get_om_app_cfg()
+            _mode_prefix = req.comment.split("|")[0] if "|" in req.comment else ""
+            _mode_map = {"scalp": "scalping", "day": "day_trading", "swing": "swing"}
+            _tt = _mode_map.get(_mode_prefix, "")
+            if _tt:
+                _spread_limits = _app_cfg.get("max_spread_pips", {})
+                _max_sp = _spread_limits.get(_tt)
+                if _max_sp is not None:
+                    _current_sp = sym_info.spread * sym_info.point * (
+                        10 if sym_info.digits in (3, 5) else 1
+                    )
+                    if _current_sp > _max_sp:
+                        return OrderResult(
+                            success=False,
+                            error=f"Spread too wide: {_current_sp:.2f} > max {_max_sp:.2f} pips [{_tt}]"
+                        )
+        except Exception as _sp_exc:
+            logger.debug(f"Spread gate skipped: {_sp_exc}")
 
         # Use broker-supported filling mode (filling_mode bitmask: bit0=FOK, bit1=IOC)
         fm = sym_info.filling_mode

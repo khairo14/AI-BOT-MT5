@@ -42,14 +42,14 @@ from ai.predictor import predictor as global_predictor
 # Configuration
 # ---------------------------------------------------------------------------
 
-MAX_CONCURRENT_TRAIN = 4   # simultaneous LSTM training jobs (CPU/GPU bound)
+MAX_CONCURRENT_TRAIN = 6   # simultaneous LSTM training jobs (CPU/GPU bound)
 
 _BARS: dict[str, int] = {
     "scalping":     200_000,   # M5:  ~2 years
-    "day_trading":  20_000,   # H1:  ~2 years
-    "swing":         15_000,   # H4:  ~2 years
+    "day_trading":  30_000,   # H1:  ~2 years
+    "swing":         20_000,   # H4:  ~2 years
 }
-
+_SKIP_SCALPING = True
 _TF: dict[str, str] = {
     "scalping":    "M5",
     "day_trading": "H1",
@@ -71,6 +71,9 @@ def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
     symbols_cfg = json.loads((config_dir / "symbols.json").read_text(encoding="utf-8"))
     jobs: list[tuple[str, str]] = []
     for trading_type in ("scalping", "day_trading", "swing"):
+        if _SKIP_SCALPING and trading_type == "scalping":
+            logger.info("Skipping scalping — run_retrain_scalping.py handles these")
+            continue
         for entry in symbols_cfg.get(trading_type, []):
             if entry.get("enabled", True):
                 jobs.append((entry["symbol"], trading_type))
@@ -270,13 +273,10 @@ def main() -> None:
         marker = "✓" if stats[key] > 0.60 else "✗"
         logger.info(f"  {marker} {key:40s}  acc={stats[key]:.4f}")
 
-    weights_updated = _update_scorer_weights(config_dir, stats)
-
     logger.info("\n" + "=" * 70)
     logger.info(
         f"Retraining complete — "
-        f"{total_submitted} trained  |  {skipped} skipped  |  "
-        f"scorer weights {'updated' if weights_updated else 'unchanged'}"
+        f"{total_submitted} trained  |  {skipped} skipped"
     )
     logger.info("=" * 70)
 

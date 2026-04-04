@@ -52,20 +52,32 @@ MAX_CONCURRENT_OPT        = 2    # max simultaneous optimizer jobs (prevents CPU
 # This is subtracted from each simulated trade so unrealistic tight-spread combos
 # are penalised during grid search.
 SPREAD_COST_R: dict[str, float] = {
-    "scalping":    0.15,   # tight stops → spread ~15% of 1R
-    "day_trading": 0.05,   # spread ~5% of 1R
-    "swing":       0.02,   # spread ~2% of 1R for wide swing targets
+    "scalping":    0.20,   # tight stops → spread ~15% of 1R
+    "day_trading": 0.08,   # spread ~5% of 1R
+    "swing":       0.03,   # spread ~2% of 1R for wide swing targets
 }
 
 # Per-symbol overrides: these assets have much wider spreads than typical forex.
 # Checked first in _run_backtest(); falls back to SPREAD_COST_R[trading_type] if symbol absent.
 SPREAD_COST_R_SYMBOL: dict[str, float] = {
-    "BTCUSD":    0.30,  "ETHUSD":    0.30,   # crypto: spread can be 0.3R easily
-    "XRPUSD":    0.25,  "SOLUSD":    0.25,
-    "XAUUSD":    0.10,  "GOLD":      0.10,   # gold: tighter than crypto, wider than forex
-    "SILVER":    0.12,  "USOIL":     0.12,   "UKOIL":     0.12,
-    "US30Cash":  0.08,  "US100Cash": 0.08,   "US500Cash": 0.08,   # US indices
-    "GER40Cash": 0.10,  "UK100Cash": 0.10,   "FRA40Cash": 0.10,   # EU indices
+    # Crypto — very wide spreads on XM Standard
+    "BTCUSD":     0.40,  "ETHUSD":     0.40,
+    "XRPUSD":     0.35,  "SOLUSD":     0.35,
+    # Gold / Silver
+    "XAUUSD":     0.15,  "GOLD":       0.15,
+    "SILVER":     0.18,
+    # Oil
+    "USOIL":      0.15,  "UKOIL":      0.15,
+    "OILCash":    0.15,  "BRENTCash":  0.15,
+    "NGASCash":   0.20,
+    # US Indices
+    "US30Cash":   0.10,  "US100Cash":  0.10,  "US500Cash":  0.10,
+    # EU Indices
+    "GER40Cash":  0.12,  "UK100Cash":  0.12,  "FRA40Cash":  0.12,
+    # Stocks — widest spreads
+    "Tesla":      0.35,  "Nvidia":     0.35,  "Apple":      0.30,
+    "Microsoft":  0.30,  "Amazon":     0.35,  "Google":     0.35,
+    "Facebook":   0.35,  "Netflix":    0.35,  "AdvMicroDev":0.35,
 }
 
 # Walk-forward step (every Nth bar) and max hold per mode

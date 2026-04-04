@@ -794,13 +794,14 @@ async def recover_unclosed_trades(client) -> None:
                 volume=float(entry.get("volume") or 0.01),
                 profit=profit,
                 profit_pips=round(pips, 1),
-                profit_pct=round(_rec2_pct, 4),
+                profit_pct=_rec2_pct,
                 outcome=outcome_type,
-                open_time=entry.get("open_time", ""),
+                open_time=entry.get("open_time", close_time),
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
                 mode=entry.get("account_mode") or current_mode(),
-                extra={"source": "live"},
+                lstm_predicted_direction=direction,
+                extra={"source": "live", "slippage_pips": 0.0},
             )
             memory.record(outcome)
             _stats = memory.stats(trading_type=trading_type, live_only=True)

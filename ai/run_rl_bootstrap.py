@@ -47,8 +47,8 @@ from ai.rl_agent import RLAgent, rl_manager as _rl_manager
 # 1 year of bars per trading type (enough for Q-table coverage; faster than optimizer's 2 years)
 _BARS: dict[str, int] = {
     "scalping":     200_000,   # M5  ~2 years
-    "day_trading":   20_000,   # H1  ~2 years
-    "swing":         15_000,   # H4  ~2 years
+    "day_trading":   30_000,   # H1  ~2 years
+    "swing":         20_000,   # H4  ~2 years
 }
 
 _D1_BARS = 800   # 3.5 year of daily bars (for ema_trend_rider / weekly_breakout)
@@ -116,7 +116,11 @@ def _build_extra_dfs(
             extra[kwarg] = primary_df   # same-granularity proxy
     return extra
 
-
+_SPREAD_PNL_PENALTY: dict[str, float] = {
+    "scalping":    0.04,   # ~2 pip round-trip on tight scalp SL = 4% pnl penalty
+    "day_trading": 0.015,  # ~2 pip on wider H1 SL = 1.5% penalty
+    "swing":       0.010,  # ~2 pip on wide H4 SL = 0.5% penalty
+}
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -248,7 +252,10 @@ def main() -> None:
             dd_pct    = max(0.0, (peak_eq - equity) / peak_eq * 100.0)
             wr        = sum(window) / len(window) if window else 0.5
             avg_conf  = conf_score if conf_score > 0.0 else 0.55
-            reward    = pnl_pct / 100.0
+             # Apply spread penalty so RL agent learns from spread-adjusted outcomes
+            _penalty = _SPREAD_PNL_PENALTY.get(trading_type, 0.01)
+            _adjusted_pnl = pnl_pct - (_penalty * 100.0)
+            reward    = _adjusted_pnl / 100.0
             vol_pct   = abs(entry - sl) / entry * 100.0 if entry > 0 else 0.5
 
             agent.observe(

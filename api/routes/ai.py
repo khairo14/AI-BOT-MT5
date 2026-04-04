@@ -21,7 +21,7 @@ import asyncio
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ai.predictor import predictor, TRADING_TYPE_TF
@@ -188,6 +188,18 @@ async def get_confidence(symbol: str, trading_type: TRADING_TYPE = "day_trading"
 # ───────────────────────────────────
 # RL Agent endpoints
 # ───────────────────────────────────
+@router.get("/lstm/accuracy")
+def get_lstm_accuracy(
+    trading_type: Optional[str] = Query(None),
+    min_samples: int = Query(20),
+):
+    """Return live LSTM prediction accuracy vs actual trade outcomes."""
+    from ai.trade_memory import memory
+    return memory.lstm_accuracy(
+        trading_type=trading_type,
+        min_samples=min_samples,
+        live_only=True,
+    )
 
 @router.get("/rl/status")
 def rl_status():

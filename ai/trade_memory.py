@@ -48,8 +48,8 @@ class TradeOutcome:
     close_time:      str          # ISO datetime
     duration_mins:   float
     mode:            str  = "live"   # "live" or "paper" — used to separate RL/stats per mode
+    lstm_predicted_direction: Optional[str] = None  # "BUY" or "SELL" — LSTM prediction at signal time
     extra:           dict = field(default_factory=dict)
-
 
 class TradeMemory:
     """
@@ -113,6 +113,96 @@ class TradeMemory:
             "avg_conf":   round(avg_conf, 4),
             "tp_hits":    tp_hits,
             "sl_hits":    sl_hits,
+        }
+    
+    def lstm_accuracy(
+        self,
+        trading_type: Optional[str] = None,
+        min_samples: int = 20,
+        live_only: bool = True,
+    ) -> dict:
+        """
+        Compute live LSTM prediction accuracy by comparing lstm_predicted_direction
+        against actual trade outcome direction.
+
+        A prediction is 'correct' when:
+          - LSTM predicted BUY and trade was profitable (price went up)
+          - LSTM predicted SELL and trade was profitable (price went down)
+
+        Returns dict with accuracy per symbol and overall, or empty if insufficient data.
+        Requires lstm_predicted_direction to be populated in TradeOutcome.extra or field.
+        """
+        outcomes = self.recent(
+            n=self.MAX_BUFFER,
+            trading_type=trading_type,
+            live_only=live_only,
+        )
+        # Only consider trades where LSTM prediction was recorded
+        tracked = [
+            o for o in outcomes
+            if o.get("lstm_predicted_direction") or
+            o.get("extra", {}).get("lstm_predicted_direction")
+        ]
+        if len(tracked) < min_samples:
+            return {"tracked": len(tracked), "min_samples": min_samples, "sufficient_data": False}
+
+        def _get_pred(o: dict) -> Optional[str]:
+            return (
+                o.get("lstm_predicted_direction") or
+                o.get("extra", {}).get("lstm_predicted_direction")
+            )
+
+        correct = 0
+        total   = 0
+        by_symbol: dict[str, dict] = {}
+
+        for o in tracked:
+            pred   = _get_pred(o)
+            actual = o.get("direction", "").upper()
+            profit = o.get("profit", 0)
+            if not pred or not actual:
+                continue
+            # Correct if prediction matches actual profitable direction
+            is_correct = (
+                (pred == "BUY"  and profit > 0 and actual == "BUY") or
+                (pred == "SELL" and profit > 0 and actual == "SELL") or
+                (pred == "BUY"  and profit < 0 and actual == "SELL") or
+                (pred == "SELL" and profit < 0 and actual == "BUY")
+            )
+            # Simpler: prediction correct if market went the predicted direction
+            is_correct = (pred == actual and profit > 0) or (pred != actual and profit < 0)
+            correct += int(is_correct)
+            total   += 1
+
+            sym = o.get("symbol", "unknown")
+            if sym not in by_symbol:
+                by_symbol[sym] = {"correct": 0, "total": 0}
+            by_symbol[sym]["correct"] += int(is_correct)
+            by_symbol[sym]["total"]   += 1
+
+        overall_acc = round(correct / total, 4) if total else 0.0
+        sym_accuracy = {
+            sym: {
+                "accuracy": round(v["correct"] / v["total"], 4),
+                "samples":  v["total"],
+            }
+            for sym, v in by_symbol.items()
+            if v["total"] >= 5  # min 5 samples per symbol
+        }
+
+        # Flag symbols where live LSTM accuracy is worse than random (< 45%)
+        degraded = [
+            sym for sym, v in sym_accuracy.items()
+            if v["accuracy"] < 0.45
+        ]
+
+        return {
+            "overall_accuracy": overall_acc,
+            "correct":          correct,
+            "total":            total,
+            "sufficient_data":  True,
+            "by_symbol":        sym_accuracy,
+            "degraded_symbols": degraded,
         }
 
     def __len__(self) -> int:

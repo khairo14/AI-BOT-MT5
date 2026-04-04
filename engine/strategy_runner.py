@@ -159,15 +159,18 @@ STRATEGY_MAP = {
 # Primary TF bars are set to ≥250 so the regime classifier (which needs
 # EMA200 = 200 bars minimum) always has enough data to return a real label.
 TIMEFRAME_BARS: dict[str, dict[str, int]] = {
-    "ema_scalp":       {"M1": 250, "M5": 250},
-    "bb_squeeze":      {"M5": 250},
-    "vwap_reversion":  {"M5": 250},
-    "macd_ema_trend":  {"H1": 250, "M15": 250},
-    "sr_breakout":     {"H1": 250},
-    "rsi_divergence":  {"M30": 250, "H1": 250},  # H1 needed for LSTM scoring (trained on H1)
-    "ema_trend_rider": {"H1": 250, "H4": 250, "D1": 60},
-    "fibonacci_rsi":   {"H4": 250},
-    "weekly_breakout": {"H4": 250, "D1": 60},
+    # H1 added to scalping strategies for MTF confirmation (higher TF trend check)
+    "ema_scalp":       {"M1": 250, "M5": 250, "H1": 250},
+    "bb_squeeze":      {"M5": 250, "H1": 250},
+    "vwap_reversion":  {"M5": 250, "H1": 250},
+    # D1 added to day_trading strategies for MTF confirmation
+    "macd_ema_trend":  {"H1": 250, "M15": 250, "D1": 60},
+    "sr_breakout":     {"H1": 250, "D1": 60},
+    "rsi_divergence":  {"M30": 250, "H1": 250, "D1": 60},
+    # W1 added to swing strategies for MTF confirmation (50 bars ≈ 1 year)
+    "ema_trend_rider": {"H1": 250, "H4": 250, "D1": 60, "W1": 50},
+    "fibonacci_rsi":   {"H4": 250, "W1": 50},
+    "weekly_breakout": {"H4": 250, "D1": 60, "W1": 50},
 }
 
 # Primary timeframe per strategy — used for regime classification and LSTM scoring.
@@ -428,6 +431,34 @@ class StrategyRunner:
                 f"RL risk factor skipped [{symbol}/{trading_type}]: {_rl_exc} — using raw lot"
             )
 
+        # Volatility-adjusted position sizing — reduce lot during high ATR regimes
+        # ATR% is computed from the primary timeframe df already fetched above.
+        try:
+            _close_arr = primary_df["close"].values.astype(float)
+            _high_arr  = primary_df["high"].values.astype(float)
+            _low_arr   = primary_df["low"].values.astype(float)
+            if len(_close_arr) >= 15:
+                import numpy as _np
+                _prev_close = _np.concatenate([[_close_arr[0]], _close_arr[:-1]])
+                _tr = _np.maximum(
+                    _high_arr - _low_arr,
+                    _np.maximum(
+                        _np.abs(_high_arr - _prev_close),
+                        _np.abs(_low_arr  - _prev_close),
+                    )
+                )
+                _atr14 = float(_np.mean(_tr[-14:]))
+                _atr_pct = _atr14 / max(abs(_close_arr[-1]), 1e-8) * 100.0
+                lot = self.risk_manager.adjust_lot_for_volatility(
+                    lot=lot,
+                    trading_type=trading_type,
+                    atr_pct=_atr_pct,
+                    min_lot=sym_info.get("min_lot", 0.01),
+                    lot_step=sym_info.get("lot_step", 0.01),
+                )
+        except Exception as _vol_exc:
+            logger.debug(f"Volatility adjustment skipped [{symbol}]: {_vol_exc}")
+
         # For scalping: snap the stale bar-close entry to the live market quote.
         # SL/TP distances (in price) are preserved; only the anchor shifts.
         _entry_price = sig.entry_price
@@ -479,6 +510,12 @@ class StrategyRunner:
         try:
             from ai.signal_scorer import scorer
 
+            # Build higher TF dataframe for MTF confirmation
+            # scalping(M5) → H1, day_trading(H1) → D1, swing(H4) → W1
+            _htf_map = {"scalping": "H1", "day_trading": "D1", "swing": "W1"}
+            _htf_str = _htf_map.get(trading_type)
+            _df_higher = tf_data.get(_htf_str) if _htf_str else None
+
             strat_sig.confidence = scorer.score(
                 symbol=symbol,
                 direction=sig.direction,
@@ -488,6 +525,7 @@ class StrategyRunner:
                 df=primary_df,
                 trading_type=trading_type,
                 regime=_regime,
+                df_higher=_df_higher,
             )
             # AI/ML confidence filter (enabled via Settings → AI → confidence_filter_enabled)
             try:

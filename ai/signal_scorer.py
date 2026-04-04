@@ -142,6 +142,7 @@ class SignalScorer:
         df:           pd.DataFrame,   # primary timeframe OHLCV, most-recent bar last
         trading_type: str = "day_trading",
         regime:       str | None = None,  # market regime label from RegimeClassifier
+        df_higher:    pd.DataFrame | None = None,  # higher timeframe for MTF confirmation
     ) -> float:
         """
         Return a 0–1 confidence score for a pending signal.
@@ -162,8 +163,23 @@ class SignalScorer:
                 W_TREND  * trend  +
                 W_VOLUME * volume
             )
-            return round(float(np.clip(score, 0.0, 1.0)), 4)
+            # Multi-timeframe confirmation: apply penalty if higher TF trend
+            # contradicts the signal direction. A signal against the higher TF
+            # trend is structurally weaker regardless of primary TF indicators.
+            #   aligned    → no penalty (score unchanged)
+            #   neutral    → small penalty (score × 0.95)
+            #   conflicted → larger penalty (score × 0.85)
+            if df_higher is not None and len(df_higher) >= 200:
+                _htf_trend = self._trend_score(direction, df_higher)
+                if _htf_trend >= 0.55:
+                    pass  # aligned — no penalty
+                elif _htf_trend >= 0.45:
+                    score *= 0.95  # neutral — slight penalty
+                else:
+                    score *= 0.85  # conflicted — meaningful penalty
 
+            return round(float(np.clip(score, 0.0, 1.0)), 4)
+        
         except Exception as exc:
             logger.warning(f"SignalScorer error [{symbol}]: {exc}")
             return 0.5

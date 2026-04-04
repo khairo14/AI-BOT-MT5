@@ -215,6 +215,66 @@ class RiskManager:
         )
         return lot
 
+    def adjust_lot_for_volatility(
+        self,
+        lot: float,
+        trading_type: str,
+        atr_pct: float,
+        min_lot: float = 0.01,
+        lot_step: float = 0.01,
+    ) -> float:
+        """
+        Scale down lot size when current ATR% exceeds the baseline for this
+        trading type. Protects against oversizing during high-volatility regimes.
+
+        ATR% = ATR(14) / close * 100 — same metric used by regime classifier.
+
+        Baseline ATR% by type (calm market reference):
+          scalping    → 0.15% (M5 candles on major forex)
+          day_trading → 0.50% (H1 candles)
+          swing       → 1.50% (H4 candles)
+
+        Scaling:
+          atr_pct ≤ baseline       → no reduction (factor = 1.0)
+          atr_pct = 2× baseline    → factor = 0.75
+          atr_pct = 3× baseline    → factor = 0.60
+          atr_pct ≥ 4× baseline    → factor = 0.50 (floor)
+
+        This means during a crypto news spike (3× normal vol), position
+        size automatically halves — without needing manual intervention.
+        """
+        _BASELINE_ATR: dict[str, float] = {
+            "scalping":    0.15,
+            "day_trading": 0.50,
+            "swing":       1.50,
+        }
+        baseline = _BASELINE_ATR.get(trading_type, 0.50)
+        if baseline <= 0 or atr_pct <= baseline:
+            return lot  # calm market — no reduction
+
+        ratio = atr_pct / baseline
+        if ratio <= 1.0:
+            factor = 1.0
+        elif ratio <= 2.0:
+            # Linear scale from 1.0 → 0.75 between 1× and 2× baseline
+            factor = 1.0 - (ratio - 1.0) * 0.25
+        elif ratio <= 3.0:
+            # Linear scale from 0.75 → 0.60 between 2× and 3× baseline
+            factor = 0.75 - (ratio - 2.0) * 0.15
+        else:
+            factor = 0.50  # floor at 50% for extreme volatility
+
+        adjusted = math.floor(lot * factor / lot_step) * lot_step
+        adjusted = round(max(min_lot, adjusted), 8)
+
+        if adjusted < lot:
+            logger.info(
+                f"Volatility adjustment [{trading_type}]: "
+                f"ATR%={atr_pct:.2f} ({ratio:.1f}× baseline) → "
+                f"lot {lot} → {adjusted} (factor={factor:.2f})"
+            )
+        return adjusted
+
     # ------------------------------------------------------------------
     # SL / TP Validation
     # ------------------------------------------------------------------

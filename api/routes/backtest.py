@@ -171,6 +171,62 @@ def delete_run(run_id: str):
     return {"deleted": run_id}
 
 
+@router.get("/journal/replay")
+async def replay_journal_trades(
+    trading_type: str = Query("day_trading"),
+    account: str = Query("all"),
+    limit: int = Query(100),
+):
+    """
+    Replay actual closed trades from the journal through current strategy params.
+    Shows what the outcome would have been with current optimized params vs actual.
+    Useful for detecting parameter overfitting on live trades.
+    """
+    from engine.trade_journal import trade_journal
+    from ai.param_optimizer import optimizer
+
+    entries = trade_journal.get(
+        account=account,
+        trading_type=trading_type,
+        event="close",
+        limit=limit,
+    )
+    closed = [e for e in entries if e.get("profit") is not None]
+
+    comparison = []
+    for e in closed:
+        strat = e.get("comment", "").split("|")[0] if "|" in e.get("comment", "") else ""
+        sym   = e.get("symbol", "")
+        actual_profit = e.get("profit", 0)
+        actual_outcome = "win" if actual_profit > 0 else "loss"
+
+        # Get current optimized params for this strategy/symbol
+        current_params = optimizer.get_params(strat, sym) if strat and sym else {}
+
+        comparison.append({
+            "ticket":         e.get("ticket"),
+            "symbol":         sym,
+            "strategy":       strat,
+            "direction":      e.get("direction"),
+            "entry":          e.get("entry"),
+            "close_time":     e.get("close_time"),
+            "actual_profit":  actual_profit,
+            "actual_outcome": actual_outcome,
+            "current_params": current_params,
+            "confidence":     e.get("confidence"),
+        })
+
+    wins    = sum(1 for c in comparison if c["actual_outcome"] == "win")
+    total   = len(comparison)
+    return {
+        "total":      total,
+        "wins":       wins,
+        "win_rate":   round(wins / total, 4) if total else 0,
+        "trades":     comparison,
+        "trading_type": trading_type,
+        "account":    account,
+    }
+
 @router.post("/run")
 async def backtest_run(req: BacktestRequest):
     """

@@ -43,8 +43,8 @@ MAX_WORKERS = 12
 
 _BARS: dict[str, int] = {
     "scalping":     200_000,   # M5:  ~2 years
-    "day_trading":  20_000,   # H1:  ~2 years
-    "swing":         15_000,   # H4:  ~2 years
+    "day_trading":  30_000,   # H1:  ~2 years
+    "swing":         20_000,   # H4:  ~2 years
 }
 
 _TF: dict[str, str] = {
@@ -60,7 +60,7 @@ _STRATEGIES: dict[str, list[str]] = {
 }
 
 # Jobs with bars_used >= this threshold are treated as already done and skipped.
-_DONE_BARS_THRESHOLD = 200_000
+_DONE_BARS_THRESHOLD = 30000
 
 
 # ---------------------------------------------------------------------------

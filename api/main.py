@@ -68,6 +68,38 @@ async def _mt5_watchdog() -> None:
         except Exception as _exc:
             logger.warning(f"MT5 watchdog error: {_exc}")
 
+async def _rl_idle_decay_loop() -> None:
+    """
+    Background task that triggers RL agent idle decay every 30 minutes.
+    Normally idle decay fires inside observe() on trade close, but during
+    long periods with no trades (weekends, holidays) observe() never runs.
+    This loop ensures thresholds still decay toward default over time.
+    """
+    while True:
+        await asyncio.sleep(1800)  # check every 30 minutes
+        try:
+            from ai.rl_agent import rl_manager as _rl
+            from datetime import datetime, timezone
+            _now_ts = datetime.now(tz=timezone.utc).timestamp()
+            for trading_type, agent in _rl._agents.items():
+                # Only decay if threshold is above default and no recent trades
+                _last_ts = getattr(agent, "_last_update_ts", _now_ts)
+                _hours_idle = (_now_ts - _last_ts) / 3600
+                if _hours_idle >= 6.0 and agent._conf_thresh > 0.55:
+                    from ai.rl_agent import DEFAULT_CONF_THRESH, CONF_STEP, _CONF_MAX_BY_MODE
+                    agent._conf_thresh = max(
+                        DEFAULT_CONF_THRESH,
+                        agent._conf_thresh - CONF_STEP
+                    )
+                    agent._last_update_ts = _now_ts
+                    agent._force_save()
+                    logger.info(
+                        f"RL idle decay [{trading_type}]: "
+                        f"conf_thresh → {agent._conf_thresh:.2f} "
+                        f"(idle {_hours_idle:.1f}h)"
+                    )
+        except Exception as _exc:
+            logger.debug(f"RL idle decay loop error: {_exc}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -123,6 +155,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Startup recovery task failed to launch: {_rec_exc}")
         # G-1: MT5 watchdog — reconnect automatically if the terminal drops
         asyncio.create_task(_mt5_watchdog())
+        # RL idle decay — runs every 30 min to decay thresholds during no-trade periods
+        asyncio.create_task(_rl_idle_decay_loop())
     yield
     # Shutdown
     try:

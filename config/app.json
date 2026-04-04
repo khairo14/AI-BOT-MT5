@@ -29,6 +29,12 @@
     "circuit_breaker_triggered": true,
     "news_pause": true
   },
+  "max_spread_pips": {
+    "scalping":    3.0,
+    "day_trading": 6.0,
+    "swing":       15.0
+  },
+  "weekend_gap_protection": true,
   "ai": {
     "price_prediction_enabled": true,
     "confidence_filter_enabled": true,
@@ -66,9 +72,9 @@
         "volume": 0.15
       },
       "ranging_low_vol": {
-        "lstm": 0.2,
-        "rr": 0.45,
-        "trend": 0.1,
+        "lstm": 0.25,
+        "rr": 0.35,
+        "trend": 0.15,
         "volume": 0.25
       },
       "ranging_high_vol": {

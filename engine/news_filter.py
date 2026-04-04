@@ -60,6 +60,25 @@ _SYMBOL_CURRENCIES: dict[str, list[str]] = {
     "GER40CASH": ["EUR"], "UK100CASH": ["GBP"],
 }
 
+# Stock symbols → ticker mapping for earnings calendar lookup
+# Used to fetch earnings dates from open APIs
+_STOCK_TICKERS: dict[str, str] = {
+    "TESLA":      "TSLA",
+    "NVIDIA":     "NVDA",
+    "APPLE":      "AAPL",
+    "MICROSOFT":  "MSFT",
+    "AMAZON":     "AMZN",
+    "GOOGLE":     "GOOGL",
+    "FACEBOOK":   "META",
+    "NETFLIX":    "NFLX",
+    "ADVMICRODEV": "AMD",
+}
+
+# Earnings blackout window — pause trading around earnings releases
+# Stocks can move 10-20% on earnings; wider window than normal news
+_EARNINGS_PAUSE_BEFORE_HOURS = 2   # 2 hours before earnings
+_EARNINGS_PAUSE_AFTER_HOURS  = 4   # 4 hours after earnings
+
 UTC = timezone.utc
 
 
@@ -116,6 +135,10 @@ class NewsFilter:
         self._cfg_cache:           Optional[dict]     = None
         self._cfg_loaded_at:       Optional[datetime] = None
         self._cfg = self._load_cfg()
+        # Earnings calendar cache — keyed by ticker → list of earnings datetimes
+        self._earnings_cache:      dict[str, list[datetime]] = {}
+        self._earnings_fetched_at: Optional[datetime]        = None
+        self._earnings_refresh_in_progress: bool             = False
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -157,6 +180,14 @@ class NewsFilter:
                         f"News blackout: {ev.get('title','?')} "
                         f"({ev.get('currency','?')}) in {remaining}min"
                     )
+    
+        # Earnings blackout for stock symbols
+        _ticker = _STOCK_TICKERS.get(symbol.upper())
+        if _ticker and trading_type in affect_modes:
+            blocked, reason = self._check_earnings(symbol, _ticker)
+            if blocked:
+                return True, reason
+
         return False, ""
 
     def next_events(self, currencies: Optional[list[str]] = None, n: int = 5) -> list[dict]:
@@ -185,10 +216,14 @@ class NewsFilter:
         return result
 
     def status(self) -> dict:
+        with self._lock:
+            earnings_count = sum(len(v) for v in self._earnings_cache.values())
         return {
-            "enabled":      self._reload_cfg().get("enabled", True),
-            "cached_events": len(self._events),
-            "last_fetch":   self._fetched_at.isoformat() if self._fetched_at else None,
+            "enabled":        self._reload_cfg().get("enabled", True),
+            "cached_events":  len(self._events),
+            "last_fetch":     self._fetched_at.isoformat() if self._fetched_at else None,
+            "earnings_cached": earnings_count,
+            "earnings_tickers": list(self._earnings_cache.keys()),
         }
 
     # ── internal ──────────────────────────────────────────────────────────────
@@ -229,6 +264,99 @@ class NewsFilter:
         finally:
             with self._lock:
                 self._refresh_in_progress = False
+
+    def _check_earnings(self, symbol: str, ticker: str) -> tuple[bool, str]:
+        """Check if trading should be paused due to upcoming/recent earnings."""
+        self._refresh_earnings(ticker)
+        now = datetime.now(tz=UTC)
+        with self._lock:
+            earnings_dates = self._earnings_cache.get(ticker, [])
+        for dt in earnings_dates:
+            window_start = dt - timedelta(hours=_EARNINGS_PAUSE_BEFORE_HOURS)
+            window_end   = dt + timedelta(hours=_EARNINGS_PAUSE_AFTER_HOURS)
+            if window_start <= now <= window_end:
+                if now < dt:
+                    mins = int((dt - now).total_seconds() / 60)
+                    return True, f"Earnings blackout: {symbol} reports in {mins}min"
+                else:
+                    mins = int((now - dt).total_seconds() / 60)
+                    return True, f"Earnings blackout: {symbol} reported {mins}min ago"
+        return False, ""
+
+    def _refresh_earnings(self, ticker: str) -> None:
+        """Fetch earnings dates from open API — cached for 6 hours."""
+        now = datetime.now(tz=UTC)
+        with self._lock:
+            if (
+                self._earnings_fetched_at is not None
+                and (now - self._earnings_fetched_at).total_seconds() < 6 * 3600
+                and ticker in self._earnings_cache
+            ):
+                return
+            if self._earnings_refresh_in_progress:
+                return
+            self._earnings_refresh_in_progress = True
+        threading.Thread(
+            target=self._fetch_earnings,
+            args=(ticker,),
+            daemon=True,
+        ).start()
+
+    def _fetch_earnings(self, ticker: str) -> None:
+        """
+        Fetch upcoming earnings dates from Nasdaq earnings calendar API.
+        Uses public endpoint — no API key required.
+        Falls back gracefully if fetch fails.
+        """
+        try:
+            import httpx
+            # Nasdaq public earnings calendar — returns JSON with earnings dates
+            url = f"https://api.nasdaq.com/api/calendar/earnings?date={datetime.now(tz=UTC).strftime('%Y-%m-%d')}"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = httpx.get(url, timeout=10, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            rows = data.get("data", {}).get("rows", []) or []
+            dates: list[datetime] = []
+            for row in rows:
+                if row.get("symbol", "").upper() != ticker.upper():
+                    continue
+                # Time format: "After Market Close" / "Before Market Open" / "Time Not Supplied"
+                time_str = row.get("time", "")
+                date_str = row.get("lastReportedDate") or datetime.now(tz=UTC).strftime("%m/%d/%Y")
+                try:
+                    from datetime import date as _date
+                    _d = datetime.strptime(date_str, "%m/%d/%Y")
+                    # Map time description to approximate UTC time
+                    if "After" in time_str:
+                        # After market close ~21:00 ET = ~01:00 UTC next day
+                        _dt = _d.replace(hour=21, minute=0)
+                    elif "Before" in time_str:
+                        # Before market open ~12:30 ET = ~16:30 UTC
+                        _dt = _d.replace(hour=12, minute=30)
+                    else:
+                        # Unknown time — use market close as conservative estimate
+                        _dt = _d.replace(hour=21, minute=0)
+                    # Convert ET to UTC (approximate — DST not critical for earnings window)
+                    _dt_utc = _dt.replace(tzinfo=timezone(timedelta(hours=-4))).astimezone(UTC)
+                    dates.append(_dt_utc)
+                except Exception:
+                    continue
+            with self._lock:
+                self._earnings_cache[ticker] = dates
+                self._earnings_fetched_at = datetime.now(tz=UTC)
+            if dates:
+                logger.info(f"NewsFilter: fetched {len(dates)} earnings date(s) for {ticker}")
+        except Exception as exc:
+            logger.debug(f"NewsFilter: earnings fetch failed for {ticker}: {exc}")
+            with self._lock:
+                # Cache empty list so we don't retry immediately on failure
+                if ticker not in self._earnings_cache:
+                    self._earnings_cache[ticker] = []
+                self._earnings_fetched_at = datetime.now(tz=UTC)
+        finally:
+            with self._lock:
+                self._earnings_refresh_in_progress = False
 
     @staticmethod
     def _parse_time(date_str: str, time_str: str) -> Optional[datetime]:

@@ -113,6 +113,54 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                         await asyncio.to_thread(paper_engine.sync_positions)
             except Exception as _exc:
                 logger.debug(f"paper sync error: {_exc}")
+                
+        # Weekend gap protection — close swing positions before Friday market close
+        # Forex closes ~22:00 UTC Friday; indices/stocks close ~21:00 UTC Friday.
+        # Check every 5 minutes (every 60 ticks at 5s base) to avoid hammering MT5.
+        try:
+            _now_utc = datetime.now(tz=timezone.utc)
+            _is_friday = _now_utc.weekday() == 4  # Friday = 4
+            _hour = _now_utc.hour
+            _minute = _now_utc.minute
+            # Trigger between 20:45–21:00 UTC on Fridays
+            if _is_friday and _hour == 20 and 45 <= _minute < 60:
+                from engine.account_store import current_mode as _cm
+                _cfg_path = CONFIG_DIR / "app.json"
+                try:
+                    _app_cfg = json.loads(_cfg_path.read_text(encoding="utf-8"))
+                    _gap_protect = _app_cfg.get("weekend_gap_protection", True)
+                except Exception:
+                    _gap_protect = True
+                if _gap_protect:
+                    _positions = await asyncio.to_thread(client.get_open_positions)
+                    _swing_open = [
+                        p for p in _positions
+                        if str(p.get("comment", "")).startswith("swing")
+                    ]
+                    if _swing_open:
+                        logger.warning(
+                            f"Weekend gap protection: closing {len(_swing_open)} "
+                            f"swing position(s) before Friday close"
+                        )
+                        from engine.order_manager import OrderManager
+                        _om = OrderManager(client)
+                        for _pos in _swing_open:
+                            try:
+                                await asyncio.to_thread(
+                                    _om.close_position,
+                                    _pos["ticket"],
+                                    "weekend_gap_protection"
+                                )
+                                logger.info(
+                                    f"Weekend gap: closed #{_pos['ticket']} "
+                                    f"{_pos['symbol']} swing"
+                                )
+                            except Exception as _wge:
+                                logger.warning(
+                                    f"Weekend gap: failed to close #{_pos['ticket']}: {_wge}"
+                                )
+        except Exception as _wg_exc:
+            logger.debug(f"Weekend gap check error: {_wg_exc}")
 
         for mode, interval in INTERVALS.items():
             counters[mode] += 5

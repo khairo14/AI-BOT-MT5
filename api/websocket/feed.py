@@ -157,6 +157,112 @@ async def _tick_poller():
                     p["open_time"] = p["open_time"].isoformat()
             await manager.broadcast_positions(positions)
 
+_monitor_task: Optional[asyncio.Task] = None
+_last_alert_ts: dict[str, float] = {}  # alert_key → last sent timestamp
+_ALERT_COOLDOWN_SECS = 3600  # don't repeat same alert within 1 hour
+
+
+async def _performance_monitor():
+    """
+    Background task — checks trading performance every 5 minutes and
+    broadcasts alerts to the dashboard when thresholds are breached:
+      - Win rate drops below 40% for 10+ consecutive trades
+      - A symbol is consistently losing (3+ losses, 0 wins)
+      - RL agent risk factor drops below 0.6 (agent losing confidence)
+      - LSTM degraded symbols detected
+    """
+    import time as _time
+    while True:
+        await asyncio.sleep(300)  # check every 5 minutes
+        if not manager.has_clients:
+            continue
+        try:
+            from ai.trade_memory import memory
+            from ai.rl_agent import rl_manager
+
+            now_ts = _time.monotonic()
+
+            # ── Alert 1: overall win rate < 40% with 10+ recent trades ──────
+            for trading_type in ("scalping", "day_trading", "swing"):
+                stats = memory.stats(trading_type=trading_type, live_only=True)
+                total = stats.get("total", 0)
+                wr    = stats.get("win_rate", 1.0)
+                if total >= 10 and wr < 0.40:
+                    _key = f"low_winrate_{trading_type}"
+                    if now_ts - _last_alert_ts.get(_key, 0) > _ALERT_COOLDOWN_SECS:
+                        _last_alert_ts[_key] = now_ts
+                        await broadcast_performance_alert({
+                            "level":    "warning",
+                            "category": "win_rate",
+                            "message":  f"{trading_type.replace('_',' ').title()} win rate critical: {wr:.0%} over last {total} trades",
+                            "trading_type": trading_type,
+                            "win_rate": wr,
+                            "total":    total,
+                        })
+                        logger.warning(f"Performance alert: {trading_type} win rate {wr:.0%} ({total} trades)")
+
+            # ── Alert 2: RL risk factor < 0.6 (agent losing confidence) ─────
+            rl_status = rl_manager.status()
+            for trading_type, agent_status in rl_status.items():
+                rf = agent_status.get("risk_factor", 1.0)
+                ct = agent_status.get("confidence_threshold", 0.55)
+                if rf < 0.60:
+                    _key = f"low_rf_{trading_type}"
+                    if now_ts - _last_alert_ts.get(_key, 0) > _ALERT_COOLDOWN_SECS:
+                        _last_alert_ts[_key] = now_ts
+                        await broadcast_performance_alert({
+                            "level":    "info",
+                            "category": "rl_agent",
+                            "message":  f"RL agent [{trading_type}] reducing position sizes: risk_factor={rf:.2f}",
+                            "trading_type": trading_type,
+                            "risk_factor": rf,
+                            "confidence_threshold": ct,
+                        })
+
+            # ── Alert 3: LSTM degraded symbols ───────────────────────────────
+            lstm_acc = memory.lstm_accuracy(min_samples=15, live_only=True)
+            degraded = lstm_acc.get("degraded_symbols", [])
+            if degraded:
+                _key = "degraded_lstm"
+                if now_ts - _last_alert_ts.get(_key, 0) > _ALERT_COOLDOWN_SECS:
+                    _last_alert_ts[_key] = now_ts
+                    await broadcast_performance_alert({
+                        "level":    "warning",
+                        "category": "lstm_accuracy",
+                        "message":  f"LSTM performing below random on: {', '.join(degraded)}",
+                        "degraded_symbols": degraded,
+                    })
+
+            # ── Alert 4: symbol consistently losing ──────────────────────────
+            recent = memory.recent(n=50, live_only=True)
+            sym_pnl: dict[str, list[float]] = {}
+            for o in recent:
+                sym = o.get("symbol", "")
+                if sym:
+                    sym_pnl.setdefault(sym, []).append(o.get("profit", 0))
+            for sym, pnls in sym_pnl.items():
+                if len(pnls) >= 3 and all(p < 0 for p in pnls[-3:]):
+                    _key = f"losing_sym_{sym}"
+                    if now_ts - _last_alert_ts.get(_key, 0) > _ALERT_COOLDOWN_SECS:
+                        _last_alert_ts[_key] = now_ts
+                        await broadcast_performance_alert({
+                            "level":    "warning",
+                            "category": "symbol_performance",
+                            "message":  f"{sym} has 3+ consecutive losses — consider disabling",
+                            "symbol":   sym,
+                            "recent_losses": len([p for p in pnls if p < 0]),
+                        })
+
+        except Exception as _exc:
+            logger.debug(f"Performance monitor error: {_exc}")
+
+
+def start_performance_monitor():
+    """Start the performance monitor background task."""
+    global _monitor_task
+    if _monitor_task is None or _monitor_task.done():
+        _monitor_task = asyncio.create_task(_performance_monitor())
+        logger.info("Performance monitor started.")
 
 def start_poller():
     """Start the background tick poller if not already running."""
@@ -189,7 +295,7 @@ async def websocket_feed(
 
     await manager.connect(ws, symbol_set)
     start_poller()  # idempotent — only starts once
-
+    start_performance_monitor()
     # Send an immediate one-time snapshot so the client has data before the first poll
     try:
         from api.main import get_mt5_client
@@ -230,6 +336,17 @@ async def websocket_feed(
 # ---------------------------------------------------------------------------
 # Signal broadcast — called by the strategy runner to push signals to UI
 # ---------------------------------------------------------------------------
+async def broadcast_performance_alert(alert: dict) -> None:
+    """Push a performance alert to all connected WebSocket clients."""
+    payload = json.dumps({"type": "performance_alert", **alert})
+    dead = []
+    for ws in list(manager._connections.keys()):
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        manager.disconnect(ws)
 
 async def broadcast_signal(signal: dict) -> None:
     """Push a new trading signal to all connected WebSocket clients."""
