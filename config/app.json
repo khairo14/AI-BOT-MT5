@@ -30,21 +30,21 @@
     "news_pause": true
   },
   "max_spread_pips": {
-    "scalping":    3.0,
+    "scalping": 3.0,
     "day_trading": 6.0,
-    "swing":       15.0
+    "swing": 15.0
   },
   "weekend_gap_protection": true,
   "ai": {
     "price_prediction_enabled": true,
     "confidence_filter_enabled": true,
-    "confidence_threshold": 55,
+    "confidence_threshold": 56,
     "rl_agent_enabled": true,
     "swing_scorer_weights": {
-    "lstm":   0.40,
-    "rr":     0.30,
-    "trend":  0.25,
-    "volume": 0.05
+      "lstm": 0.4,
+      "rr": 0.3,
+      "trend": 0.25,
+      "volume": 0.05
     },
     "scorer_weights": {
       "lstm": 0.35,

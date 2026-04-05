@@ -21,7 +21,7 @@
     "SILVER": "volatile_breakout",
     "BRENTCash": "trending_bull",
     "US100Cash": "trending_bear",
-    "US30Cash": "trending_bear",
+    "US30Cash": "trending_bull",
     "US500Cash": "trending_bull",
     "Tesla": "trending_bear",
     "Facebook": "trending_bear",
@@ -31,59 +31,59 @@
   "pending": {
     "EURUSD": [
       "quiet",
-      165
+      3
     ],
     "BTCUSD": [
       "trending_bear",
-      1348
+      1666
     ],
     "ETHUSD": [
       "trending_bear",
-      796
+      1114
     ],
     "USDJPY": [
       "quiet",
-      165
+      3
     ],
     "GBPUSD": [
       "quiet",
-      165
+      3
     ],
     "XRPUSD": [
       "trending_bear",
-      486
+      624
     ],
     "SOLUSD": [
       "trending_bear",
-      579
+      717
     ],
     "EURJPY": [
       "quiet",
-      347677
+      355783
     ],
     "AUDUSD": [
       "trending_bear",
-      2021
+      2837
     ],
     "USDCHF": [
       "quiet",
-      30875
+      33577
     ],
     "GBPJPY": [
       "quiet",
-      2814
+      3492
     ],
     "GOLD": [
-      "trending_bull",
-      12
+      "trending_bear",
+      2
     ],
     "OILCash": [
-      "trending_bull",
-      12
+      "volatile_breakout",
+      2
     ],
     "Nvidia": [
       "trending_bear",
-      7070
+      7660
     ],
     "Apple": [
       "trending_bear",
@@ -99,7 +99,7 @@
     ],
     "NZDUSD": [
       "trending_bear",
-      347
+      485
     ],
     "SILVER": [
       "trending_bear",
@@ -107,35 +107,35 @@
     ],
     "BRENTCash": [
       "trending_bull",
-      609
+      747
     ],
     "US100Cash": [
       "trending_bear",
-      6
+      3
     ],
     "US30Cash": [
-      "trending_bear",
-      5
+      "trending_bull",
+      3
     ],
     "US500Cash": [
       "trending_bull",
-      2853
+      3531
     ],
     "Tesla": [
       "trending_bear",
-      5758
+      6210
     ],
     "Facebook": [
       "trending_bear",
-      1716
+      1854
     ],
     "AdvMicroDev": [
       "trending_bear",
-      562
+      608
     ],
     "UK100Cash": [
       "trending_bull",
-      8623
+      9301
     ]
   }
 }

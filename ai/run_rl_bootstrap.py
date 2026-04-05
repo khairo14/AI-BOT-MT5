@@ -46,12 +46,12 @@ from ai.rl_agent import RLAgent, rl_manager as _rl_manager
 
 # 1 year of bars per trading type (enough for Q-table coverage; faster than optimizer's 2 years)
 _BARS: dict[str, int] = {
-    "scalping":     200_000,   # M5  ~2 years
-    "day_trading":   30_000,   # H1  ~2 years
-    "swing":         20_000,   # H4  ~2 years
+    "scalping":     250_000,   # M5  ~2.38 years
+    "day_trading":   50_000,   # H1  ~5.71 years
+    "swing":         30_000,   # H4  ~13.7 years
 }
 
-_D1_BARS = 800   # 3.5 year of daily bars (for ema_trend_rider / weekly_breakout)
+_D1_BARS = 1_200   # 3.5 year of daily bars (for ema_trend_rider / weekly_breakout)
 
 _TF: dict[str, str] = {
     "scalping":    "M5",
