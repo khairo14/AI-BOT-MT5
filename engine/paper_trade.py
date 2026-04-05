@@ -141,6 +141,13 @@ class PaperTradeEngine:
             if mt5_match:
                 pos.current_price = mt5_match.get("price_current", pos.current_price)
                 pos.profit        = mt5_match.get("profit", 0.0)
+                # Sync SL/TP in case _poll_outcome moved them (breakeven, trail)
+                _live_sl = mt5_match.get("sl")
+                _live_tp = mt5_match.get("tp")
+                if _live_sl and _live_sl != pos.sl_price:
+                    pos.sl_price = float(_live_sl)
+                if _live_tp and _live_tp != pos.tp_price:
+                    pos.tp_price = float(_live_tp)
             else:
                 # Position no longer in MT5 — mark as closed.
                 # H-7 fix: query deal history to get the actual fill price rather than
@@ -253,7 +260,7 @@ class PaperTradeEngine:
                         extra={"source": "paper"},
                     ))
                     # Notify RL agent using the freshly-updated stats
-                    _stats_pt = _mem_pt.stats(trading_type=pos.trading_type, live_only=False)
+                    _stats_pt = _mem_pt.stats(trading_type=pos.trading_type, live_only=True)
                     _vol_pct  = abs(pos.open_price - pos.sl_price) / max(abs(pos.open_price), 1e-8) * 100.0 if pos.sl_price else 0.0
                     from ai.rl_agent import rl_manager as _rl_pt
                     _rl_pt.on_trade_closed(

@@ -25,6 +25,94 @@ _NUMERIC_FIELDS = frozenset({
     "min_lot", "max_lot", "lot_step", "risk_pct",
 })
 
+# ── Schema definitions ────────────────────────────────────────────────────────
+# Each schema entry: field_path (dot-separated) → (type, min, max, allowed_values)
+# type: "number" | "bool" | "str" | "str_enum"
+# min/max only used for "number"; allowed_values only for "str_enum".
+# Nested paths like "drawdown.daily_limit_pct" match inside nested dicts.
+_RISK_SCHEMA: dict[str, tuple] = {
+    "risk_per_trade_pct":         ("number", 0.01, 10.0, None),
+    "max_risk_per_trade_pct":     ("number", 0.01, 20.0, None),
+    "risk_reward_min":            ("number", 0.5,  10.0, None),
+    "daily_limit_pct":            ("number", 0.1,  50.0, None),
+    "weekly_limit_pct":           ("number", 0.1, 100.0, None),
+    "max_consecutive_losses":     ("number", 1.0,  50.0, None),
+    "consecutive_loss_pause_hours":("number",0.0, 168.0, None),
+    "pause_minutes_before":       ("number", 0.0, 120.0, None),
+    "pause_minutes_after":        ("number", 0.0,  60.0, None),
+}
+
+_APP_SCHEMA: dict[str, tuple] = {
+    "confidence_threshold":       ("number",  0.0, 100.0, None),
+    "max_correlated_positions":   ("number",  1.0,  10.0, None),
+    "lstm":                       ("number",  0.0,   1.0, None),
+    "rr":                         ("number",  0.0,   1.0, None),
+    "trend":                      ("number",  0.0,   1.0, None),
+    "volume":                     ("number",  0.0,   1.0, None),
+}
+
+_SCANNER_SCHEMA: dict[str, tuple] = {
+    "enabled": ("bool", None, None, None),
+}
+
+# Max symbols per scanner mode — also enforced in update_scanner_config
+_SCANNER_MAX = {"scalping": 7, "day_trading": 15, "swing": 18}
+
+
+def _validate_schema(data: dict, schema: dict, path: str = "") -> None:
+    """
+    Recursively validate a dict against a flat schema.
+    Schema keys are matched against leaf-level field names anywhere in the tree.
+    Raises HTTPException(422) with a descriptive message on first violation.
+    """
+    for key, value in data.items():
+        full_path = f"{path}.{key}" if path else key
+        if key in schema:
+            typ, lo, hi, choices = schema[key]
+            if typ == "number":
+                if not isinstance(value, (int, float)):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"'{full_path}' must be a number, got {type(value).__name__!r}",
+                    )
+                if lo is not None and value < lo:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"'{full_path}' = {value} is below minimum {lo}",
+                    )
+                if hi is not None and value > hi:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"'{full_path}' = {value} exceeds maximum {hi}",
+                    )
+            elif typ == "bool":
+                if not isinstance(value, bool):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"'{full_path}' must be true/false, got {type(value).__name__!r}",
+                    )
+            elif typ == "str_enum" and choices:
+                if value not in choices:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"'{full_path}' must be one of {choices}, got {value!r}",
+                    )
+        if isinstance(value, dict):
+            _validate_schema(value, schema, full_path)
+
+
+def _validate_numeric_fields(data: dict) -> None:
+    """Recursively check that known numeric fields contain actual numbers.
+    Kept for backward compatibility — full schema validation is done per-endpoint."""
+    for key, value in data.items():
+        if key in _NUMERIC_FIELDS and not isinstance(value, (int, float)):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Field '{key}' must be a number, got {type(value).__name__!r}",
+            )
+        if isinstance(value, dict):
+            _validate_numeric_fields(value)
+
 
 def _load(filename: str) -> dict:
     path = CONFIG_DIR / filename
@@ -35,18 +123,6 @@ def _load(filename: str) -> dict:
             return json.load(f)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"Config file is corrupted ({filename}): {exc}")
-
-
-def _validate_numeric_fields(data: dict) -> None:
-    """Recursively check that known numeric fields contain actual numbers."""
-    for key, value in data.items():
-        if key in _NUMERIC_FIELDS and not isinstance(value, (int, float)):
-            raise HTTPException(
-                status_code=422,
-                detail=f"Field '{key}' must be a number, got {type(value).__name__!r}",
-            )
-        if isinstance(value, dict):
-            _validate_numeric_fields(value)
 
 
 def _save(filename: str, data: dict) -> None:
@@ -89,8 +165,19 @@ def get_app_config():
 
 @router.patch("/app")
 def update_app_config(body: PatchRequest):
-    """Deep-merge partial updates into app.json."""
+    """Deep-merge partial updates into app.json with schema validation."""
     _validate_numeric_fields(body.data)
+    _validate_schema(body.data, _APP_SCHEMA)
+    # Validate scorer weight sums if present — must sum to ≈1.0
+    for weight_key in ("scorer_weights", "scalping_scorer_weights", "swing_scorer_weights"):
+        wdata = body.data.get("ai", {}).get(weight_key)
+        if wdata and isinstance(wdata, dict):
+            total = sum(float(v) for v in wdata.values() if isinstance(v, (int, float)))
+            if total > 0 and abs(total - 1.0) > 0.05:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"ai.{weight_key} weights sum to {total:.3f}; must sum to 1.0 (±0.05)",
+                )
     current = _load("app.json")
     _deep_merge(current, body.data)
     _save("app.json", current)
@@ -108,8 +195,18 @@ def get_risk_config():
 
 @router.patch("/risk")
 def update_risk_config(body: PatchRequest):
-    """Deep-merge partial updates into risk.json."""
+    """Deep-merge partial updates into risk.json with schema validation."""
     _validate_numeric_fields(body.data)
+    _validate_schema(body.data, _RISK_SCHEMA)
+    # Extra cross-field check: daily limit must be <= weekly limit
+    dd = body.data.get("drawdown", {})
+    daily  = dd.get("daily_limit_pct")
+    weekly = dd.get("weekly_limit_pct")
+    if daily is not None and weekly is not None and daily > weekly:
+        raise HTTPException(
+            status_code=422,
+            detail=f"drawdown.daily_limit_pct ({daily}) cannot exceed weekly_limit_pct ({weekly})",
+        )
     current = _load("risk.json")
     _deep_merge(current, body.data)
     _save("risk.json", current)
@@ -137,6 +234,26 @@ def get_symbols_config():
 def update_symbols_config(body: PatchRequest):
     """Update symbol enable/disable flags."""
     _validate_numeric_fields(body.data)
+    # Validate each mode entry is a list of dicts with required keys
+    for mode, entries in body.data.items():
+        if not isinstance(entries, list):
+            continue
+        for i, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"symbols.{mode}[{i}] must be an object with 'symbol' and 'enabled' keys",
+                )
+            if "symbol" in entry and not isinstance(entry["symbol"], str):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"symbols.{mode}[{i}].symbol must be a string",
+                )
+            if "enabled" in entry and not isinstance(entry["enabled"], bool):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"symbols.{mode}[{i}].enabled must be true or false",
+                )
     current = _load("symbols.json")
     _deep_merge(current, body.data)
     _save("symbols.json", current)
@@ -154,8 +271,30 @@ def get_strategies_config():
 
 @router.patch("/strategies")
 def update_strategies_config(body: PatchRequest):
-    """Update strategy parameters or active strategy lists."""
+    """Update strategy parameters or active strategy lists with validation."""
     _validate_numeric_fields(body.data)
+    # Validate active_strategies lists contain only known strategy names
+    _KNOWN_STRATEGIES = {
+        "ema_scalp", "bb_squeeze", "vwap_reversion",
+        "macd_ema_trend", "sr_breakout", "rsi_divergence",
+        "ema_trend_rider", "fibonacci_rsi", "weekly_breakout",
+    }
+    for mode_key, mode_val in body.data.items():
+        if isinstance(mode_val, dict):
+            active = mode_val.get("active_strategies")
+            if active is not None:
+                if not isinstance(active, list):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"strategies.{mode_key}.active_strategies must be a list",
+                    )
+                unknown = [s for s in active if s not in _KNOWN_STRATEGIES]
+                if unknown:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Unknown strategy name(s) in {mode_key}: {unknown}. "
+                               f"Valid names: {sorted(_KNOWN_STRATEGIES)}",
+                    )
     current = _load("strategies.json")
     _deep_merge(current, body.data)
     _save("strategies.json", current)
@@ -201,9 +340,31 @@ def get_scanner_config():
 
 @router.patch("/scanner")
 def update_scanner_config(body: PatchRequest):
-    """Update scanner settings. Enforces per-mode symbol limits."""
+    """Update scanner settings. Enforces per-mode symbol limits and type checks."""
     _validate_numeric_fields(body.data)
-    _SCANNER_MAX = {"scalping": 7, "day_trading": 15, "swing": 18}
+    _validate_schema(body.data, _SCANNER_SCHEMA)
+    # Validate per-mode symbol lists
+    for mode, limit in _SCANNER_MAX.items():
+        mode_data = body.data.get(mode)
+        if mode_data is None:
+            continue
+        if not isinstance(mode_data, dict):
+            raise HTTPException(
+                status_code=422,
+                detail=f"scanner.{mode} must be an object",
+            )
+        syms = mode_data.get("symbols")
+        if syms is not None:
+            if not isinstance(syms, list):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"scanner.{mode}.symbols must be a list of symbol strings",
+                )
+            if not all(isinstance(s, str) for s in syms):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"scanner.{mode}.symbols must contain only strings",
+                )
     current = _load("scanner.json")
     _deep_merge(current, body.data)
     for m, limit in _SCANNER_MAX.items():
@@ -211,6 +372,36 @@ def update_scanner_config(body: PatchRequest):
             current[m]["symbols"] = current[m]["symbols"][:limit]
     _save("scanner.json", current)
     return current
+
+
+# ---------------------------------------------------------------------------
+# Config validation endpoint — check all files are well-formed
+# ---------------------------------------------------------------------------
+
+@router.get("/validate")
+def validate_all_configs():
+    """
+    Read all config files and report any JSON parse errors or missing files.
+    Returns a dict of {filename: "ok" | error_message} for each file.
+    Useful for diagnosing silent corruption after a bad PATCH or manual edit.
+    """
+    _FILES = ["app.json", "risk.json", "symbols.json", "strategies.json",
+              "scanner.json", "account_mode.json"]
+    results = {}
+    for fname in _FILES:
+        path = CONFIG_DIR / fname
+        if not path.exists():
+            results[fname] = "missing"
+            continue
+        try:
+            json.loads(path.read_text(encoding="utf-8-sig"))
+            results[fname] = "ok"
+        except json.JSONDecodeError as exc:
+            results[fname] = f"JSON error: {exc}"
+        except Exception as exc:
+            results[fname] = f"read error: {exc}"
+    all_ok = all(v == "ok" for v in results.values())
+    return {"all_ok": all_ok, "files": results}
 
 
 # ---------------------------------------------------------------------------

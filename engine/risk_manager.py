@@ -37,7 +37,7 @@ class RiskManager:
         self._day_start_balance: Optional[float] = None
         self._week_start_balance: Optional[float] = None
         self._tracking_date: Optional[date] = None
-        self._tracking_week: Optional[int] = None
+        self._tracking_week: Optional[tuple[int, int]] = None
 
         # Consecutive loss tracking per trading mode
         self._consecutive_losses: dict[str, int] = {
@@ -86,7 +86,7 @@ class RiskManager:
                 "day_start_balance":   self._day_start_balance,
                 "week_start_balance":  self._week_start_balance,
                 "tracking_date":       self._tracking_date.isoformat() if self._tracking_date else None,
-                "tracking_week":       self._tracking_week,
+                "tracking_week":       list(self._tracking_week) if self._tracking_week else None,
                 "consecutive_losses":  self._consecutive_losses,
                 "paused_modes":        {
                     k: v.isoformat() if v else None
@@ -109,7 +109,9 @@ class RiskManager:
             self._day_start_balance  = state.get("day_start_balance")
             self._week_start_balance = state.get("week_start_balance")
             self._tracking_date      = date.fromisoformat(state["tracking_date"]) if state.get("tracking_date") else None
-            self._tracking_week      = state.get("tracking_week")
+            _tw = state.get("tracking_week")
+            self._tracking_week = tuple(_tw) if isinstance(_tw, list) and len(_tw) == 2 else _tw
+            
             for k, v in state.get("consecutive_losses", {}).items():
                 if k in self._consecutive_losses:
                     self._consecutive_losses[k] = int(v)
@@ -332,8 +334,11 @@ class RiskManager:
         and triggers circuit breakers if thresholds are exceeded.
         """
         with self._lock:
-            today = date.today()
-            week_num = today.isocalendar().week
+            # Always use UTC to match forex market day boundaries
+            _now_utc  = datetime.now(tz=timezone.utc)
+            today     = _now_utc.date()
+            _iso      = _now_utc.isocalendar()
+            week_key  = (_iso.year, _iso.week)   # tuple prevents year-boundary rollover
 
             # Reset daily tracking at start of new day
             if self._tracking_date != today:
@@ -343,8 +348,8 @@ class RiskManager:
                 logger.info(f"Daily balance reset: {current_balance}")
 
             # Reset weekly tracking at start of new week
-            if self._tracking_week != week_num:
-                self._tracking_week = week_num
+            if self._tracking_week != week_key:
+                self._tracking_week = week_key
                 self._week_start_balance = current_balance
                 self._weekly_halted = False
                 logger.info(f"Weekly balance reset: {current_balance}")
@@ -549,3 +554,5 @@ class RiskManager:
                 for k, v in self._paused_modes.items()
             },
         }
+# Application-level singleton
+risk_manager = RiskManager()

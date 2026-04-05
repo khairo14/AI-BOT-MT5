@@ -32,8 +32,12 @@ from loguru import logger
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
 
-# Forex Factory JSON calendar endpoint (public, no auth required)
-_FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+# Forex Factory JSON calendar endpoints (public, no auth required).
+# Both this week and next week are fetched so Sunday-night events on the
+# upcoming week are visible to the blackout check (e.g. Monday 00:30 UTC
+# NFP release becomes available Saturday when only the thisweek URL is used).
+_FF_URL_THIS = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+_FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
 
 # Map MT5 symbol prefixes → currency codes
 _SYMBOL_CURRENCIES: dict[str, list[str]] = {
@@ -247,18 +251,21 @@ class NewsFilter:
     def _fetch(self) -> None:
         try:
             import httpx
-            resp = httpx.get(_FF_URL, timeout=10)
-            resp.raise_for_status()
-            raw = resp.json()
             events = []
-            for ev in raw:
-                dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
-                ev["_dt"] = dt
-                events.append(ev)
+            for url in (_FF_URL_THIS, _FF_URL_NEXT):
+                try:
+                    resp = httpx.get(url, timeout=10)
+                    resp.raise_for_status()
+                    for ev in resp.json():
+                        dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
+                        ev["_dt"] = dt
+                        events.append(ev)
+                except Exception as _url_exc:
+                    logger.warning(f"NewsFilter: failed to fetch {url}: {_url_exc}")
             with self._lock:
                 self._events     = events
                 self._fetched_at = datetime.now(tz=UTC)
-            logger.info(f"NewsFilter: fetched {len(events)} events from Forex Factory")
+            logger.info(f"NewsFilter: fetched {len(events)} events (this + next week)")
         except Exception as exc:
             logger.warning(f"NewsFilter fetch failed: {exc} — using cached data")
         finally:

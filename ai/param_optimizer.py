@@ -649,8 +649,8 @@ class ParamOptimizer:
 
         # Build secondary-timeframe extras for strategies that need them.
         # The optimizer only fetches one df (primary TF). For multi-TF strategies
-        # we reuse the same df as the secondary TF — it's a reasonable approximation
-        # for parameter search (trend direction changes slowly relative to entry TF).
+        # we reuse the same df as the secondary TF — reasonable approximation for
+        # parameter search (trend direction changes slowly relative to entry TF).
         _extra_dfs: dict = {}
         if strategy_name in ("macd_ema_trend", "rsi_divergence"):
             # Both strategies use df_h1 for trend confirmation; the optimizer
@@ -665,13 +665,30 @@ class ParamOptimizer:
         elif strategy_name == "weekly_breakout":
             _extra_dfs = {"df_daily": df}
 
+        # Slice extra_dfs to match the train/val boundary so the secondary-TF
+        # dataframe cannot leak future bars into the training backtest.
+        # Without this, the full extra_df (100% of data) is visible to the
+        # training phase even though the primary df is capped at 75%.
+        if _use_validation and _extra_dfs:
+            _extra_dfs_train = {
+                k: v.iloc[:_val_split].reset_index(drop=True)
+                for k, v in _extra_dfs.items()
+            }
+            _extra_dfs_val = {
+                k: v.iloc[_val_split:].reset_index(drop=True)
+                for k, v in _extra_dfs.items()
+            }
+        else:
+            _extra_dfs_train = _extra_dfs
+            _extra_dfs_val   = _extra_dfs
+
         for combo in combos:
             time.sleep(0)  # yield CPU between combos to prevent event-loop starvation
-            # Phase 1: optimize on training set
+            # Phase 1: optimize on training set (train-split extra_dfs only)
             wr_train, avg_rr_train, n_train, regime_stats = _backtest_combo(
                 strategy_cls, dispatch, _df_train, combo,
                 cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
-                _extra_dfs, bt_window,
+                _extra_dfs_train, bt_window,
             )
             train_score = wr_train * max(avg_rr_train, 0.0) if n_train >= MIN_BACKTEST_SIGNALS else 0.0
             if train_score <= 0.0:
@@ -683,7 +700,7 @@ class ParamOptimizer:
                 wr_val, avg_rr_val, n_val, _ = _backtest_combo(
                     strategy_cls, dispatch, _df_val, combo,
                     cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
-                    _extra_dfs, bt_window,
+                    _extra_dfs_val, bt_window,
                 )
                 # Require minimum signals on validation set too
                 val_score = wr_val * max(avg_rr_val, 0.0) if n_val >= max(MIN_BACKTEST_SIGNALS // 3, 3) else 0.0
@@ -762,10 +779,21 @@ class ParamOptimizer:
             # Also update __global__ if this is the first symbol
             if "__global__" not in data[strategy_name]:
                 data[strategy_name]["__global__"] = entry
-            OPT_FILE.write_text(
-                json.dumps(data, indent=2),
-                encoding="utf-8",
-            )
+            # Atomic write: serialise to a temp file in the same directory then
+            # rename over the target so a mid-write crash cannot corrupt the JSON.
+            import os as _os, tempfile as _tempfile
+            _serialised = json.dumps(data, indent=2)
+            _fd, _tmp_path = _tempfile.mkstemp(dir=OPT_FILE.parent, suffix=".tmp")
+            try:
+                with _os.fdopen(_fd, "w", encoding="utf-8") as _tf:
+                    _tf.write(_serialised)
+                _os.replace(_tmp_path, OPT_FILE)
+            except Exception:
+                try:
+                    _os.unlink(_tmp_path)
+                except OSError:
+                    pass
+                raise
 
     _STATUS_FILE = Path(__file__).parent / "data" / "optimizer_status.json"
 

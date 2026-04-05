@@ -265,23 +265,22 @@ class SignalBus:
             except Exception:
                 _conf_filter_on = True
             if _conf_filter_on:
-                MIN_CONF = {"scalping": 0.60, "day_trading": 0.50, "swing": 0.45}
-                min_conf = MIN_CONF.get(mode, 0.50)
                 conf = float(signal.get("confidence") or 0.0)
-                if conf < min_conf:
-                    # Silently drop — do NOT queue, do NOT broadcast.
-                    # Strategy runner generates a new UUID every scan tick so
-                    # queuing these would fill the archive with thousands of
-                    # rejected entries per hour and produce non-stop popups.
+                try:
+                    from ai.rl_agent import rl_manager as _rl_bus
+                    _is_tradeable = _rl_bus.should_take_signal(mode, conf)
+                except Exception:
+                    _is_tradeable = conf >= 0.50
+                if not _is_tradeable:
                     logger.debug(
                         f"SignalBus: conf-drop {signal.get('symbol')}/{signal.get('strategy')} "
-                        f"({mode}) conf={conf:.0%} < {min_conf:.0%} — not queued"
+                        f"({mode}) conf={conf:.0%} — not queued"
                     )
-                    # IMPROVE-4: record reason even for silent drops
                     signal["rejection_reason"] = (
-                        f"Confidence {conf:.0%} below minimum {min_conf:.0%} for {mode}"
+                        f"Confidence {conf:.0%} below RL threshold for {mode}"
                     )
                     return signal
+                
             signal["status"] = "executing"
             self.queue[signal["id"]] = signal
             self._pending_keys.add(_dedup_key)
@@ -516,9 +515,9 @@ class SignalBus:
                                 sl=_sl_lot,
                                 tick_value=_sym_info_lot.get("pip_value", 1.0),
                                 tick_size=_sym_info_lot.get("tick_size", 0.00001),
-                                min_lot=_sym_info_lot.get("volume_min", 0.01),
-                                max_lot=_sym_info_lot.get("volume_max", 100.0),
-                                lot_step=_sym_info_lot.get("volume_step", 0.01),
+                                min_lot=_sym_info_lot.get("min_lot", 0.01),
+                                max_lot=_sym_info_lot.get("max_lot", 100.0),
+                                lot_step=_sym_info_lot.get("lot_step", 0.01),
                             )
                             if abs(_new_lot - _lot) / max(_lot, 1e-8) > 0.10:
                                 logger.info(
@@ -1220,6 +1219,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
                 mode=signal.get("account_mode") or _poll_mode,
+                lstm_predicted_direction=signal.get("direction", "").upper() or None,
+                regime=signal.get("regime"),
                 extra={"source": "live", "slippage_pips": _slippage_pips},
             )
             memory.record(outcome)

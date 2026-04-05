@@ -242,7 +242,7 @@ class SignalScorer:
 
         Scoring formula:
           gap_pct        = (EMA50 - EMA200) / |EMA200|   (positive = bullish)
-          trend_strength = clip(gap_pct / 0.02, -1, 1)   (normalised to ±1 at ±2% gap)
+          trend_strength = clip(gap_pct / 0.05, -1, 1)   (normalised to ±1 at ±5% gap)
           raw_score      = 0.5 + 0.4 × trend_strength     (range [0.1, 0.9])
 
         BUY  direction: raw_score  (high = trend aligned)

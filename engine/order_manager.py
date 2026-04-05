@@ -449,7 +449,7 @@ class OrderManager:
                 entry=pos.price_open,
                 sl=pos.sl,
                 tp=pos.tp if pos.tp else None,
-                profit=result.profit if hasattr(result, "profit") else None,
+                profit= None,
                 trading_type="",
                 account_mode=current_mode(),
                 comment=reason,

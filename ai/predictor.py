@@ -265,16 +265,20 @@ class PricePredictor:
         _LBL_SMOOTH = 0.05
 
         model.train()
-        for _ in range(EPOCHS):
-            for i in range(0, len(X_train), BATCH_SIZE):
-                xb = X_train[i: i + BATCH_SIZE]
-                yb = y_train[i: i + BATCH_SIZE]
+        for _epoch in range(EPOCHS):
+            # Shuffle sequence order each epoch (not internal bar order)
+            _perm      = torch.randperm(len(X_train))
+            _X_shuf    = X_train[_perm]
+            _y_shuf    = y_train[_perm]
+            for i in range(0, len(_X_shuf), BATCH_SIZE):
+                xb = _X_shuf[i: i + BATCH_SIZE]
+                yb = _y_shuf[i: i + BATCH_SIZE]
                 yb_smooth = yb * (1.0 - _LBL_SMOOTH) + _LBL_SMOOTH * 0.5
                 optimizer.zero_grad()
                 criterion(model(xb), yb_smooth).backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
-
+                
         # Validation accuracy (model outputs logits; sigmoid > 0.5 ↔ logit > 0)
         model.eval()
         with torch.no_grad():

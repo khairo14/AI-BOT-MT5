@@ -328,15 +328,20 @@ class TradeMemory:
         _alarm    = False
         _alarm_at = None
 
+        _alarm_direction = None
         for i, r in enumerate(results[_half:]):
             _ph_sum += r - _baseline_wr - delta
             _ph_min  = min(_ph_min, _ph_sum)
             _ph_max  = max(_ph_max, _ph_sum)
-            # Upward drift (improving): _ph_sum - _ph_min > lambda
-            # Downward drift (degrading): _ph_max - _ph_sum > lambda
             if _ph_max - _ph_sum > lambda_threshold:
-                _alarm    = True
-                _alarm_at = _half + i
+                _alarm           = True
+                _alarm_direction = "down"
+                _alarm_at        = _half + i
+                break
+            if _ph_sum - _ph_min > lambda_threshold:
+                _alarm           = True
+                _alarm_direction = "up"
+                _alarm_at        = _half + i
                 break
 
         # Rolling win rate over last window bars for severity assessment
@@ -344,6 +349,7 @@ class TradeMemory:
 
         return {
             "drift_detected":    _alarm,
+            "drift_direction":   _alarm_direction,
             "drift_at_sample":   _alarm_at,
             "baseline_win_rate": round(_baseline_wr, 4),
             "recent_win_rate":   round(_recent_wr, 4),

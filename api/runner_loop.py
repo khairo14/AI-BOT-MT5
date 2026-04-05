@@ -7,10 +7,15 @@ and feeds new signals into the SignalBus.
 The MT5 API is blocking/synchronous, so all strategy work runs via
 asyncio.to_thread() to avoid blocking the event loop.
 
-Intervals (seconds, start running immediately on first tick):
-  scalping:    30 s  (M5 bars close every 300 s — 30 s is plenty reactive)
-  day_trading: 60 s
-  swing:       300 s (5 min)
+Bar-close guard: each mode only runs when a new bar has closed since the
+last scan. This prevents redundant OHLCV fetches on every 5-second base
+tick, reducing MT5 lock contention by ~90% for scalping (M1 bars close
+every 60 s, not every 5 s).
+
+Intervals (seconds between checks — actual execution gated by bar close):
+  scalping:    5 s check, fires on new M1 bar  (~60 s between runs)
+  day_trading: 60 s check, fires on new H1 bar (~3600 s between runs)
+  swing:       300 s check, fires on new H4 bar (~14400 s between runs)
 """
 
 from __future__ import annotations
@@ -27,13 +32,29 @@ from loguru import logger
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 INTERVALS: dict[str, int] = {
-    "scalping":    5,    # M1 bars close every 60 s — 5 s keeps latency within 1 bar
+    "scalping":    5,    # check every 5 s; bar-close guard fires only on new M1 bar
     "day_trading": 60,
     "swing":       300,
 }
 
+# Primary timeframe per mode — used by bar-close guard to detect new bar
+_MODE_PRIMARY_TF: dict[str, str] = {
+    "scalping":    "M1",
+    "day_trading": "H1",
+    "swing":       "H4",
+}
+
+# Bar-close guard: track the timestamp of the last bar seen per mode.
+# A mode scan only runs when the latest bar timestamp advances beyond this value.
+# Keyed by mode string. Values are pd.Timestamp or None on first run.
+_last_bar_time: dict[str, object] = {
+    "scalping": None,
+    "day_trading": None,
+    "swing": None,
+}
+
 _runner_task: Optional[asyncio.Task] = None
-_mode_tasks: dict[str, asyncio.Task] = {}  # NEW-7: per-mode task refs to detect accumulation
+_mode_tasks: dict[str, asyncio.Task] = {}  # per-mode task refs to detect accumulation
 _risk_manager = None  # exposed so /risk/status can read live state
 _paused: bool = False  # set True during account mode switch
 
@@ -50,6 +71,46 @@ def resume_runner() -> None:
     global _paused
     _paused = False
     logger.info("Strategy runner resumed.")
+
+
+def _get_probe_symbol(mode: str) -> str:
+    """Return the first enabled symbol for a mode from symbols.json, default EURUSD."""
+    try:
+        syms_cfg = json.loads(
+            (CONFIG_DIR / "symbols.json").read_text(encoding="utf-8-sig")
+        )
+        for entry in syms_cfg.get(mode, []):
+            if isinstance(entry, dict) and entry.get("enabled", False):
+                return entry["symbol"]
+    except Exception:
+        pass
+    return "EURUSD"
+
+
+def _new_bar_closed(client, mode: str) -> bool:
+    """
+    Return True if a new primary-timeframe bar has closed since the last scan.
+    Fetches only the latest 2 bars (minimal MT5 lock time) to compare timestamps.
+
+    First call always returns True so each mode runs immediately at startup.
+    Falls back to True on any MT5 error so a data failure never silently
+    suppresses trading — the strategy runner handles missing data gracefully.
+    """
+    global _last_bar_time
+    tf     = _MODE_PRIMARY_TF.get(mode, "M1")
+    symbol = _get_probe_symbol(mode)
+    try:
+        df = client.get_ohlcv(symbol, tf, count=2)
+        if df is None or df.empty:
+            return True   # fail-open
+        latest = df.iloc[-1]["time"]
+        prev   = _last_bar_time.get(mode)
+        if prev is None or latest > prev:
+            _last_bar_time[mode] = latest
+            return True
+        return False
+    except Exception:
+        return True   # fail-open: never suppress trading on a fetch error
 
 
 async def _run_one_mode(runner, bus, mode: str, sym_override) -> None:
@@ -166,6 +227,14 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
             counters[mode] += 5
             if counters[mode] >= interval:
                 counters[mode] = 0
+                # Bar-close guard: only run strategies when a new primary-TF bar
+                # has closed since the last scan. This avoids redundant OHLCV fetches
+                # (and MT5 lock contention) on every 5 s base tick for scalping.
+                # The guard uses a lightweight 2-bar fetch on the probe symbol.
+                # Falls back to True on any error so a data issue never blocks trading.
+                if not await asyncio.to_thread(_new_bar_closed, client, mode):
+                    logger.debug(f"Runner [{mode}]: no new bar — skipping tick")
+                    continue
                 # Re-read scanner.json every tick so dashboard changes apply immediately
                 _sym_override = None
                 try:
@@ -185,7 +254,7 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                     logger.warning(f"scanner.json corrupt/invalid [{mode}]: {_err} — scanning all symbols")
                 except Exception as _err:
                     logger.debug(f"Scanner config read error [{mode}]: {_err}")
-                # NEW-7: skip if previous task for this mode is still running —
+                # Skip if previous task for this mode is still running —
                 # prevents task accumulation under high MT5 latency.
                 _prev = _mode_tasks.get(mode)
                 if _prev and not _prev.done():
@@ -197,6 +266,7 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
 
 def _signal_to_dict(sig, mode: str) -> dict:
     # Compute R:R if entry, sl, tp are available
+    from engine.account_store import current_mode as _acm
     rr = None
     try:
         if sig.entry_price and sig.sl_price and sig.tp_price:
@@ -213,6 +283,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
         "symbol":       sig.symbol,
         "direction":    sig.direction,
         "trading_mode": mode,
+        "account_mode": _acm(),
         "strategy":     sig.strategy,
         "entry_price":  sig.entry_price,
         "sl":           sig.sl_price,

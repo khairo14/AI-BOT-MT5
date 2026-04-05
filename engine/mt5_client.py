@@ -383,7 +383,7 @@ class MT5Client:
 
         # Fallback: load last 30 days of history and filter by position_id
         to_dt   = datetime.now(_tz.utc)
-        from_dt = to_dt - timedelta(days=30)
+        from_dt = to_dt - timedelta(days=60)
         with self._lock:
             all_deals = mt5.history_deals_get(from_dt, to_dt)
         if not all_deals:

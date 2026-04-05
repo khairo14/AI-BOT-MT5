@@ -18,10 +18,10 @@
     "Amazon": "trending_bear",
     "USDCAD": "trending_bull",
     "NZDUSD": "trending_bear",
-    "SILVER": "volatile_breakout",
+    "SILVER": "trending_bear",
     "BRENTCash": "trending_bull",
     "US100Cash": "trending_bear",
-    "US30Cash": "trending_bull",
+    "US30Cash": "trending_bear",
     "US500Cash": "trending_bull",
     "Tesla": "trending_bear",
     "Facebook": "trending_bear",
@@ -31,59 +31,59 @@
   "pending": {
     "EURUSD": [
       "quiet",
-      3
+      90
     ],
     "BTCUSD": [
       "trending_bear",
-      1666
+      1671
     ],
     "ETHUSD": [
       "trending_bear",
-      1114
+      3
     ],
     "USDJPY": [
       "quiet",
-      3
+      90
     ],
     "GBPUSD": [
       "quiet",
-      3
+      90
     ],
     "XRPUSD": [
       "trending_bear",
-      624
+      627
     ],
     "SOLUSD": [
       "trending_bear",
-      717
+      720
     ],
     "EURJPY": [
       "quiet",
-      355783
+      355870
     ],
     "AUDUSD": [
       "trending_bear",
-      2837
+      2849
     ],
     "USDCHF": [
       "quiet",
-      33577
+      33606
     ],
     "GBPJPY": [
       "quiet",
-      3492
+      3501
     ],
     "GOLD": [
-      "trending_bear",
-      2
+      "trending_bull",
+      6
     ],
     "OILCash": [
-      "volatile_breakout",
-      2
+      "trending_bull",
+      6
     ],
     "Nvidia": [
       "trending_bear",
-      7660
+      7669
     ],
     "Apple": [
       "trending_bear",
@@ -99,43 +99,43 @@
     ],
     "NZDUSD": [
       "trending_bear",
-      485
+      488
     ],
     "SILVER": [
       "trending_bear",
-      2
+      4
     ],
     "BRENTCash": [
       "trending_bull",
-      747
+      750
     ],
     "US100Cash": [
       "trending_bear",
-      3
+      16
     ],
     "US30Cash": [
-      "trending_bull",
-      3
+      "trending_bear",
+      15
     ],
     "US500Cash": [
       "trending_bull",
-      3531
+      3540
     ],
     "Tesla": [
       "trending_bear",
-      6210
+      6216
     ],
     "Facebook": [
       "trending_bear",
-      1854
+      1857
     ],
     "AdvMicroDev": [
       "trending_bear",
-      608
+      609
     ],
     "UK100Cash": [
       "trending_bull",
-      9301
+      9310
     ]
   }
 }
