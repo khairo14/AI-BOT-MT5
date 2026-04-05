@@ -224,6 +224,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
         "rr":           rr,
         "tp2":          sig.tp2_price if hasattr(sig, "tp2_price") else None,
         "indicators":   sig.indicators if hasattr(sig, "indicators") else {},
+        "regime":       sig.regime if hasattr(sig, "regime") else None,
     }
 
 

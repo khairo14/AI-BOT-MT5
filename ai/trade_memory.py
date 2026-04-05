@@ -49,6 +49,7 @@ class TradeOutcome:
     duration_mins:   float
     mode:            str  = "live"   # "live" or "paper" — used to separate RL/stats per mode
     lstm_predicted_direction: Optional[str] = None  # "BUY" or "SELL" — LSTM prediction at signal time
+    regime:          Optional[str] = None   # market regime at signal time (e.g. "trending_bull")
     extra:           dict = field(default_factory=dict)
 
 class TradeMemory:
@@ -104,6 +105,16 @@ class TradeMemory:
         avg_conf= sum(o["confidence"] for o in outcomes) / total
         tp_hits = sum(1 for o in outcomes if o["outcome"] == "tp_hit")
         sl_hits = sum(1 for o in outcomes if o["outcome"] == "sl_hit")
+        # Post-slippage EV — subtract avg slippage cost from avg PnL
+        # Slippage is stored in extra.slippage_pips; convert to account currency
+        # using a conservative pip value estimate (varies by symbol/lot but
+        # this gives a directional signal for whether edge survives execution)
+        avg_slip_pips = sum(
+            o.get("extra", {}).get("slippage_pips", 0.0) for o in outcomes
+        ) / total
+        # Rough pip value: $1/pip per 0.01 lot on standard account
+        # This is an estimate — exact value depends on symbol and lot size
+        avg_slip_cost = avg_slip_pips * 1.0  # $1 per pip estimate per trade
         return {
             "total":      total,
             "wins":       wins,
@@ -113,6 +124,9 @@ class TradeMemory:
             "avg_conf":   round(avg_conf, 4),
             "tp_hits":    tp_hits,
             "sl_hits":    sl_hits,
+            "avg_slippage_pips":   round(avg_slip_pips, 2),
+            "post_slippage_ev":    round(avg_pnl - avg_slip_cost, 4),
+            "slippage_tracked":    sum(1 for o in outcomes if o.get("extra", {}).get("slippage_pips", 0) > 0),
         }
     
     def lstm_accuracy(
@@ -203,6 +217,224 @@ class TradeMemory:
             "sufficient_data":  True,
             "by_symbol":        sym_accuracy,
             "degraded_symbols": degraded,
+        }
+
+    def stats_by_regime(
+        self,
+        trading_type: Optional[str] = None,
+        min_samples: int = 5,
+        live_only: bool = True,
+    ) -> dict:
+        """
+        Compute win rate and avg PnL per regime per strategy.
+        Lets you validate whether regime gating is actually improving edge.
+        Returns dict keyed by regime → {win_rate, avg_pnl, total, by_strategy}.
+        """
+        outcomes = self.recent(
+            n=self.MAX_BUFFER,
+            trading_type=trading_type,
+            live_only=live_only,
+        )
+        # Only trades where regime was recorded
+        tracked = [o for o in outcomes if o.get("regime")]
+        if not tracked:
+            return {"tracked": 0, "sufficient_data": False}
+
+        by_regime: dict[str, dict] = {}
+        for o in tracked:
+            regime  = o.get("regime", "unknown")
+            strat   = o.get("strategy", "unknown")
+            profit  = o.get("profit", 0)
+            is_win  = profit > 0
+
+            if regime not in by_regime:
+                by_regime[regime] = {"wins": 0, "total": 0, "pnl": 0.0, "by_strategy": {}}
+            by_regime[regime]["wins"]  += int(is_win)
+            by_regime[regime]["total"] += 1
+            by_regime[regime]["pnl"]   += profit
+
+            bs = by_regime[regime]["by_strategy"]
+            if strat not in bs:
+                bs[strat] = {"wins": 0, "total": 0, "pnl": 0.0}
+            bs[strat]["wins"]  += int(is_win)
+            bs[strat]["total"] += 1
+            bs[strat]["pnl"]   += profit
+
+        result = {}
+        for regime, data in by_regime.items():
+            total = data["total"]
+            if total < min_samples:
+                continue
+            result[regime] = {
+                "win_rate":   round(data["wins"] / total, 4),
+                "avg_pnl":    round(data["pnl"] / total, 4),
+                "total":      total,
+                "by_strategy": {
+                    s: {
+                        "win_rate": round(v["wins"] / v["total"], 4),
+                        "avg_pnl":  round(v["pnl"] / v["total"], 4),
+                        "total":    v["total"],
+                    }
+                    for s, v in data["by_strategy"].items()
+                    if v["total"] >= min_samples
+                },
+            }
+        return {"tracked": len(tracked), "sufficient_data": True, "by_regime": result}
+    
+    def detect_drift(
+        self,
+        trading_type: Optional[str] = None,
+        window: int = 30,
+        delta: float = 0.005,
+        lambda_threshold: float = 10.0,
+        live_only: bool = True,
+    ) -> dict:
+        """
+        Page-Hinkley drift detection on rolling win rate.
+        Detects when the win rate is drifting downward (regime shift / model decay).
+
+        Page-Hinkley test:
+          - Tracks cumulative sum of (observed - expected - delta)
+          - Raises alarm when cumulative sum exceeds lambda_threshold
+          - delta: minimum acceptable mean change (0.005 = 0.5%)
+          - lambda_threshold: sensitivity (lower = more sensitive)
+
+        Returns drift detected flag and severity.
+        """
+        outcomes = self.recent(
+            n=max(window * 3, 100),
+            trading_type=trading_type,
+            live_only=live_only,
+        )
+        if len(outcomes) < window:
+            return {
+                "drift_detected": False,
+                "samples": len(outcomes),
+                "min_samples": window,
+                "sufficient_data": False,
+            }
+
+        # Convert outcomes to win (1) / loss (0) series
+        results = [1.0 if o.get("profit", 0) > 0 else 0.0 for o in outcomes]
+
+        # Expected win rate from first half of the window (baseline)
+        _half = len(results) // 2
+        _baseline_wr = sum(results[:_half]) / _half if _half > 0 else 0.55
+
+        # Page-Hinkley cumulative sum on second half
+        _ph_sum   = 0.0
+        _ph_min   = 0.0
+        _ph_max   = 0.0
+        _alarm    = False
+        _alarm_at = None
+
+        for i, r in enumerate(results[_half:]):
+            _ph_sum += r - _baseline_wr - delta
+            _ph_min  = min(_ph_min, _ph_sum)
+            _ph_max  = max(_ph_max, _ph_sum)
+            # Upward drift (improving): _ph_sum - _ph_min > lambda
+            # Downward drift (degrading): _ph_max - _ph_sum > lambda
+            if _ph_max - _ph_sum > lambda_threshold:
+                _alarm    = True
+                _alarm_at = _half + i
+                break
+
+        # Rolling win rate over last window bars for severity assessment
+        _recent_wr = sum(results[-window:]) / window
+
+        return {
+            "drift_detected":    _alarm,
+            "drift_at_sample":   _alarm_at,
+            "baseline_win_rate": round(_baseline_wr, 4),
+            "recent_win_rate":   round(_recent_wr, 4),
+            "win_rate_delta":    round(_recent_wr - _baseline_wr, 4),
+            "severity":          (
+                "high"   if _alarm and _recent_wr < _baseline_wr - 0.15 else
+                "medium" if _alarm and _recent_wr < _baseline_wr - 0.08 else
+                "low"    if _alarm else
+                "none"
+            ),
+            "samples":           len(results),
+            "sufficient_data":   True,
+        }
+
+    def rolling_ev_stability(
+        self,
+        trading_type: Optional[str] = None,
+        window: int = 20,
+        min_windows: int = 3,
+        live_only: bool = True,
+    ) -> dict:
+        """
+        Track EV stability across rolling windows.
+        Detects whether performance is stable, improving, or degrading
+        before it reaches the hard 40% win-rate alert threshold.
+
+        Returns rolling EV per window and a stability assessment.
+        Requires at least min_windows × window trades to compute.
+        """
+        outcomes = self.recent(
+            n=self.MAX_BUFFER,
+            trading_type=trading_type,
+            live_only=live_only,
+        )
+        needed = window * min_windows
+        if len(outcomes) < needed:
+            return {
+                "sufficient_data": False,
+                "samples":         len(outcomes),
+                "needed":          needed,
+            }
+
+        # Compute rolling window EV and win rate
+        windows_data = []
+        for i in range(0, len(outcomes) - window + 1, window // 2):  # 50% overlap
+            chunk = outcomes[i: i + window]
+            if len(chunk) < window:
+                break
+            chunk_wins = sum(1 for o in chunk if o.get("profit", 0) > 0)
+            chunk_ev   = sum(o.get("profit", 0) for o in chunk) / window
+            chunk_pips = sum(o.get("profit_pips", 0) for o in chunk) / window
+            windows_data.append({
+                "window_start": i,
+                "win_rate":     round(chunk_wins / window, 4),
+                "avg_ev":       round(chunk_ev, 4),
+                "avg_pips":     round(chunk_pips, 2),
+            })
+
+        if len(windows_data) < min_windows:
+            return {"sufficient_data": False, "samples": len(outcomes), "needed": needed}
+
+        recent_windows = windows_data[-min_windows:]
+        evs    = [w["avg_ev"]   for w in recent_windows]
+        wrs    = [w["win_rate"] for w in recent_windows]
+
+        # Trend: fit linear regression slope over recent windows
+        import statistics as _stats
+        _n = len(evs)
+        _x_mean = (_n - 1) / 2
+        _xy = sum((i - _x_mean) * (evs[i] - _stats.mean(evs)) for i in range(_n))
+        _xx = sum((i - _x_mean) ** 2 for i in range(_n))
+        _ev_slope = _xy / _xx if _xx > 0 else 0.0
+
+        # Classification
+        if _ev_slope > 0.01:
+            trend = "improving"
+        elif _ev_slope < -0.01:
+            trend = "degrading"
+        else:
+            trend = "stable"
+
+        return {
+            "sufficient_data":    True,
+            "samples":            len(outcomes),
+            "windows":            windows_data,
+            "recent_avg_wr":      round(_stats.mean(wrs), 4),
+            "recent_avg_ev":      round(_stats.mean(evs), 4),
+            "ev_slope":           round(_ev_slope, 6),
+            "trend":              trend,
+            "latest_win_rate":    wrs[-1],
+            "earliest_win_rate":  wrs[0],
         }
 
     def __len__(self) -> int:

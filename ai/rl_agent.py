@@ -49,6 +49,15 @@ EPSILON_START = 0.15   # initial exploration rate (15% random actions)
 EPSILON_MIN   = 0.02   # floor — always keep 2% exploration for non-stationarity
 EPSILON_DECAY = 0.995  # per-update multiplier (reaches ~5% after ~250 trades)
 
+# Per-mode learning rates — scalping needs faster adaptation (intraday regime shifts),
+# swing needs slower adaptation (multi-day trends require more confirmation).
+# ALPHA is the base rate; these scale it per trading type.
+_ALPHA_BY_MODE: dict[str, float] = {
+    "scalping":    0.15,   # faster — M5 regimes change intraday
+    "day_trading": 0.10,   # default — balanced H1 adaptation
+    "swing":       0.05,   # slower — H4/D1 trends need multi-day confirmation
+}
+
 # Parameter bounds
 CONF_MIN, CONF_MAX   = 0.40, 0.85
 RISK_MIN, RISK_MAX   = 0.50, 1.50
@@ -184,7 +193,12 @@ class RLAgent:
             # near the ceiling with no signals passing to generate trades.
             _now_ts  = datetime.now(tz=timezone.utc).timestamp()
             _last_ts = getattr(self, "_last_update_ts", _now_ts)
-            if (_now_ts - _last_ts) / 3600 >= 6.0 and self._conf_thresh > DEFAULT_CONF_THRESH:
+            
+            # Idle decay speed is mode-aware: scalping decays every 4h (fast reset),
+            # swing decays every 12h (slow — swing positions can be open for days).
+            _IDLE_DECAY_HOURS = {"scalping": 4.0, "day_trading": 6.0, "swing": 12.0}
+            _idle_threshold = _IDLE_DECAY_HOURS.get(self.trading_type, 6.0)
+            if (_now_ts - _last_ts) / 3600 >= _idle_threshold and self._conf_thresh > DEFAULT_CONF_THRESH:
                 self._conf_thresh = max(DEFAULT_CONF_THRESH, self._conf_thresh - CONF_STEP)
                 logger.info(
                     f"RL [{self.trading_type}] idle decay: "
@@ -196,18 +210,45 @@ class RLAgent:
             # more precisely; looser ceiling lets strong wins register clearly.
             # MATH-3: was ±0.10 (symmetric) — extreme losses clipped same as moderate.
             reward = max(-0.05, min(0.15, float(reward)))
+            # Behavioral guardrail: penalize low win-rate states to prevent
+            # the agent from learning "take everything to recover losses" (gambler's fallacy).
+            # When win_rate < 40%, subtract a small penalty so the Q-table associates
+            # low-WR states with negative value — pushing conf_thresh UP, not down.
+            if win_rate < 0.40:
+                reward -= 0.02  # nudge Q-values toward more selective behavior
+            elif win_rate < 0.45:
+                reward -= 0.01  # lighter nudge in marginal zone
+                
             self._n_updates += 1
             new_state = _state(win_rate, avg_conf, drawdown_pct, vol_pct)
             self._update_q(new_state, reward)
             action_idx = self._choose_action(new_state)
             conf_delta, risk_delta = ACTIONS[action_idx]
             _conf_max = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
+            # Floor: never allow conf_thresh to drop below mode-specific safe minimum.
+            # Without this, Q-learning on a bad win-rate sequence can drive
+            # conf_thresh to 0.40 (CONF_MIN) which causes overtrade/blowup.
+            _CONF_FLOOR_BY_MODE = {
+                "scalping":    0.52,
+                "day_trading": 0.52,
+                "swing":       0.50,
+            }
+            _conf_floor = _CONF_FLOOR_BY_MODE.get(self.trading_type, 0.52)
             self._conf_thresh = float(
-                max(CONF_MIN, min(_conf_max, self._conf_thresh + conf_delta))
+                max(_conf_floor, min(_conf_max, self._conf_thresh + conf_delta))
             )
+            # Risk factor floor: never drop below 0.60 — below this,
+            # lot sizes become so small they barely cover spread cost.
+            _RF_FLOOR_BY_MODE = {
+                "scalping":    0.60,
+                "day_trading": 0.60,
+                "swing":       0.60,
+            }
+            _rf_floor = _RF_FLOOR_BY_MODE.get(self.trading_type, 0.60)
             self._risk_factor = float(
-                max(RISK_MIN, min(RISK_MAX, self._risk_factor + risk_delta))
+                max(_rf_floor, min(RISK_MAX, self._risk_factor + risk_delta))
             )
+
             self._last_state  = new_state
             self._last_action = action_idx
             # Snapshot payload to save outside the lock (avoid holding lock during I/O)
@@ -290,12 +331,14 @@ class RLAgent:
         return self._HOLD_ACTION if self._HOLD_ACTION in best_indices else best_indices[0]
 
     def _update_q(self, new_state: str, reward: float) -> None:
-        """Bellman update for the previous (state, action) pair."""
+        """Bellman update for the previous (state, action) pair.
+        Uses per-mode learning rate so scalping adapts faster than swing."""
         if self._last_state is None or self._last_action is None:
             return
+        _alpha = _ALPHA_BY_MODE.get(self.trading_type, ALPHA)
         prev = self._q.setdefault(self._last_state, [0.0] * len(ACTIONS))
         next_max = max(self._q.get(new_state, [0.0] * len(ACTIONS)))
-        prev[self._last_action] += ALPHA * (
+        prev[self._last_action] += _alpha * (
             reward + GAMMA * next_max - prev[self._last_action]
         )
 
@@ -326,14 +369,22 @@ class RLAgent:
                         self._last_action = paper_data.get("last_action")
                         self._n_updates   = paper_data.get("n_updates", 0)
                         _conf_max_boot = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
-                        self._conf_thresh = float(min(
-                            paper_data.get("conf_thresh", DEFAULT_CONF_THRESH),
-                            _conf_max_boot
-                        ))
-                        self._risk_factor = float(min(
-                            paper_data.get("risk_factor", DEFAULT_RISK_FACTOR),
-                            RISK_MAX
-                        ))
+                        _CONF_FLOOR_BOOT = {"scalping": 0.52, "day_trading": 0.52, "swing": 0.50}
+                        _conf_floor_boot = _CONF_FLOOR_BOOT.get(self.trading_type, 0.52)
+                        _RF_FLOOR_BOOT = {"scalping": 0.60, "day_trading": 0.60, "swing": 0.60}
+                        _rf_floor_boot = _RF_FLOOR_BOOT.get(self.trading_type, 0.60)
+                        self._conf_thresh = float(
+                            max(_conf_floor_boot, min(
+                                paper_data.get("conf_thresh", DEFAULT_CONF_THRESH),
+                                _conf_max_boot
+                            ))
+                        )
+                        self._risk_factor = float(
+                            max(_rf_floor_boot, min(
+                                paper_data.get("risk_factor", DEFAULT_RISK_FACTOR),
+                                RISK_MAX
+                            ))
+                        )
                         logger.info(
                             f"RL live agent bootstrapped from paper [{self.trading_type}]: "
                             f"conf_thresh={self._conf_thresh:.2f} "
@@ -353,8 +404,17 @@ class RLAgent:
             # Enforce per-mode cap on load — prevents a previously saved value
             # that exceeded the new cap (e.g. 0.85 scalping) from bypassing it.
             _conf_max_load = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
-            self._conf_thresh = float(min(data.get("conf_thresh", DEFAULT_CONF_THRESH), _conf_max_load))
-            self._risk_factor = float(min(data.get("risk_factor", DEFAULT_RISK_FACTOR), RISK_MAX))
+            _CONF_FLOOR_LOAD = {"scalping": 0.52, "day_trading": 0.52, "swing": 0.50}
+            _conf_floor_load = _CONF_FLOOR_LOAD.get(self.trading_type, 0.52)
+            _RF_FLOOR_LOAD = {"scalping": 0.60, "day_trading": 0.60, "swing": 0.60}
+            _rf_floor_load = _RF_FLOOR_LOAD.get(self.trading_type, 0.60)
+            self._conf_thresh = float(
+                max(_conf_floor_load, min(data.get("conf_thresh", DEFAULT_CONF_THRESH), _conf_max_load))
+            )
+            self._risk_factor = float(
+                max(_rf_floor_load, min(data.get("risk_factor", DEFAULT_RISK_FACTOR), RISK_MAX))
+            )
+
             logger.info(
                 f"RL agent loaded [{self.trading_type}/{self._mode}]: "
                 f"conf_thresh={self._conf_thresh:.2f} "

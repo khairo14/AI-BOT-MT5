@@ -161,7 +161,7 @@ def main() -> None:
             sys.exit(1)
 
         for symbol in symbols:
-            df = client.get_ohlcv(symbol, "M5", count=250_000)
+            df = client.get_ohlcv(symbol, "M5", count=200_000)
             data_cache[symbol] = df
             bar_count = len(df) if df is not None else 0
             status    = f"{bar_count:>9,d} bars" if df is not None else "   NO DATA"

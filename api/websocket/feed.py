@@ -232,6 +232,61 @@ async def _performance_monitor():
                         "message":  f"LSTM performing below random on: {', '.join(degraded)}",
                         "degraded_symbols": degraded,
                     })
+            # ── Alert 3b: drift detection per trading type ───────────────────
+            for trading_type in ("scalping", "day_trading", "swing"):
+                drift = memory.detect_drift(trading_type=trading_type, window=30)
+                if drift.get("drift_detected") and drift.get("severity") in ("medium", "high"):
+                    _key = f"drift_{trading_type}"
+                    if now_ts - _last_alert_ts.get(_key, 0) > _ALERT_COOLDOWN_SECS:
+                        _last_alert_ts[_key] = now_ts
+                        await broadcast_performance_alert({
+                            "level":            "warning",
+                            "category":         "drift",
+                            "message":          (
+                                f"{trading_type.replace('_',' ').title()} performance drifting: "
+                                f"WR {drift['baseline_win_rate']:.0%} → {drift['recent_win_rate']:.0%}"
+                            ),
+                            "trading_type":     trading_type,
+                            "severity":         drift["severity"],
+                            "baseline_win_rate": drift["baseline_win_rate"],
+                            "recent_win_rate":  drift["recent_win_rate"],
+                        })
+
+            # ── Alert 3c: live accuracy vs anchor baseline ───────────────────
+            # Compare current LSTM live prediction accuracy against the anchor model's
+            # training accuracy. If live accuracy has dropped >10 points below anchor,
+            # the model may have drifted significantly from its baseline quality.
+            try:
+                from ai.predictor import predictor as _pred
+                from pathlib import Path as _Path
+                _models_dir = _Path("ai/models")
+                for _anchor_meta_f in _models_dir.glob("*_anchor_meta.json"):
+                    try:
+                        _ameta = json.loads(_anchor_meta_f.read_text())
+                        _anchor_acc = float(_ameta.get("accuracy", 0))
+                        _key = _anchor_meta_f.stem.replace("_anchor_meta", "")
+                        _live_meta_f = _models_dir / f"{_key}_meta.json"
+                        if _live_meta_f.exists():
+                            _lmeta = json.loads(_live_meta_f.read_text())
+                            _live_acc = float(_lmeta.get("accuracy", 0))
+                            _drop = _anchor_acc - _live_acc
+                            if _drop > 0.08:  # 8+ point accuracy drop
+                                _akey = f"anchor_drop_{_key}"
+                                if now_ts - _last_alert_ts.get(_akey, 0) > _ALERT_COOLDOWN_SECS * 4:
+                                    _last_alert_ts[_akey] = now_ts
+                                    await broadcast_performance_alert({
+                                        "level":        "warning",
+                                        "category":     "model_degradation",
+                                        "message":      f"LSTM {_key}: accuracy dropped from anchor {_anchor_acc:.1%} → {_live_acc:.1%}",
+                                        "model_key":    _key,
+                                        "anchor_acc":   _anchor_acc,
+                                        "live_acc":     _live_acc,
+                                        "accuracy_drop": round(_drop, 4),
+                                    })
+                    except Exception:
+                        continue
+            except Exception as _anc_exc:
+                logger.debug(f"Anchor comparison error: {_anc_exc}")
 
             # ── Alert 4: symbol consistently losing ──────────────────────────
             recent = memory.recent(n=50, live_only=True)

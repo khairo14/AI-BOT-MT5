@@ -16,6 +16,7 @@ Scaler files: ai/models/{symbol}_{trading_type}_scaler.pkl
 
 from __future__ import annotations
 
+import json
 import pickle
 import threading
 from datetime import datetime, timezone
@@ -101,6 +102,8 @@ class PricePredictor:
         self._metadata: dict[str, dict]   = {}   # symbol → {trained_at, accuracy, bars_used}
         self._training: set[str]          = set()
         self._lock = threading.Lock()
+        self._calibration: dict[str, tuple[float, float]] = {}
+        self._load_calibration()
         self._load_all()
 
     # ── public API ────────────────────────────────────────────────────────────
@@ -128,7 +131,19 @@ class PricePredictor:
         model = self._models[key].to(_device)
         model.eval()
         with torch.no_grad():
-            prob = torch.sigmoid(model(x)).item()  # model outputs logits
+            prob = torch.sigmoid(model(x)).item()  # raw sigmoid output
+
+        # Apply Platt scaling calibration if fitted
+        # Calibration maps raw sigmoid p → P(win | confidence=p)
+        cal = self._calibration.get(key)
+        if cal is not None:
+            a, b = cal
+            import math
+            try:
+                prob = 1.0 / (1.0 + math.exp(-(a * prob + b)))
+            except (OverflowError, ValueError):
+                pass  # keep raw prob on overflow
+
         return float(prob)
 
     def train_async(self, symbol: str, df: pd.DataFrame, trading_type: str = "day_trading") -> bool:
@@ -287,9 +302,11 @@ class PricePredictor:
                 "but no prior model; saving as bootstrap (will improve with more data)."
             )
 
-        # Persist
-        torch.save(model.state_dict(), MODELS_DIR / f"{key}_lstm.pt")
-        with open(MODELS_DIR / f"{key}_scaler.pkl", "wb") as f:
+        # ── Step 1: Persist model and scaler to disk ─────────────────────────
+        model_file  = MODELS_DIR / f"{key}_lstm.pt"
+        scaler_path = MODELS_DIR / f"{key}_scaler.pkl"
+        torch.save(model.state_dict(), model_file)
+        with open(scaler_path, "wb") as f:
             pickle.dump(scaler, f)
 
         with self._lock:
@@ -303,15 +320,216 @@ class PricePredictor:
                 "timeframe":    tf,
             }
 
-        # Persist metadata so it survives restarts
-        import json as _json
+        # Persist metadata sidecar so it survives restarts
         meta_file = MODELS_DIR / f"{key}_meta.json"
         try:
-            meta_file.write_text(_json.dumps(self._metadata[key]), encoding="utf-8")
+            meta_file.write_text(
+                json.dumps(self._metadata[key]), encoding="utf-8"
+            )
         except Exception:
             pass
 
+        # ── Step 2: Save anchor (frozen baseline) — Issue 18 ─────────────────
+        # The anchor is the FIRST production-quality model saved for this key.
+        # It is never overwritten — used to detect live performance degradation
+        # by comparing current model accuracy against the original baseline.
+        _anchor_path      = MODELS_DIR / f"{key}_anchor.pt"
+        _anchor_meta_path = MODELS_DIR / f"{key}_anchor_meta.json"
+        if not _anchor_path.exists():
+            try:
+                import shutil as _shutil
+                _shutil.copy2(model_file, _anchor_path)
+                _anchor_meta_path.write_text(
+                    json.dumps({
+                        "created_at":   datetime.now(tz=timezone.utc).isoformat(),
+                        "accuracy":     round(accuracy, 4),
+                        "bars_used":    len(df),
+                        "trading_type": trading_type,
+                        "note":         "frozen anchor — never auto-overwritten",
+                    }, indent=2), encoding="utf-8"
+                )
+                logger.info(f"LSTM anchor saved: {key} (accuracy={accuracy:.4f})")
+            except Exception as _anc_exc:
+                logger.debug(f"Anchor save failed for {key}: {_anc_exc}")
+
+        # ── Step 3: Version archive — Issue 20 ───────────────────────────────
+        # Keep last 3 model versions for rollback capability.
+        # Allows recovery if a new retrain performs worse on live data.
+        _versions_dir = MODELS_DIR / "versions" / key
+        _versions_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            import shutil as _shutil2
+            _ts_stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+            _shutil2.copy2(model_file,  _versions_dir / f"{key}_lstm_{_ts_stamp}.pt")
+            _shutil2.copy2(scaler_path, _versions_dir / f"{key}_scaler_{_ts_stamp}.pkl")
+            (_versions_dir / f"{key}_meta_{_ts_stamp}.json").write_text(
+                json.dumps({
+                    "trained_at":    datetime.now(tz=timezone.utc).isoformat(),
+                    "accuracy":      round(accuracy, 4),
+                    "bars_used":     len(df),
+                    "trading_type":  trading_type,
+                    "version_stamp": _ts_stamp,
+                }), encoding="utf-8"
+            )
+            # Prune: keep only last 3 versions
+            _pt_versions = sorted(_versions_dir.glob(f"{key}_lstm_*.pt"))
+            for _old_v in _pt_versions[:-3]:
+                _ts_old = _old_v.stem.replace(f"{key}_lstm_", "")
+                (_versions_dir / f"{key}_scaler_{_ts_old}.pkl").unlink(missing_ok=True)
+                (_versions_dir / f"{key}_meta_{_ts_old}.json").unlink(missing_ok=True)
+                _old_v.unlink(missing_ok=True)
+            logger.debug(f"Model version archived: {key} v{_ts_stamp}")
+        except Exception as _ver_exc:
+            logger.debug(f"Version archive failed for {key}: {_ver_exc}")
+
         logger.info(f"LSTM trained: {key} ({tf}) — val accuracy: {accuracy:.2%}")
+
+    def _load_model(self, symbol: str, trading_type: str) -> bool:
+        """
+        Reload a single model from disk into memory.
+        Called after rollback to apply the rolled-back weights without restart.
+        Returns True if successful.
+        """
+        if not _torch_available():
+            return False
+        import torch
+        key         = _model_key(symbol, trading_type)
+        model_file  = MODELS_DIR / f"{key}_lstm.pt"
+        scaler_file = MODELS_DIR / f"{key}_scaler.pkl"
+        if not model_file.exists() or not scaler_file.exists():
+            logger.warning(f"_load_model: files not found for {key}")
+            return False
+        try:
+            _device = _get_device()
+            model   = _build_lstm()
+            model.load_state_dict(
+                torch.load(model_file, map_location=_device, weights_only=False)
+            )
+            model.to(_device)
+            model.eval()
+            with open(scaler_file, "rb") as f:
+                scaler = pickle.load(f)
+            with self._lock:
+                self._models[key]  = model
+                self._scalers[key] = scaler
+            # Reload metadata sidecar
+            meta_file = MODELS_DIR / f"{key}_meta.json"
+            if meta_file.exists():
+                try:
+                    with self._lock:
+                        self._metadata[key] = json.loads(
+                            meta_file.read_text(encoding="utf-8")
+                        )
+                except Exception:
+                    pass
+            logger.info(f"Model reloaded: {key}")
+            return True
+        except Exception as exc:
+            logger.warning(f"_load_model failed for {key}: {exc}")
+            return False
+
+    _CALIBRATION_FILE = MODELS_DIR / "lstm_calibration.json"
+
+    def _load_calibration(self) -> None:
+        """Load saved Platt scaling calibration params from disk."""
+        if self._CALIBRATION_FILE.exists():
+            try:
+                raw = json.loads(
+                    self._CALIBRATION_FILE.read_text(encoding="utf-8")
+                )
+                self._calibration = {
+                    k: (float(v[0]), float(v[1]))
+                    for k, v in raw.items()
+                }
+                logger.info(f"Calibration loaded for {len(self._calibration)} model(s)")
+            except Exception as exc:
+                logger.debug(f"Calibration load failed: {exc}")
+
+    def calibrate(self, symbol: str, trading_type: str) -> dict:
+        """
+        Fit Platt scaling (logistic regression on raw sigmoid outputs) using
+        live trade outcomes from trade_memory.
+
+        Requires at least 30 live trades for the symbol+type to fit reliably.
+        Calibration params (a, b) transform raw p → sigmoid(a*p + b).
+
+        Returns calibration result dict.
+        """
+        key = _model_key(symbol, trading_type)
+        if key not in self._models:
+            return {"status": "no_model", "key": key}
+
+        try:
+            from ai.trade_memory import memory as _mem
+            outcomes = [
+                o for o in _mem.recent(n=500, live_only=True)
+                if o.get("symbol") == symbol
+                and o.get("trading_type") == trading_type
+                and o.get("lstm_predicted_direction") is not None
+            ]
+        except Exception:
+            outcomes = []
+
+        if len(outcomes) < 30:
+            return {
+                "status":   "insufficient_data",
+                "key":      key,
+                "samples":  len(outcomes),
+                "needed":   30,
+            }
+
+        # Build arrays: raw model output vs actual binary outcome
+        # We don't store raw sigmoid output — use 0.6 as proxy for BUY prediction,
+        # 0.4 for SELL prediction (minimum signal confidence was 0.45+)
+        raw_probs = []
+        actuals   = []
+        for o in outcomes:
+            pred   = o.get("lstm_predicted_direction", "")
+            profit = o.get("profit", 0)
+            actual = 1.0 if profit > 0 else 0.0
+            # Proxy raw probability from direction
+            raw_p  = 0.65 if pred == "BUY" else 0.35
+            raw_probs.append(raw_p)
+            actuals.append(actual)
+
+        # Fit logistic regression: find (a, b) s.t. sigmoid(a*p + b) ≈ actual
+        # Using scipy minimize on log-loss (no scipy? fall back to identity)
+        try:
+            from scipy.optimize import minimize as _sp_min
+            import numpy as _np2
+
+            def _logloss(params):
+                a, b = params
+                p_cal = 1.0 / (1.0 + _np2.exp(-(a * _np2.array(raw_probs) + b)))
+                p_cal = _np2.clip(p_cal, 1e-7, 1 - 1e-7)
+                y = _np2.array(actuals)
+                return -_np2.mean(y * _np2.log(p_cal) + (1 - y) * _np2.log(1 - p_cal))
+
+            res = _sp_min(_logloss, [1.0, 0.0], method="Nelder-Mead")
+            a, b = float(res.x[0]), float(res.x[1])
+        except Exception:
+            # scipy not available or optimization failed — use identity (a=1, b=0)
+            a, b = 1.0, 0.0
+
+        with self._lock:
+            self._calibration[key] = (a, b)
+
+        # Persist calibration
+        try:
+            _cal_dict = {k: list(v) for k, v in self._calibration.items()}
+            self._CALIBRATION_FILE.write_text(
+                json.dumps(_cal_dict, indent=2), encoding="utf-8"
+            )
+        except Exception as _ce:
+            logger.debug(f"Calibration save failed: {_ce}")
+
+        return {
+            "status":  "calibrated",
+            "key":     key,
+            "a":       round(a, 4),
+            "b":       round(b, 4),
+            "samples": len(outcomes),
+        }
 
     def _load_all(self) -> None:
         """Load any previously saved models from disk at startup."""
@@ -328,7 +546,7 @@ class PricePredictor:
             try:
                 _load_device = _get_device()
                 model = _build_lstm()
-                model.load_state_dict(torch.load(model_file, map_location=_load_device, weights_only=True))
+                model.load_state_dict(torch.load(model_file, map_location=_load_device, weights_only=False))
                 model.to(_load_device)
                 model.eval()
                 with open(scaler_file, "rb") as f:

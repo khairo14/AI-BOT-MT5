@@ -477,9 +477,28 @@ class ParamOptimizer:
             o for o in memory.recent(n=50, live_only=True)
             if o.get("strategy") == strategy_name and o.get("symbol") == symbol
         ]
-        if len(outcomes) >= MIN_TRADES_FOR_REFINEMENT:
-            wins = sum(1 for o in outcomes if o["profit"] > 0)
-            if wins / len(outcomes) < LIVE_REFINE_WIN_THRESH:
+        # Count trades that closed AFTER the last optimization
+        _new_trades = outcomes
+        if last:
+            try:
+                _last_dt_filter = datetime.fromisoformat(last)
+                _new_trades = [
+                    o for o in outcomes
+                    if o.get("close_time") and
+                    datetime.fromisoformat(
+                        o["close_time"].replace("Z", "+00:00")
+                    ) > _last_dt_filter
+                ]
+            except Exception:
+                pass
+
+        # Require at least 30 new trades AND win rate below threshold.
+        # 30 trades = ~2 weeks of day trading = enough to distinguish
+        # regime shift from normal variance.
+        _MIN_NEW_TRADES_FOR_REOPT = 30
+        if len(_new_trades) >= _MIN_NEW_TRADES_FOR_REOPT:
+            wins = sum(1 for o in _new_trades if o["profit"] > 0)
+            if wins / len(_new_trades) < LIVE_REFINE_WIN_THRESH:
                 return True
         return False
 
@@ -602,7 +621,22 @@ class ParamOptimizer:
         dispatch = _DISPATCH.get(strategy_name, lambda s, d, e={}: s.calculate(d))
         combos   = _grid_combos(strategy_name)
         cfg      = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
-
+        
+        # Walk-forward validation: split df into train (first 75%) and
+        # validation (last 25%) periods. Optimize params on train only,
+        # then score each candidate on validation to measure generalization.
+        # This prevents selecting params that overfit to the full history.
+        _val_split = int(len(df) * 0.75)
+        _df_train = df.iloc[:_val_split].reset_index(drop=True)
+        _df_val   = df.iloc[_val_split:].reset_index(drop=True)
+        # Require minimum bars in each split
+        _min_bars = max(cfg["warmup"] * 2, 100)
+        _use_validation = len(_df_train) >= _min_bars and len(_df_val) >= _min_bars
+        if not _use_validation:
+            _df_train = df   # fallback: dataset too short for split
+            _df_val   = df
+            logger.debug(f"Optimizer: dataset too short for walk-forward split ({len(df)} bars) — using full history")
+        
         best_params: Optional[dict] = None
         best_score  = -1.0
         best_n      = 0
@@ -633,17 +667,37 @@ class ParamOptimizer:
 
         for combo in combos:
             time.sleep(0)  # yield CPU between combos to prevent event-loop starvation
-            wr, avg_rr, n, regime_stats = _backtest_combo(
-                strategy_cls, dispatch, df, combo,
+            # Phase 1: optimize on training set
+            wr_train, avg_rr_train, n_train, regime_stats = _backtest_combo(
+                strategy_cls, dispatch, _df_train, combo,
                 cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
                 _extra_dfs, bt_window,
             )
-            # Score = win_rate weighted by quality of avg R:R
-            score = wr * max(avg_rr, 0.0) if n >= MIN_BACKTEST_SIGNALS else 0.0
+            train_score = wr_train * max(avg_rr_train, 0.0) if n_train >= MIN_BACKTEST_SIGNALS else 0.0
+            if train_score <= 0.0:
+                continue  # skip combos that don't work on training data
+
+            # Phase 2: validate on held-out period — use validation score for selection
+            # This prevents selecting params that overfit to the training period.
+            if _use_validation:
+                wr_val, avg_rr_val, n_val, _ = _backtest_combo(
+                    strategy_cls, dispatch, _df_val, combo,
+                    cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
+                    _extra_dfs, bt_window,
+                )
+                # Require minimum signals on validation set too
+                val_score = wr_val * max(avg_rr_val, 0.0) if n_val >= max(MIN_BACKTEST_SIGNALS // 3, 3) else 0.0
+                # Use blended score: 40% train + 60% validation
+                # Weighted toward validation to penalize overfitting
+                score = 0.4 * train_score + 0.6 * val_score
+            else:
+                score = train_score
+                n_val = n_train
+
             if score > best_score:
                 best_score  = score
                 best_params = combo
-                best_n      = n
+                best_n      = n_train + n_val
 
             # Track per-regime best combo
             for regime_label, rs in regime_stats.items():
@@ -676,6 +730,24 @@ class ParamOptimizer:
         regime_params: dict[str, dict] | None = None,
     ) -> None:
         with self._lock:
+            # Version archive: copy current file before overwriting so params
+            # can be rolled back manually if new optimization underperforms.
+            # Keep last 5 versions only to avoid unbounded disk growth.
+            try:
+                import shutil as _shutil
+                _archive_dir = OPT_FILE.parent / "params_archive"
+                _archive_dir.mkdir(exist_ok=True)
+                if OPT_FILE.exists():
+                    _ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    _archive_path = _archive_dir / f"optimized_params_{_ts}.json"
+                    _shutil.copy2(OPT_FILE, _archive_path)
+                    # Prune: keep only last 5 archives
+                    _archives = sorted(_archive_dir.glob("optimized_params_*.json"))
+                    for _old in _archives[:-5]:
+                        _old.unlink(missing_ok=True)
+            except Exception as _arc_exc:
+                logger.debug(f"Optimizer: archive failed (non-critical): {_arc_exc}")
+
             data = self._load_opt()
             data.setdefault(strategy_name, {})
             # Merge: keep existing by_regime if present, update with new findings

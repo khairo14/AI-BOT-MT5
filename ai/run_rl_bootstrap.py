@@ -46,7 +46,7 @@ from ai.rl_agent import RLAgent, rl_manager as _rl_manager
 
 # 1 year of bars per trading type (enough for Q-table coverage; faster than optimizer's 2 years)
 _BARS: dict[str, int] = {
-    "scalping":     250_000,   # M5  ~2.38 years
+    "scalping":     200_000,   # M5  ~2 years
     "day_trading":   50_000,   # H1  ~5.71 years
     "swing":         30_000,   # H4  ~13.7 years
 }
@@ -251,7 +251,13 @@ def main() -> None:
             peak_eq   = max(peak_eq, equity)
             dd_pct    = max(0.0, (peak_eq - equity) / peak_eq * 100.0)
             wr        = sum(window) / len(window) if window else 0.5
-            avg_conf  = conf_score if conf_score > 0.0 else 0.55
+            # Deflate confidence scores from backtest: LSTM is scoring on its own
+            # training data which inflates P(up/down). Apply a 5% deflation to
+            # approximate the realistic live confidence distribution.
+            # Without this, RL learns "high confidence = good outcome" from an
+            # inflated dataset, then gets surprised when live confidence is lower.
+            _conf_deflated = conf_score * 0.95 if conf_score > 0.0 else 0.55
+            avg_conf  = max(0.50, _conf_deflated)
              # Apply spread penalty so RL agent learns from spread-adjusted outcomes
             _penalty = _SPREAD_PNL_PENALTY.get(trading_type, 0.01)
             _adjusted_pnl = pnl_pct - (_penalty * 100.0)
@@ -267,6 +273,30 @@ def main() -> None:
             )
 
         agent.shutdown()
+        # Sanity clamp: Q-learning can produce extreme values from poor backtest win rates.
+        # Clamp to a safe operating range before persisting — prevents bootstrap from
+        # writing a panic state (40% threshold, 1.5x risk) that then requires days of
+        # idle decay to correct.
+        _CLAMP_CONF_FLOOR = {"scalping": 0.54, "day_trading": 0.54, "swing": 0.52}
+        _CLAMP_CONF_CEIL  = {"scalping": 0.68, "day_trading": 0.72, "swing": 0.70}
+        _CLAMP_RF_FLOOR   = {"scalping": 0.70, "day_trading": 0.70, "swing": 0.70}
+        _CLAMP_RF_CEIL    = {"scalping": 1.20, "day_trading": 1.30, "swing": 1.40}
+        _qp = _QTABLE_FILES[trading_type]
+        try:
+            _qt = json.loads(_qp.read_text(encoding="utf-8"))
+            _qt["conf_thresh"] = max(
+                _CLAMP_CONF_FLOOR[trading_type],
+                min(_CLAMP_CONF_CEIL[trading_type], _qt.get("conf_thresh", 0.55))
+            )
+            _qt["risk_factor"] = max(
+                _CLAMP_RF_FLOOR[trading_type],
+                min(_CLAMP_RF_CEIL[trading_type], _qt.get("risk_factor", 1.0))
+            )
+            _qp.write_text(json.dumps(_qt), encoding="utf-8")
+        except Exception as _ce:
+            logger.warning(f"Bootstrap clamp failed for {trading_type}: {_ce}")
+
+
         wr_final = wins / len(type_trades)
         logger.info(
             f"  {trading_type:12s}: {len(type_trades):>5,d} trades  "

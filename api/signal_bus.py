@@ -801,6 +801,7 @@ async def recover_unclosed_trades(client) -> None:
                 duration_mins=round(dur_mins, 1),
                 mode=entry.get("account_mode") or current_mode(),
                 lstm_predicted_direction=direction,
+                regime=entry.get("regime"),
                 extra={"source": "live", "slippage_pips": 0.0},
             )
             memory.record(outcome)
@@ -1340,13 +1341,13 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
                 # Trigger 3: 5 consecutive losses (regime change indicator)
                 if not _retrain and not predictor.is_training(_sym, _type):
-                    _recent_5 = [
-                        o for o in _mem.recent(n=30, live_only=True)
+                    _recent_trades = [
+                        o for o in _mem.recent(n=50, live_only=True)
                         if o.get("symbol") == _sym and o.get("trading_type") == _type
-                    ][-5:]
-                    if len(_recent_5) == 5 and all(o.get("profit", 0) < 0 for o in _recent_5):
+                    ][-8:]
+                    if len(_recent_trades) == 8 and all(o.get("profit", 0) < 0 for o in _recent_trades):
                         _retrain = True
-                        _retrain_reason = "5 consecutive losses"
+                        _retrain_reason = "8 consecutive losses"
 
                 if _retrain:
                     _tf_str = TRADING_TYPE_TF.get(_type, "H1")

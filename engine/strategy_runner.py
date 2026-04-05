@@ -229,6 +229,7 @@ class StrategySignal:
     comment: str
     timeframe: str = ""  # primary timeframe from the strategy class (e.g. "M5", "H1")
     confidence: float = 0.0  # 0–1 score from AI scorer (Phase 6)
+    regime:     str | None = None
     indicators: dict[str, Any] = field(default_factory=dict)
     approved: bool = False  # set to True when user confirms (manual mode)
 
@@ -459,6 +460,33 @@ class StrategyRunner:
         except Exception as _vol_exc:
             logger.debug(f"Volatility adjustment skipped [{symbol}]: {_vol_exc}")
 
+        # Regime-aware position sizing — reduce lot when trading in an unfamiliar
+        # or high-risk regime. Volatile breakout and quiet regimes are structurally
+        # different from the training data distribution; reduce exposure accordingly.
+        # This is separate from volatility adjustment (ATR-based) — this is regime-based.
+        _REGIME_LOT_FACTOR: dict[str, float] = {
+            "trending_bull":     1.00,   # familiar regime — full size
+            "trending_bear":     1.00,   # familiar regime — full size
+            "ranging_low_vol":   0.90,   # slightly reduced — strategies less optimal
+            "ranging_high_vol":  0.85,   # further reduced — wider spreads, slippage
+            "volatile_breakout": 0.75,   # significant reduction — unpredictable moves
+            "quiet":             0.50,   # shouldn't reach here (regime gate blocks all)
+        }
+        if _regime and _regime in _REGIME_LOT_FACTOR:
+            _regime_factor = _REGIME_LOT_FACTOR[_regime]
+            if _regime_factor < 1.0:
+                _min_l = sym_info.get("min_lot", 0.01)
+                _step_l = sym_info.get("lot_step", 0.01)
+                _regime_adj = round(
+                    math.floor(lot * _regime_factor / _step_l) * _step_l, 8
+                )
+                lot = max(_min_l, _regime_adj)
+                if lot < _regime_adj or _regime_factor < 1.0:
+                    logger.debug(
+                        f"Regime lot reduction [{_regime}]: "
+                        f"factor={_regime_factor} lot→{lot} [{symbol}/{trading_type}]"
+                    )
+
         # For scalping: snap the stale bar-close entry to the live market quote.
         # SL/TP distances (in price) are preserved; only the anchor shifts.
         _entry_price = sig.entry_price
@@ -502,6 +530,7 @@ class StrategyRunner:
             lot_size=lot,
             timeframe=sig.timeframe,
             comment=sig.comment,
+            regime=_regime,
             indicators=result.indicators,
         )
 

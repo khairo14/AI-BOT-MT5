@@ -184,7 +184,72 @@ async def get_confidence(symbol: str, trading_type: TRADING_TYPE = "day_trading"
         **predictor.status().get(key, {}),
     }
 
+@router.post("/models/rollback/{symbol}/{trading_type}")
+async def rollback_model(symbol: str, trading_type: TRADING_TYPE):
+    """
+    Roll back a symbol's LSTM model to the previous version.
+    Uses the model version archive in ai/models/versions/.
+    """
+    from pathlib import Path
+    import shutil
+    key = f"{symbol}_{trading_type}"
+    _versions_dir = Path("ai/models/versions") / key
+    if not _versions_dir.exists():
+        raise HTTPException(status_code=404, detail=f"No version archive for {key}")
+    _pt_versions = sorted(_versions_dir.glob(f"{key}_lstm_*.pt"))
+    if len(_pt_versions) < 2:
+        raise HTTPException(status_code=404, detail=f"Need at least 2 versions to rollback — only {len(_pt_versions)} found")
+    # Second-to-last is the previous version
+    _prev_pt   = _pt_versions[-2]
+    _ts_stamp  = _prev_pt.stem.replace(f"{key}_lstm_", "")
+    _prev_scaler = _versions_dir / f"{key}_scaler_{_ts_stamp}.pkl"
+    _prev_meta   = _versions_dir / f"{key}_meta_{_ts_stamp}.json"
+    _models_dir  = Path("ai/models")
+    try:
+        shutil.copy2(_prev_pt,     _models_dir / f"{key}_lstm.pt")
+        if _prev_scaler.exists():
+            shutil.copy2(_prev_scaler, _models_dir / f"{key}_scaler.pkl")
+        if _prev_meta.exists():
+            shutil.copy2(_prev_meta,   _models_dir / f"{key}_meta.json")
+        # Reload the predictor to pick up the rolled-back model
+        reloaded = predictor._load_model(symbol, trading_type)
+        return {
+            "status":        "rolled_back" if reloaded else "rolled_back_reload_failed",
+            "key":           key,
+            "version_stamp": _ts_stamp,
+            "model":         str(_prev_pt.name),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {exc}")
+    
+@router.post("/models/calibrate/{symbol}/{trading_type}")
+async def calibrate_model(symbol: str, trading_type: TRADING_TYPE):
+    """
+    Fit Platt scaling calibration for a symbol's LSTM model using live trade outcomes.
+    Requires at least 30 live trades. Run periodically as live trade data accumulates.
+    """
+    result = predictor.calibrate(symbol, trading_type)
+    if result.get("status") == "no_model":
+        raise HTTPException(status_code=404, detail=f"No model for {symbol}/{trading_type}")
+    return result
 
+@router.post("/models/calibrate/all")
+async def calibrate_all_models():
+    """Calibrate all trained models using available live trade outcomes."""
+    import json as _json
+    from pathlib import Path as _Path
+    results = {}
+    _symbols_cfg_path = _Path("config/symbols.json")
+    try:
+        _syms_cfg = _json.loads(_symbols_cfg_path.read_text(encoding="utf-8"))
+        for tt in ("scalping", "day_trading", "swing"):
+            for entry in _syms_cfg.get(tt, []):
+                sym = entry.get("symbol") if isinstance(entry, dict) else entry
+                if sym and predictor.is_trained(sym, tt):
+                    results[f"{sym}_{tt}"] = predictor.calibrate(sym, tt)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return results
 # ───────────────────────────────────
 # RL Agent endpoints
 # ───────────────────────────────────
@@ -227,12 +292,46 @@ def rl_reset(trading_type: TRADING_TYPE):
 # ───────────────────────────────────
 # Trade Memory endpoints
 # ───────────────────────────────────
+@router.get("/memory/drift")
+def memory_drift_detection(
+    trading_type: Optional[TRADING_TYPE] = None,
+    window: int = Query(30),
+):
+    """Detect win rate drift using Page-Hinkley test."""
+    return memory.detect_drift(
+        trading_type=trading_type,
+        window=window,
+        live_only=True,
+    )
+
+@router.get("/memory/stability")
+def memory_ev_stability(
+    trading_type: Optional[TRADING_TYPE] = None,
+    window: int = Query(20),
+):
+    """Return rolling EV stability trend across time windows."""
+    return memory.rolling_ev_stability(
+        trading_type=trading_type,
+        window=window,
+        live_only=True,
+    )
 
 @router.get("/memory/stats")
 def memory_stats(trading_type: Optional[TRADING_TYPE] = None):
     """Return aggregate win rate, avg P&L, SL/TP hit counts."""
     return memory.stats(trading_type=trading_type)
 
+@router.get("/memory/stats/regime")
+def memory_stats_by_regime(
+    trading_type: Optional[TRADING_TYPE] = None,
+    min_samples: int = Query(5),
+):
+    """Return win rate and avg PnL broken down by market regime."""
+    return memory.stats_by_regime(
+        trading_type=trading_type,
+        min_samples=min_samples,
+        live_only=True,
+    )
 
 @router.get("/memory/recent")
 def memory_recent(n: int = 50, trading_type: Optional[TRADING_TYPE] = None):
