@@ -1,6 +1,6 @@
-# AI / ML System — Full Capabilities & Limits
+# EVOTRADE-AI — AI / ML System: Full Capabilities
 
-This document describes exactly what each AI component does, its current limits, and how it is wired into the trading pipeline.
+**Last Updated:** April 2026
 
 ---
 
@@ -8,389 +8,494 @@ This document describes exactly what each AI component does, its current limits,
 
 | Component | Purpose | Runs when | Updates when |
 |---|---|---|---|
-| **LSTM Predictor** | Directional probability (0–1) per symbol×mode | Every signal check | Every 20th closed live/paper trade, or model stale >7 days, or 5 consecutive losses (auto), or manual Retrain |
-| **Signal Scorer** | Blend LSTM + R:R + Trend + Volume → confidence | Every signal check | Weights are fixed; LSTM sub-score updates via retraining |
-| **RL Agent** | Learn confidence threshold + risk factor per mode | Every signal check (gate) | After every closed trade |
-| **Param Optimizer** | Find best strategy params via walk-forward grid search | On-demand, or auto when WR drops below 45% | After each optimizer run |
-| **Trade Memory** | Central outcome log; source of truth for RL + optimizer | Always (every closed trade) | Appended after each close |
+| **LSTM Predictor** | Directional probability (0–1) per symbol×mode | Every signal check | Every 20th live trade, model stale >7 days, 8 consecutive losses, or manual retrain |
+| **Signal Scorer** | Blend LSTM + R:R + Trend + Volume → confidence | Every signal check | Weights hot-reload from `app.json` every 5 s |
+| **Regime Classifier** | 6-label market condition label | Every signal check | Per bar — 3-bar hysteresis before label promoted |
+| **RL Agent** | Learns confidence threshold + risk factor per mode | Every signal check (gate) | After every closed trade |
+| **Param Optimizer** | Best strategy params via walk-forward grid search | On-demand or auto on WR drop | After each optimizer run |
+| **Trade Memory** | Central outcome log — source of truth for all AI | Always (every closed trade) | Appended after each close |
 
 ---
 
 ## 1. LSTM Price Predictor (`ai/predictor.py`)
 
-**What it predicts:** Whether price will go up or down on the next bar. Returns a probability between 0 and 1 — `0.5 = neutral`, `>0.65 = strong directional signal`.
+**What it predicts:** Whether the cumulative return over the next N bars will be positive or negative. Returns a probability between 0 and 1 — `0.5 = neutral`, `>0.65 = strong directional signal`.
+
+**Multi-bar lookahead label** (not single next-bar):
+- Scalping (M5): 5 bars ahead = 25-minute horizon
+- Day Trading (H1): 5 bars ahead = 5-hour horizon
+- Swing (H4): 3 bars ahead = 12-hour horizon
+
+Single next-bar direction at M5/H1/H4 is near-pure noise. Aggregating N bars reduces label noise while keeping the prediction horizon relevant to the trading type.
 
 **Architecture:**
-- 2-layer LSTM with hidden size 64
-- Sequence length: 60 bars (the model sees the past 60 bars before making a call)
-- Input features per bar (**7 total**):
-  - `close_return` — (close[i] − close[i−1]) / close[i−1]
-  - `hl_range` — (high − low) / close
-  - `oc_body` — (close − open) / open
-  - `volume_norm` — volume / mean volume
-  - `upper_wick` — (high − close) / close
-  - `is_near_news` — per-bar flag: 1.0 only for bars within the 45-min news blackout window (scaled to bar count for the timeframe), else 0.0. This prevents the train/inference distribution shift that occurred when the whole 60-bar sequence received the same current news state.
-  - `atr_norm` — ATR(14) / close: normalised volatility regime indicator — tells the model whether the market is in a high/low volatility environment
-- Output: binary classification (up vs down) — not a price regression
-- Trained with `BCELoss` for 20 epochs, gradient clipping `max_norm=1.0`, 80/20 train/val split
+- 2-layer LSTM, hidden size 64, dropout 0.2
+- Sequence length: 60 bars (sees 60 bars before making a prediction)
+- Input features per bar — **7 total**:
 
-**Accuracy gate:** After training, if validation accuracy is below **52%** (statistically indistinguishable from random), the new weights are discarded and the previous model file is kept intact. This prevents a coin-flip model from overwriting a working one during low-data or adverse-regime retrains.
+| Feature | Formula | Purpose |
+|---|---|---|
+| `close_return` | (close[i] − close[i−1]) / close[i−1] | Price momentum |
+| `hl_range` | (high − low) / close | Bar range / volatility |
+| `oc_body` | (close − open) / open | Candle direction + strength |
+| `volume_norm` | volume / mean volume | Relative volume |
+| `upper_wick` | (high − close) / close | Rejection signal |
+| `is_near_news` | 1.0 for last N bars within 45-min news window, else 0.0 | News event awareness |
+| `atr_norm` | ATR(14) / close | Volatility regime |
 
-**One model per symbol × trading type.** A `EURUSD` scalping model trains on M5 OHLCV. An `EURUSD` day trading model trains on H1. These are completely independent files stored as `ai/models/{symbol}_{type}_lstm.pt` + `{symbol}_{type}_scaler.pkl`.
+- Output: binary classification (up vs down)
+- Loss: `BCEWithLogitsLoss` with `pos_weight` for class balancing (prevents majority-class dominance)
+- Training: 50 epochs, mini-batch shuffled (shuffles sequence order, not internal bar order), label smoothing 0.05, gradient clipping `max_norm=1.0`
+- Train/val split: 80/20 on the feature array with scaler fitted on training rows only (no val leakage)
 
-**Timeframes used for training data:**
+**Accuracy gate:**
+- If a model already exists on disk: new model must exceed **58%** validation accuracy or it is discarded (existing model retained)
+- First-time training (bootstrap): accepts any accuracy > 50% and logs a bootstrap notice
+- 58% threshold: chosen because below this, expected value after spread and slippage is negative
 
-| Mode | Training TF |
-|---|---|
-| Scalping | M5 |
-| Day Trading | H1 |
-| Swing | H4 |
+**Model versioning:**
+- **Live model:** `ai/models/{key}_lstm.pt` + `{key}_scaler.pkl` + `{key}_meta.json`
+- **Anchor model:** `ai/models/{key}_anchor.pt` — frozen at first production-quality training, never auto-overwritten. Used for baseline comparison alerts.
+- **Version archive:** `ai/models/versions/{key}/` — last 3 versions kept. API rollback endpoint: `POST /ai/models/rollback/{symbol}/{trading_type}`
 
-**When it retrains (three triggers, whichever fires first):**
-- **Trigger 1 — Trade count:** every 20th closed live/paper trade per symbol×mode
-- **Trigger 2 — Staleness:** if the model is older than 7 days AND ≥ 10 trades exist for this symbol×mode
-- **Trigger 3 — Consecutive losses:** if the last 5 closed trades for this symbol×mode all lost (regime-change indicator)
-- **Manual:** "Retrain" or "Retrain All" buttons on the AI/ML Brain page
+**Platt scaling calibration:**
+After 30+ live trades per symbol×mode, `POST /ai/models/calibrate/{symbol}/{trading_type}` fits a logistic regression (Platt scaling) on raw sigmoid outputs vs actual outcomes. The calibration parameters (a, b) are persisted to `ai/models/lstm_calibration.json` and applied on every `predict()` call. This maps raw sigmoid confidence to true P(win | confidence).
 
-**Minimum data to train:** 70+ bars required (60 for sequence + warmup). If fewer bars are available, training is skipped.
+**One model per symbol × trading type.** Training timeframes:
 
-**Hard limits:**
-- Predicts direction only — no price target, no confidence interval.
-- Does not account for news events or session boundaries directly (news is captured via `is_near_news` feature).
-- GPU-accelerated when CUDA is available (auto-detected at runtime via `torch.cuda.is_available()`). Falls back to CPU if no CUDA device is found. Models are saved to CPU format and loaded to the appropriate device on each run.
-- Changing `INPUT_SIZE` (e.g. adding features) invalidates existing `.pt` model files — they will auto-retrain on the next trigger.
+| Mode | Training TF | Lookahead |
+|---|---|---|
+| Scalping | M5 | 5 bars (25 min) |
+| Day Trading | H1 | 5 bars (5 hours) |
+| Swing | H4 | 3 bars (12 hours) |
+
+**Auto-retrain triggers (whichever fires first):**
+1. Every 20th closed live/paper trade per symbol×mode
+2. Model age > 7 days AND ≥ 10 trades exist for the symbol×mode
+3. 8 consecutive losses for the symbol×mode (regime-change indicator)
+4. Manual: "Retrain" or "Retrain All" on the AI/ML Brain page
+
+**Anchor vs live accuracy comparison** (feed alert at −8+ point drop):
+The performance monitor checks every 5 minutes and broadcasts a WebSocket alert if the live model's training accuracy has dropped more than 8 percentage points below the anchor baseline.
 
 ---
 
 ## 2. Signal Scorer (`ai/signal_scorer.py`)
 
-**What it produces:** A single 0–1 confidence score per signal, blending four components.
+**What it produces:** A single 0–1 confidence score per signal from a weighted blend of four components.
 
-**Weights:**
+### Default Weight Profiles
+
+**Global default (day_trading):**
 
 | Component | Weight | Source |
 |---|---|---|
-| LSTM direction probability | 40% | `ai/predictor.py` |
-| Risk:Reward ratio quality | 25% | Derived from entry/SL/TP |
-| Trend alignment (EMA50 vs EMA200) | 20% | Computed from `df` |
+| LSTM direction probability | 30% | `predictor.predict()` |
+| Risk:Reward ratio quality | 35% | From entry / SL / TP |
+| Trend alignment (EMA50 vs EMA200) | 20% | Computed from OHLCV |
 | Volume confirmation | 15% | Last bar vs 20-bar avg |
 
-**Score thresholds (for badge colours in the UI):**
+**Scalping-specific weights** (`app.json → ai.scalping_scorer_weights`):
+
+| Component | Weight | Rationale |
+|---|---|---|
+| LSTM | 15% | M5 LSTM less reliable than H1/H4 |
+| R:R | 25% | Structure quality gate |
+| Trend | 40% | Primary scalping edge |
+| Volume | 20% | Momentum confirmation |
+
+**Swing-specific weights** (`app.json → ai.swing_scorer_weights`):
+
+| Component | Weight | Rationale |
+|---|---|---|
+| LSTM | 40% | H4 LSTM is most reliable |
+| R:R | 30% | Multi-day commitment requires strong setup |
+| Trend | 25% | Weekly trend alignment |
+| Volume | 5% | Less meaningful on H4 |
+
+### Regime-Adaptive Weights
+
+When the regime classifier provides a label, the scorer uses a per-regime profile from `app.json → ai.regime_weights`. Resolution priority: per-regime → global default → class defaults.
+
+| Regime | LSTM | RR | Trend | Volume | Logic |
+|---|---|---|---|---|---|
+| `trending_bull` | 0.35 | 0.25 | **0.30** | 0.10 | Lean on trend + LSTM for timing |
+| `trending_bear` | 0.35 | 0.25 | **0.30** | 0.10 | Mirror of trending_bull |
+| `ranging_low_vol` | 0.25 | **0.40** | 0.10 | 0.25 | RR structure + volume carry weight |
+| `ranging_high_vol` | 0.20 | **0.45** | 0.05 | 0.30 | Trend near-zeroed in noisy range |
+| `volatile_breakout` | 0.25 | **0.40** | 0.20 | 0.15 | RR gates explosive moves |
+| `quiet` | 0.35 | 0.30 | 0.20 | 0.15 | Near-default; no dominant edge |
+
+### Component Details
+
+**Trend score — graduated (not binary):**
+- `gap_pct = (EMA50 − EMA200) / |EMA200|`
+- `trend_strength = clip(gap_pct / 0.05, −1, +1)` — normalised: ±5% gap = ±1
+- `raw_score = 0.5 + 0.4 × trend_strength` — range **[0.1, 0.9]**
+- BUY uses `raw_score`; SELL uses `1 − raw_score`
+
+**R:R score:**
+- `clip((reward / risk) / 4.0, 0.0, 1.0)`
+- 1:1 → 0.25 | 2:1 → 0.50 | 3:1 → 0.75 | ≥4:1 → 1.0
+
+**Volume score:**
+- `clip(last_bar_volume / (20_bar_avg × 2), 0.0, 1.0)`
+- At average → 0.50 | 2× above average → 1.0
+
+**Multi-timeframe penalty:**
+After scoring, if a higher-TF dataframe is available, the score is penalised when the HTF trend conflicts with the signal direction:
+- Aligned (HTF trend score ≥ 0.55): no penalty
+- Neutral (0.45–0.55): score × 0.95
+- Conflicted (< 0.45): score × 0.85
+
+**Score thresholds (for badge colours in UI):**
 - `≥ 0.75` → High confidence (green)
 - `0.50–0.74` → Medium (yellow)
 - `< 0.50` → Low (gray)
 
-**Graceful degradation:** If LSTM is untrained or throws an error, LSTM component returns `0.5` (neutral) rather than crashing the signal. The overall score still reflects R:R, trend, and volume.
-
-**Trend score — graduated (not binary):** The EMA alignment component uses a continuous score instead of a hard 1.0/0.1 flip:
-- `gap_pct = (EMA50 − EMA200) / |EMA200|` — measures how far apart the EMAs are as a percentage
-- `trend_strength = clip(gap_pct / 0.02, −1, +1)` — normalises: ±2% gap = ±1
-- `raw_score = 0.5 + 0.4 × trend_strength` — range **[0.1, 0.9]**
-- BUY direction uses `raw_score` directly; SELL direction uses `1 − raw_score`
-- A weak alignment (EMAs nearly equal) now correctly produces ~0.5, not a false 1.0
-
-**What it does NOT do:**
-- It does not block signals by itself. Scoring is informational until a gate checks the score.
-- It does not learn or adapt — the weights are fixed constants.
+**Graceful degradation:** If LSTM is untrained or unavailable, the LSTM sub-score returns `0.5` (neutral). The overall score still reflects R:R, trend, and volume.
 
 ---
 
-## 3. Confidence Gates (two separate mechanisms)
+## 3. Confidence Gates
 
-Signals pass through **two independent gates** in `engine/strategy_runner.py`:
+Signals pass through **two independent gates** before reaching the execution pipeline.
 
 ### Gate 1 — Static Threshold (configurable, off by default)
 
-Controlled by `config/app.json → ai.confidence_filter_enabled`.
+Controlled by `config/app.json → ai.confidence_filter_enabled` and `ai.confidence_threshold`.
 
-```json
-"ai": {
-  "confidence_filter_enabled": false,
-  "confidence_threshold": 60
-}
-```
+- `false` (default): no static filtering — all scored signals proceed
+- `true`: signals below `confidence_threshold / 100` are blocked and logged
 
-- When `false` (default): no filtering — all scored signals proceed regardless of confidence.
-- When `true`: any signal with `confidence < confidence_threshold / 100` is blocked and logged as `"AI confidence gate blocked"`.
-- `confidence_threshold` is in percent (e.g., `60` means block < 0.60).
+### Gate 2 — RL Dynamic Gate
 
-**This is what "off by default" means** — signals are not filtered by a static threshold unless you enable it in Settings.
+Controlled by `config/app.json → ai.rl_agent_enabled`.
 
-### Gate 2 — RL Dynamic Gate (controlled by `rl_agent_enabled`)
+- `true` (default): RL agent's learned `conf_thresh` filters signals; `risk_factor` scales lot size
+- `false`: gate bypassed — all signals pass, raw lot sizing from `risk.json`
 
-Controlled by the RL agent's learned threshold **and** the `config/app.json → ai.rl_agent_enabled` flag.
-
-```json
-"ai": {
-  "rl_agent_enabled": true
-}
-```
-
-- When `true` (default): RL gate is active — signals below the learned threshold are suppressed, and the RL risk_factor multiplier adjusts lot sizing.
-- When `false`: gate bypassed — all signals pass through, lot sizing uses the raw risk.json value with no RL adjustment.
-
-The RL agent starts at `0.55` (55%) and adjusts between `0.40` and `0.85` based on recent trade outcomes.
-
-```python
-if not scorer.is_tradeable(strat_sig.confidence, trading_type):
-    return None  # signal suppressed
-```
-
-As the RL agent learns from closed trades, it shifts the threshold up or down (±0.02 per update).
+**Both gates and the signal_bus auto-execution check now use the RL agent threshold as the single source of truth.** The previous triple-gate inconsistency (static threshold, RL threshold, and hardcoded minimums) has been removed — only the RL gate determines tradeability in `signal_bus.py` auto-execution.
 
 ---
 
 ## 4. RL Agent (`ai/rl_agent.py`)
 
-**Algorithm:** Tabular Q-learning (no neural net).
+**Algorithm:** Tabular Q-learning — fast, interpretable, no GPU required.
 
 **What it controls:**
-1. `confidence_threshold` — signals below this are suppressed (Gate 2 above)
-2. `risk_factor` — multiplier on the base risk% from `config/risk.json`
+1. `confidence_threshold` — minimum signal confidence to allow entry
+2. `risk_factor` — multiplier on the base risk% from `risk.json`
 
 **State space (162 states):**
-
-State = `{win_rate_bucket}_{conf_bucket}_{session_bucket}_{drawdown_bucket}_{vol_bucket}`
+`{win_rate_bucket}_{conf_bucket}_{session_bucket}_{drawdown_bucket}_{vol_bucket}`
 
 | Dimension | Buckets | Values |
 |---|---|---|
-| Win rate | 3 | `low` (<40%), `med` (40–60%), `high` (>60%) |
-| Confidence | 3 | `low` (<0.55), `med` (0.55–0.70), `high` (>0.70) |
-| Session | 3 | `overlap` (12–18 UTC), `active` (07–22 UTC), `quiet` |
-| Drawdown | 3 | `low` (<1.5% daily DD), `med` (1.5–3%), `high` (≥3%) |
-| Volatility | 2 | `tight` (SL-dist < 1% of entry), `wide` (≥1%) |
+| Win rate | 3 | low (<40%), med (40–60%), high (>60%) |
+| Avg confidence | 3 | low (<0.55), med (0.55–0.70), high (>0.70) |
+| Session | 3 | overlap (12–17 UTC), active (07–22 UTC), quiet |
+| Daily drawdown | 3 | low (<1.5%), med (1.5–3%), high (≥3%) |
+| Volatility | 2 | tight (SL-dist <1% of entry), wide (≥1%) |
 
-3 × 3 × 3 × 3 × 2 = **162 total states**.
+**Actions:** 9 joint actions combining ±CONF_STEP (0.02) and ±RISK_STEP (0.05) or hold.
 
-The **volatility bucket** uses SL-distance as a cheap ATR proxy — since every strategy sets SL as a multiple of ATR, `|entry − SL| / entry × 100` directly reflects the volatility regime at trade entry without an extra OHLCV fetch:
-- `tight` (≈1% of price) — calm forex pairs, equity indices
-- `wide` (≥1% of price) — crypto, gold, oil, or forex during volatile sessions
+**Per-mode learning rates:**
+- Scalping: α = 0.15 (fast intraday adaptation)
+- Day Trading: α = 0.10 (balanced)
+- Swing: α = 0.05 (slow — multi-day confirmation needed)
 
-The agent can learn to apply a higher confidence threshold and lower risk factor for wide-stop (high-volatility) trades, independently of whether those trades were profitable.
+**Per-mode parameter bounds:**
 
-The **drawdown bucket** was added to give the RL agent awareness of its current risk exposure. As daily drawdown approaches the 5% circuit-breaker limit, the agent enters different state rows and can learn to become more conservative independently of its win-rate and recent confidence levels.
-
-Drawdown is computed in `signal_bus._poll_outcome` after each closed trade:
-```python
-drawdown_pct = max(0.0, (day_start_balance - balance) / day_start_balance * 100)
-```
-
-Backward compatibility: existing 81-key Q-table entries won't match the new 162-state keys (missing `_{vol_bucket}` suffix) and will be treated as unseen states, explored fresh with epsilon. No data migration is needed.
-
-**Action space (9 joint actions):**
-Every combination of: `{decrease, hold, increase}` for `conf_threshold` × `{decrease, hold, increase}` for `risk_factor`.
-
-Steps: `conf ±0.02`, `risk ±0.05`.
-
-**Update rule:** Bellman equation, `ALPHA=0.1`, `GAMMA=0.9`. Reward = `profit_pct` of the closed trade.
-
-**Exploration:** Decays from 15% → 2% over time (`EPSILON_START=0.15`, `EPSILON_MIN=0.02`, `EPSILON_DECAY=0.995`). After ~250 trade updates the agent explores ~5% of the time, then continues decaying toward the 2% floor. This allows aggressive early learning and conservative later exploitation.
-
-**Reward normalisation:** Raw `profit_pct` is clipped to `[-0.10, 0.10]` before the Q-table update. This prevents large single-trade spikes (e.g. gold news candles, overnight gaps) from distorting Q-values and causing overconfident position sizing.
-
-**Persistence:** Q-tables saved to `ai/data/rl_qtable_{scalping|day_trading|swing}_{live|paper}.json` after every update (includes `n_updates` counter so epsilon decay persists across restarts). Live and paper tables are kept separate so paper trading doesn't corrupt live learned thresholds. On first run, old unsuffixed files are automatically migrated.
-
-**Hard limits:**
-- Operates only on the last ~50 trades from memory for win-rate calculation (inside `trade_memory.stats()`).
-- Does not consider news directly — the `NewsFilter` already blocks trades during blackout windows so the RL never observes a near-news trade; adding it to state would be redundant.
-- Cannot increase `confidence_threshold` above `0.85` or `risk_factor` above `1.5`.
-- One agent per trading type — scalping/day_trading/swing RL tables are independent.
-
----
-
-## 5. Parameter Optimizer (`ai/param_optimizer.py`)
-
-**What it optimizes:** Strategy-level entry parameters (e.g., EMA periods, RSI threshold, BB std dev). These affect signal generation, not trade sizing or risk.
-
-**Method:** Walk-forward grid search
-1. Iterates over every parameter combination in the grid (up to `MAX_GRID_COMBOS = 64`)
-2. For each combo: runs a bar-by-bar simulation on historical OHLCV (no look-ahead)
-3. Scores each combo as `win_rate × avg_risk_reward`
-4. Saves the best combo to `config/optimized_params.json`
-
-**Walk-forward step sizes by mode:**
-
-| Mode | Step (every N bars) | Max hold | Warmup |
+| Mode | conf_thresh range | conf_ceil | risk_factor range |
 |---|---|---|---|
-| Scalping | 3 | 50 bars | 50 bars |
-| Day Trading | 5 | 100 bars | 100 bars |
-| Swing | 10 | 200 bars | 200 bars |
+| Scalping | 0.52–0.72 | 0.72 | 0.60–1.50 |
+| Day Trading | 0.52–0.78 | 0.78 | 0.60–1.50 |
+| Swing | 0.50–0.78 | 0.78 | 0.60–1.50 |
 
-**Trigger conditions:**
-1. **Manual**: "Run" or "Optimize All" buttons on the AI/ML Brain page
-2. **Post-backtest auto**: If a user-run backtest produces ≥ 30 simulated trades, the optimizer is triggered on the same data
-3. **Live auto**: When win rate for a strategy+symbol drops below `45%` (≥ 20 trades required, 24h cooldown)
+**Reward shaping:**
+- Asymmetric clipping: max(−0.05, min(+0.15, profit_pct/100))
+- Win-rate penalty: −0.02 reward when win_rate < 40%; −0.01 when < 45%
+- Prevents gambler's-fallacy learning ("take everything to recover losses")
 
-**Cooldown:** 24 hours between automatic re-optimizations per strategy+symbol pair.
+**Exploration:** ε-greedy with exponential decay from 15% → 2% over ~250 trades. Tie-breaking defaults to HOLD action on untrained states.
 
-**Parameter grids (search space per strategy):**
+**Isolation:** Paper and live each have their own Q-table files (`rl_qtable_{type}_{mode}.json`). On first live run, paper Q-table is used to bootstrap live (identical market data, same patterns apply).
 
-| Strategy | Parameters | Combos |
+**Idle decay:** If no trade has closed for 6+ hours (scalping), 6h (day trading), or 12h (swing) and `conf_thresh` is above the default 0.55, it decays by one step. A dedicated background task (`_rl_idle_decay_loop`) runs every 30 minutes to cover weekends and holidays when `observe()` never fires.
+
+**Persistence:** Q-table saved every 10 updates (not every trade) to reduce I/O. Force-saved on graceful shutdown.
+
+**Bootstrap sequence:** Run `python ai/run_rl_bootstrap.py` after completing retrain AND optimizer. This seeds Q-tables using backtests scored with real LSTM confidence. Requires both to complete first — without LSTM models, all backtest conf_scores are 0.55 uniform (no differentiation).
+
+---
+
+## 5. Market Regime Classifier (`engine/regime_classifier.py`)
+
+**Labels:** 6 mutually exclusive market condition labels
+
+| Label | Condition |
+|---|---|
+| `trending_bull` | ADX ≥ threshold, EMA50 > EMA200 |
+| `trending_bear` | ADX ≥ threshold, EMA50 < EMA200 |
+| `ranging_low_vol` | ADX < threshold, ATR% < 0.80% |
+| `ranging_high_vol` | ADX < threshold, ATR% ≥ 0.80% |
+| `volatile_breakout` | ADX ≥ breakout threshold AND ATR% ≥ 1.20% AND ADX rising ≥2 units in 3 bars |
+| `quiet` | ATR% < 0.10% |
+
+**Per-asset-class ADX thresholds:**
+
+| Asset Class | Trending | Breakout |
 |---|---|---|
-| `ema_scalp` | ema_fast×4, ema_slow×4, rr×4 | 64 |
-| `bb_squeeze` | bb_period×3, bb_std×3, min_squeeze_bars×3 | 27 (cap: 27) |
-| `vwap_reversion` | sigma_entry×3, sigma_sl×3, rsi_period×3 | 27 |
-| `macd_ema_trend` | macd_fast×2, macd_slow×2, macd_signal×2, ema_fast×2, ema_slow×2 | 32 |
-| `sr_breakout` | lookback_bars×3, atr_period×3 | 9 |
-| `rsi_divergence` | rsi_period×3, ema_bias_period×3 | 9 |
-| `ema_trend_rider` | ema_fast×3, ema_slow×3 | 9 |
-| `fibonacci_rsi` | rsi_period×3, fib_lookback×3 | 9 |
-| `weekly_breakout` | lookback_bars×3, atr_mult_sl×3 | 9 |
+| Forex | 22 | 30 |
+| Commodities (Gold, Oil) | 25 | 32 |
+| Indices (US30, GER40) | 28 | 35 |
+| Crypto | 30 | 40 |
 
-**Hard limits:**
-- Grid search is CPU-bound and synchronous within its background thread. Maximum **2 concurrent optimizer jobs** enforced (`MAX_CONCURRENT_OPT=2`) to prevent event-loop starvation and MT5 heartbeat timeouts. CPU yields (`time.sleep(0)`) between combo iterations allow the FastAPI event loop to stay responsive.
-- Simulates spread/slippage cost. Mode-based defaults: `scalping = 0.15R`, `day_trading = 0.05R`, `swing = 0.02R`. Per-symbol overrides take priority for high-spread assets (crypto, gold, indices) so their wider spreads are correctly penalised regardless of trading mode:
-  - Crypto (BTCUSD, ETHUSD, XRPUSD, SOLUSD): **0.25–0.30R**
-  - Gold / Silver: **0.10–0.12R**; Oil: **0.12R**
-  - US/EU indices (US30Cash, US100Cash, GER40Cash …): **0.08–0.10R**
-- Minimum **15 signals** fired per combo before it qualifies (raised from 10 — at 10 signals the ±31% confidence interval made scores unreliable; 15 narrows this to ±26%).
-- Same-bar SL/TP resolution: when both stop-loss and take-profit levels are touched within the same bar, SL is counted as hitting first (conservative). This prevents walk-forward win rates from being inflated by unrealistic TP-first assumptions on large news candles.
-- Optimized params affect the strategy on the **next** run — no restart needed (re-read from `config/optimized_params.json` each cycle).
+**Hysteresis:** Raw label must persist for 3 consecutive bars before being promoted to confirmed. Exception: quiet → non-quiet transition promotes immediately (no stuck-in-quiet deadlock).
 
----
+**State persistence:** Confirmed labels and pending counters are saved to `data/regime_state.json` and restored on restart. A cold-start doesn't reset weeks of accumulated regime context.
 
-## 6.5 Cross-Symbol Correlation Guard (`engine/strategy_runner.py`)
+**Wiring into the pipeline:**
+1. Regime classified from `primary_df` early in `strategy_runner._run_strategy()`
+2. Regime label passed to `optimizer.get_params(strat, symbol, regime=regime)` for regime-specific params
+3. Regime label passed to `scorer.score(..., regime=regime)` for regime-specific weights
+4. Regime label stored in signal dict → `TradeOutcome.regime` → `trade_memory.stats_by_regime()`
 
-**What it does:** Prevents the bot from opening multiple positions that all express the same USD directional bet within the same trading mode. This stops compounding losses when a single macro event (e.g. DXY spike) hits all correlated pairs simultaneously.
+**Regime gating (strategy whitelist):** Strategies structurally mismatched with the current regime are blocked before any signal logic runs:
 
-**How it works:**
-- Every trade has a computed `USD_LONG` or `USD_SHORT` label based on symbol and direction:
-  - `EURUSD BUY` = USD_SHORT, `EURUSD SELL` = USD_LONG
-  - `USDJPY BUY` = USD_LONG,  `USDJPY SELL` = USD_SHORT
-  - Same logic applies for GBPUSD, AUDUSD, NZDUSD, USDCAD, USDCHF, XAUUSD, XAGUSD, etc.
-- Before a signal is approved for execution, the runner counts how many open bot positions in the **same trading mode** (scalp/day/swing) already carry the same USD direction
-- If the count ≥ `max_correlated_positions` (default: `1`), the signal is blocked with `"Correlation guard blocked"`
-- Cross-mode stacking is intentional and unaffected — a scalping EURUSD SELL + a swing EURUSD SELL are treated independently
-- Non-USD cross pairs (e.g. EURGBP, EURJPY) are not checked (USD direction is `None` for those)
+| Regime | Allowed strategies |
+|---|---|
+| `trending_bull/bear` | macd_ema_trend, ema_trend_rider, sr_breakout, ema_scalp, bb_squeeze |
+| `ranging_low/high_vol` | vwap_reversion, bb_squeeze, fibonacci_rsi, rsi_divergence |
+| `volatile_breakout` | sr_breakout, weekly_breakout, bb_squeeze |
+| `quiet` | None (no trades in stationary markets) |
 
-**Effect:** Maximum 1 open USD_LONG or USD_SHORT position per mode at a time. Reduces drawdown concentration on DXY-driven sessions.
-
-**Config:** `max_correlated_positions` in `config/app.json` (top-level, default `1`). Set to `0` to block all correlated stacking; set higher to allow more simultaneous correlated positions.
+**Regime-aware lot sizing:** In addition to regime gating, approved trades in suboptimal regimes have their lot size reduced:
+- `volatile_breakout`: ×0.75
+- `ranging_high_vol`: ×0.85
+- `ranging_low_vol`: ×0.90
+- `trending_*`: ×1.00 (no reduction)
 
 ---
 
-## 6. Trade Memory (`ai/trade_memory.py`)
+## 6. Parameter Optimizer (`ai/param_optimizer.py`)
+
+**Method:** Walk-forward grid search with train/val split. Best combo by composite score saved per strategy×symbol.
+
+**Train/val split:** 75% training, 25% validation. Extra secondary-TF dataframes are also split at the same boundary to prevent lookahead bias. Score = 40% train + 60% validation (penalises overfitting).
+
+**Spread cost deduction (per trade, from R-multiple):**
+
+| Instrument | Cost |
+|---|---|
+| Scalping (generic) | 0.20R |
+| Day Trading | 0.08R |
+| Swing | 0.03R |
+| Crypto (BTCUSD, ETHUSD, etc.) | 0.40R |
+| Gold / Silver | 0.15–0.18R |
+| Oil / Energy | 0.15–0.20R |
+| US/EU Indices | 0.10–0.12R |
+| Stocks | 0.30–0.35R |
+
+**Per-regime best params:** During the grid search, the best param combo for each observed regime label is tracked separately. These are stored in `config/optimized_params.json` under `by_regime` and used when the regime classifier provides a matching label at signal time.
+
+**Persistence:** Atomic writes (`mkstemp → os.replace`) — a crash or kill during optimisation cannot corrupt `optimized_params.json`. Version archive keeps last 5 copies in `config/params_archive/`.
+
+**Corruption recovery:** If `optimized_params.json` is empty or unparseable (e.g. from a pre-fix non-atomic write), `_load_opt()` automatically attempts to restore the most recent valid archive copy. If no archive exists, the file is deleted and the next save starts clean.
+
+**Max grid combos:** 64 per strategy (randomly sampled if the full grid exceeds this).
+
+**Min signals per combo:** 10 — combos that fired fewer backtest signals are discarded.
+
+**Cooldown:** 24 hours between automatic re-optimisations of the same strategy×symbol.
+
+**Concurrency:** Maximum 2 simultaneous optimizer jobs (prevents CPU starvation and MT5 lock contention). Additional jobs queue automatically.
+
+**Auto-trigger:** When `trade_memory.should_reoptimize()` returns True — win rate dropped below 45% with ≥ 30 new live trades since the last optimisation.
+
+**Standalone script:** `python ai/run_optimizer.py` — 12 parallel OS processes (true CPU parallelism), skips already-done jobs (bars_used ≥ 30,000), safe to stop and resume.
+
+**Execution order dependency:** Optimizer is independent of LSTM models and can run in parallel with `run_retrain.py`. Bootstrap (`run_rl_bootstrap.py`) should wait for both to complete.
+
+---
+
+## 7. Trade Memory (`ai/trade_memory.py`)
 
 **Central data store** for all closed trade outcomes.
 
 **Sources:**
 
-| Source | When written | Notes |
+| Source | When written | Mode tag |
 |---|---|---|
-| Live trades | After MT5 position closes | Full data: confidence, pips, P&L |
-| Paper trades | After MT5 position closes | Same as live — uses XM Demo |
-| Backtest simulations | After each backtest run | `source="backtest"`, `confidence=0.5` |
+| Live trades | After MT5 position closes via `_poll_outcome` | `"live"` |
+| Paper trades | After MT5 position closes or paper ledger sync | `"paper"` |
+| Backtest simulations | After each backtest run | `"backtest"` |
 
 **Storage:**
 - Disk: `ai/data/trade_memory.jsonl` — append-only, unlimited size
-- RAM: rolling buffer of last **5,000** entries for fast reads
+- RAM: rolling buffer of last **10,000** entries for fast reads
 
-**Key fields per entry:** `ticket`, `symbol`, `strategy`, `trading_type`, `direction`, `confidence`, `outcome` (tp_hit/sl_hit/manual_close/timeout), `profit_pct`, `extra.source`
+**Key fields per entry:**
 
-**Consumers:**
-- RL Agent — reads `stats()` after each closed trade for win-rate + avg-conf state
-- Param Optimizer — reads `recent(n=50)` to check if auto-reoptimization should trigger
-- LSTM auto-retrain — counted in `signal_bus` (every 20th trade per symbol×mode)
-- Dashboard — "Trade Memory" section shows aggregate stats per mode
+| Field | Description |
+|---|---|
+| `ticket` | MT5 ticket (0 for backtest entries) |
+| `symbol`, `strategy`, `trading_type`, `direction` | Trade identification |
+| `confidence` | Signal scorer score at entry time |
+| `lstm_predicted_direction` | "BUY" or "SELL" — LSTM prediction at signal time |
+| `regime` | Market regime label at signal time |
+| `outcome` | `tp_hit`, `sl_hit`, `manual_close`, `timeout` |
+| `profit`, `profit_pips`, `profit_pct` | P&L in three formats |
+| `duration_mins` | Hold time in minutes |
+| `mode` | `live`, `paper`, or `backtest` |
+| `extra.source` | Detailed source tag |
+| `extra.slippage_pips` | Execution slippage in pips |
 
----
+**Analytics methods:**
 
-## 7. The Full Signal Lifecycle
-
-```
-MT5 bar arrives
-    │
-    ▼
-Strategy generates raw signal (entry, SL, TP)
-    │
-    ▼
-SignalScorer.score() produces confidence (0–1)
-    │
-    ├── LSTM (40%)*: predictor.predict(symbol, df, trading_type) → 0–1 probability
-    │                 *skipped (returns 0.5) if price_prediction_enabled=false
-    │                 *GPU-accelerated if CUDA available, else CPU
-    ├── R:R (25%): reward/risk capped at 4:1
-    ├── Trend (20%): EMA50 vs EMA200 alignment
-    └── Volume (15%): last bar vs 20-bar avg
-    │   (weights are configurable via app.json → ai.scorer_weights)
-    │
-    ▼
-Gate 1 — Static filter (if confidence_filter_enabled=true):
-    confidence < threshold → BLOCK signal
-    │
-    ▼
-Gate 2 — RL dynamic gate (if rl_agent_enabled=true):
-    confidence < rl_agent.confidence_threshold → BLOCK signal
-    │   + RL risk_factor applied to lot sizing
-    │
-    ▼
-Correlation guard — same-mode USD exposure check:
-    open correlated positions ≥ max_correlated_positions → BLOCK signal
-    │
-    ▼
-Signal passed to execution pipeline (risk check → order submit)
-    │
-    ▼
-Trade closes → TradeMemory.record() → RL.observe() (reward clipped ±0.10) → LSTM retrain check
-    (triggers: every 20 trades, OR model age > 7 days with ≥10 trades, OR 5 consecutive losses)
-```
+| Method | Description |
+|---|---|
+| `stats()` | Win rate, avg P&L, TP/SL counts, slippage tracking |
+| `lstm_accuracy()` | Live LSTM prediction accuracy vs actual outcomes; flags degraded symbols |
+| `stats_by_regime()` | Win rate and avg P&L per regime per strategy |
+| `detect_drift()` | Page-Hinkley test on rolling win rate — detects regime shifts |
+| `rolling_ev_stability()` | EV trend across rolling windows (improving/stable/degrading) |
 
 ---
 
-## 8. Configuration Reference
+## 8. Correlation Guard
 
-All AI flags live in `config/app.json` under the `"ai"` key:
+**Prevents:** Multiple positions in the same asset group and direction within the same trading mode.
+
+**Asset groups covered:**
+
+| Group | Members (examples) |
+|---|---|
+| USD Short (BUY = USD weakens) | EURUSD, GBPUSD, AUDUSD, NZDUSD, XAUUSD |
+| USD Long (BUY = USD strengthens) | USDJPY, USDCAD, USDCHF |
+| Crypto Long/Short | BTCUSD, ETHUSD, XRPUSD, SOLUSD |
+| Gold / Silver Long/Short | GOLD, SILVER, XAUUSD, XAGUSD |
+| Oil / Energy Long/Short | USOIL, BRENTCash, NGASCash |
+| US Indices Long/Short | US30Cash, US100Cash, US500Cash |
+| EU / Asia Indices Long/Short | GER40Cash, UK100Cash, FRA40Cash |
+| Tech Stocks Long/Short | Tesla, Nvidia, Apple, Microsoft, Amazon, Meta |
+
+Direction is included in the group key — a long BTC and a short ETH are **not** blocked. Cross-mode stacking is allowed (a scalping BUY and a swing BUY on the same symbol are independent). `max_correlated_positions` in `app.json` (default 1) sets the per-group-per-mode limit.
+
+---
+
+## 9. Full Signal Lifecycle
+
+```
+MT5 bar arrives (bar-close guard verified)
+    │
+    ▼
+Bar-close guard: new primary-TF bar closed? (2-bar OHLCV check)
+    No → skip this tick
+    │
+    ▼
+Strategy generates raw signal (entry, SL, TP) using optimized params
+    │
+    ▼
+Regime classifier labels market condition from primary_df (3-bar hysteresis)
+    │
+    ▼
+Regime gate: is this strategy allowed in the current regime?
+    No → signal suppressed
+    │
+    ▼
+SignalScorer.score() → 0–1 confidence
+    ├── LSTM (weight varies by mode/regime): predictor.predict() → 0–1
+    ├── R:R quality: (reward/risk)/4.0 capped at 1.0
+    ├── Trend (EMA50 vs EMA200): graduated score [0.1–0.9]
+    └── Volume: last bar vs 20-bar avg
+    + MTF penalty if higher-TF trend conflicts
+    │
+    ▼
+Gate 1 — Static threshold (if confidence_filter_enabled):
+    confidence < threshold → BLOCK
+    │
+    ▼
+Gate 2 — RL dynamic gate (if rl_agent_enabled):
+    confidence < rl_agent.conf_thresh → BLOCK
+    + RL risk_factor × base risk%
+    │
+    ▼
+Correlation guard: open correlated positions ≥ max_correlated_positions → BLOCK
+    │
+    ▼
+Regime lot reduction: ×0.75–1.00 based on regime
+Volatility lot reduction: ATR% vs baseline → up to ×0.50
+    │
+    ▼
+Signal dispatched to execution pipeline (news/session/spread check → order)
+    │
+    ▼
+Trade opens → _poll_outcome() monitors every 30 s
+    ├── Trailing stop (ATR-based on H1 or H4)
+    ├── Partial close at TP1 + move SL to breakeven (day trading)
+    └── Swing breakeven at 50% TP distance + ATR trail
+    │
+    ▼
+Trade closes → TradeMemory.record() (with regime, slippage, mode, lstm_direction)
+    │
+    ▼
+RL.observe(win_rate, avg_conf, reward, drawdown_pct, vol_pct)
+    │
+    ▼
+Auto-retrain check (every 20 trades / stale >7 days / 8 consecutive losses)
+Auto-optimizer check (win rate < 45% with ≥ 30 new trades)
+```
+
+---
+
+## 10. Configuration Reference
+
+All AI flags in `config/app.json` under `"ai"`:
 
 | Key | Default | Effect |
 |---|---|---|
-| `price_prediction_enabled` | `true` | When `true`: LSTM runs and contributes 40% to the signal score. When `false`: LSTM sub-score returns `0.5` (neutral) — signal still scored via R:R, trend, and volume only |
-| `confidence_filter_enabled` | `false` | When `true`: enables Gate 1 (static threshold block) |
+| `price_prediction_enabled` | `true` | LSTM contributes to signal score; `false` → LSTM returns 0.5 neutral |
+| `confidence_filter_enabled` | `false` | Gate 1 static threshold enabled/disabled |
 | `confidence_threshold` | `60` | Gate 1 threshold in percent (60 = block below 0.60) |
-| `rl_agent_enabled` | `true` | When `true`: RL gate filters signals + risk_factor scales lot size. When `false`: gate bypassed, lot sizing uses raw risk.json |
-| `scorer_weights.lstm` | `0.40` | LSTM component weight (auto-normalised to sum=1.0) |
-| `scorer_weights.rr` | `0.25` | R:R component weight |
-| `scorer_weights.trend` | `0.20` | Trend alignment weight |
-| `scorer_weights.volume` | `0.15` | Volume confirmation weight |
-| `max_correlated_positions` | `1` | Max open bot positions per mode sharing the same USD direction. Set to `0` to disable all correlated stacking; higher allows more. (Top-level key in `app.json`, not under `ai`) |
-
-**Settings page controls:** The AI/ML Brain page lets you manually trigger retraining and optimization. The circuit breaker (separate from AI) lives in Settings → Risk.
+| `rl_agent_enabled` | `true` | Gate 2 RL filtering + risk_factor lot scaling |
+| `scorer_weights` | `{lstm:0.30, rr:0.35, trend:0.20, volume:0.15}` | Global weights (day trading default) |
+| `scalping_scorer_weights` | `{lstm:0.15, rr:0.25, trend:0.40, volume:0.20}` | Scalping-specific weights |
+| `swing_scorer_weights` | `{lstm:0.40, rr:0.30, trend:0.25, volume:0.05}` | Swing-specific weights |
+| `regime_weights` | 6 regime profiles | Per-regime weight overrides |
+| `max_correlated_positions` | `1` | Max open positions per asset group per mode |
 
 ---
 
-## 9. Current Constraints Summary
+## 11. Constraints & Limits
 
-| Constraint | Value |
+| Parameter | Value |
 |---|---|
-| LSTM min bars to train | 70 |
 | LSTM sequence length | 60 bars |
-| LSTM input features | 7 (close_return, hl_range, oc_body, volume_norm, upper_wick, is_near_news, atr_norm) |
-| LSTM training epochs | 20 |
-| LSTM GPU | Auto CUDA if available; fallback CPU |
-| RL confidence range | 0.40 – 0.85 |
-| RL risk factor range | 0.50 – 1.50 |
-| RL exploration rate | 15% → 2% (exponential decay over ~250 updates) |
-| RL reward clipping | ±0.10 per trade (prevents outlier distortion) |
+| LSTM input features | 7 |
+| LSTM training epochs | 50 |
+| LSTM multi-bar lookahead | 5 bars (scalping/day), 3 bars (swing) |
+| LSTM accuracy gate (existing model) | 58% |
+| LSTM accuracy gate (first bootstrap) | 50% |
+| LSTM GPU | Auto CUDA; fallback CPU |
+| LSTM model versions kept | 3 (+ anchor) |
+| RL confidence range | 0.40–0.85 (mode-specific floor/ceil) |
+| RL risk factor range | 0.60–1.50 |
+| RL state space | 162 states |
+| RL exploration decay | 15% → 2% (ε-greedy, ~250 trades) |
+| RL reward clipping | max(−0.05, min(+0.15, reward)) |
+| RL save frequency | Every 10 updates |
 | Optimizer max grid combos | 64 |
-| Optimizer min signals per combo | 15 |
+| Optimizer min signals per combo | 10 |
+| Optimizer train/val split | 75% / 25% |
+| Optimizer validation blend | 40% train + 60% val score |
 | Optimizer cooldown | 24 hours |
-| Optimizer max concurrency | 2 simultaneous jobs |
-| Optimizer spread cost — scalping | 0.15R per trade |
-| Optimizer spread cost — day trading | 0.05R per trade |
-| Optimizer spread cost — swing | 0.02R per trade |
-| Optimizer spread cost — crypto | 0.25–0.30R per trade (symbol override) |
-| Optimizer spread cost — gold/silver | 0.10–0.12R per trade (symbol override) |
-| Optimizer spread cost — indices | 0.08–0.10R per trade (symbol override) |
-| RL state space | 162 states (WR × conf × session × drawdown × volatility) |
-| RL drawdown buckets | low (<1.5%), med (1.5–3%), high (≥3% daily DD) |
-| RL volatility buckets | tight (SL-dist <1%), wide (≥1%) — ATR proxy |
-| LSTM accuracy gate | Skip save if val accuracy < 52% |
-| LSTM news flag window | Per-bar tail window (45 min ÷ TF minutes) |
-| Backtester SL/TP same-bar | SL counted first (conservative) |
-| US market holiday blocking | NYSE/NASDAQ holidays enforced for stock/us_index |
-| Paper trade close price | Last MT5-synced `price_current` (not fresh bid/ask) |
-| Auto-retrain trigger 1 | Every 20 closed trades per symbol×mode |
+| Optimizer max concurrency | 2 jobs |
+| Trade memory RAM buffer | 10,000 entries |
+| Auto-retrain trigger 1 | Every 20 closed live/paper trades per symbol×mode |
 | Auto-retrain trigger 2 | Model age > 7 days (requires ≥ 10 trades) |
-| Auto-retrain trigger 3 | 5 consecutive losses for symbol×mode |
-| Auto-optimizer trigger | Win rate < 45% with ≥ 20 trades |
-| Correlation guard | Max 1 same-direction USD position per mode (configurable) |
-| Trade memory RAM buffer | Last 5,000 entries |
+| Auto-retrain trigger 3 | 8 consecutive losses |
+| Auto-optimizer trigger | Win rate < 45% + ≥ 30 new trades |
+| News filter coverage | This week + next week (date-param attempt) |
+| News filter TTL | 60 minutes (configurable) |

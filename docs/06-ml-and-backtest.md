@@ -1,130 +1,133 @@
 # EVOTRADE-AI — AI/ML Pipeline & Backtest System
 
+**Last Updated:** April 2026
+
+---
+
 ## Overview
 
-The AI/ML system has three learning loops that work together. The backtest system feeds into all three.
+The AI/ML system has three learning loops that work together, fed by both live trade outcomes and the user-facing backtest engine.
 
 ```
 MT5 Historical Bars
         │
-        ▼
-┌──────────────────┐     ┌───────────────────────┐
-│  Param Optimizer │────▶│  Strategy Parameters  │
-│  (grid search)   │     │  opt_params.json       │
-└──────────────────┘     └───────────────────────┘
-        ▲
-        │ auto-triggers after ≥30 simulated trades
-        │
-┌──────────────────┐
-│  Backtest Engine │
-│  (user-facing)   │────▶ trade_memory.jsonl (source=backtest)
-└──────────────────┘             │
-                                 ▼
-Live/Paper Trade Closes ───▶ trade_memory.jsonl
-                                 │
-                    ┌────────────┴────────────┐
-                    ▼                         ▼
-           ┌──────────────┐         ┌──────────────────┐
-           │   RL Agent   │         │  LSTM Predictor  │
-           │  (Q-table)   │         │  (auto-retrain   │
-           │  real-time   │         │   after 20 new   │
-           │  update      │         │   live trades)   │
-           └──────────────┘         └──────────────────┘
+        ├──────────────────────────────────────┐
+        ▼                                      ▼
+┌──────────────────┐                  ┌──────────────────┐
+│  Param Optimizer │                  │  LSTM Retrainer  │
+│  run_optimizer.py│                  │  run_retrain.py  │
+│  (12 CPU workers)│                  │  (GPU/CPU)       │
+└────────┬─────────┘                  └────────┬─────────┘
+         │ config/optimized_params.json        │ ai/models/*.pt
+         │                                     │
+         └──────────────┬──────────────────────┘
+                        │ (both complete)
+                        ▼
+                ┌───────────────────┐
+                │  RL Bootstrap     │
+                │  run_rl_bootstrap │
+                │  (seeds Q-tables  │
+                │  from backtests   │
+                │  + LSTM scores)   │
+                └───────────┬───────┘
+                            │ ai/data/rl_qtable_*_paper.json
+                            ▼
+                    Live / Paper Trading
+                            │
+                Live trade closes → trade_memory.jsonl
+                            │
+               ┌────────────┴────────────┐
+               ▼                         ▼
+      ┌──────────────┐         ┌──────────────────┐
+      │   RL Agent   │         │  LSTM Auto-retrain│
+      │  real-time   │         │  (every 20 trades │
+      │  Q-update    │         │  or stale / loss  │
+      └──────────────┘         │  streak trigger)  │
+                               └──────────────────┘
 ```
 
 ---
 
-## 1. LSTM Price Predictor (`ai/predictor.py`)
+## Correct Execution Order
 
-**Purpose:** Predict directional price movement for a symbol+trading_type pair. Returns a 0–1 confidence score — 0.5 is neutral, >0.65 is a strong directional signal.
+Running the AI/ML pipeline for the first time (or after a full data reset) follows this sequence:
 
-**Training data:** Raw OHLCV from MT5 at the natural timeframe for each mode:
+```
+Step 1 — Run in parallel (fully independent, no shared resources):
+    Terminal 1:  python ai/run_retrain.py             # day_trading + swing LSTMs
+                 python ai/run_retrain_scalping.py    # scalping LSTMs (after run_retrain.py)
+    Terminal 2:  python ai/run_optimizer.py           # all strategies × all symbols
 
-| Mode | Timeframe |
-|---|---|
-| Scalping | M5 |
-| Day Trading | H1 |
-| Swing | H4 |
+Step 2 — Only after BOTH complete:
+    python ai/run_rl_bootstrap.py
+```
 
-**When it retrains:**
-- Manually triggered from the AI/ML Brain page ("Train" button)
-- Automatically triggered after 20+ new live/paper trade outcomes accumulate (threshold in `signal_bus.py`)
+**Why retrain must complete before bootstrap:**
+- `run_rl_bootstrap.py` runs backtests with `use_ai_filters=True`
+- This calls `predictor.predict()` at every signal bar
+- Without trained models, every `conf_score = 0.0` → bootstrap fallback uses uniform `0.55` for all trades
+- RL Q-table learns from identical `avg_conf=0.55` on every trade — cannot learn which confidence levels predict wins vs losses
+- The resulting `conf_thresh` converges to an arbitrary value, not a meaningful one
 
-**Persistence:** Trained model weights saved to `ai/models/`. Each symbol+type has its own model file.
+**Why optimizer should complete before bootstrap (soft dependency):**
+- The backtester calls `optimizer.get_params(strategy, symbol)` at the start of each run
+- Without optimized params, strategies use code defaults and may fire different signal patterns than they will live
+- RL calibrates to the wrong signal frequency and win rate
+- Acceptable if optimizer partially complete; best if fully complete
 
-**Dashboard:** AI/ML Brain page → "LSTM Models" section — shows last trained time, accuracy, and bars used per symbol.
-
----
-
-## 2. RL Agent (`ai/rl_agent.py`)
-
-**Purpose:** Learns from closed trade outcomes and adjusts two variables:
-- **Confidence threshold** — minimum LSTM confidence score required before a signal is acted on
-- **Risk factor** — multiplier applied to the base risk % per trade
-
-**Algorithm:** Simple Q-table (tabular RL) — fast, interpretable, no GPU needed.
-
-**State:** Current market regime derived from recent win rate + volatility bucket.
-
-**Update:** Called immediately when any trade closes (`rl_manager.on_trade_closed()`). The agent receives a reward based on P&L and outcome type (tp_hit = positive, sl_hit = negative), then updates the Q-table via Bellman equation.
-
-**Persistence:** Q-table saved to `ai/data/rl_qtable_{trading_type}.json` after each update.
-
-**One agent per trading type** — scalping, day_trading, swing each have independent Q-tables because their market dynamics differ.
-
-**Dashboard:** AI/ML Brain page → "RL Agent" section — shows current thresholds and risk factors per mode. Reset button available.
+**Why retrain and optimizer can run simultaneously:**
+- Optimizer: reads OHLCV from MT5, writes `config/optimized_params.json`. Uses zero LSTM.
+- Retrain: reads OHLCV from MT5, writes `ai/models/`. Uses zero optimizer.
+- No shared write targets, no race conditions.
 
 ---
 
-## 3. Parameter Optimizer (`ai/param_optimizer.py`)
+## 1. LSTM Price Predictor
 
-**Purpose:** Find the best parameters for each strategy+symbol pair (e.g., EMA 8/21 vs EMA 9/26, RSI threshold 55 vs 60).
+See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 1 for full detail.
 
-**Method:** Walk-forward grid search — at each bar, run the strategy on all prior bars, simulate the trade, measure win rate + avg RR. Repeat for every param combo. Best combo by composite score is saved.
-
-**When it triggers:**
-1. **Manually** — "Run Optimizer" button on the AI/ML Brain page
-2. **After 20+ live/paper trade outcomes** accumulate for a strategy+symbol (auto from `signal_bus.py`)
-3. **After a user-facing backtest with ≥30 simulated trades** — auto-triggered from `backtest.py` using the same OHLCV bars already fetched for the simulation
-
-**Cooldown:** Won't re-optimize the same strategy+symbol within `BACKTEST_COOLDOWN_HOURS` (default 24h) to avoid thrashing.
-
-**Persistence:** Best params saved to `ai/data/opt_params.json`. Used by the strategy engine at signal generation time.
-
-**Dashboard:** AI/ML Brain page → "Parameter Optimizer" section — shows last run time, best params, and score per strategy+symbol.
+**Summary of retraining behaviour:**
+- Manual: "Retrain" or "Retrain All" on the AI/ML Brain page
+- Auto trigger 1: every 20th closed live/paper trade per symbol×mode
+- Auto trigger 2: model stale > 7 days AND ≥ 10 trades
+- Auto trigger 3: 8 consecutive losses for that symbol×mode
+- 2-minute dedup cooldown prevents burst triggers from simultaneous multi-position closes
 
 ---
 
-## 4. Trade Memory (`ai/trade_memory.py`)
+## 2. RL Agent
 
-**Purpose:** Persistent store of every closed trade outcome — the central data source for both the RL agent and the auto-optimizer trigger.
+See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 4 for full detail.
+
+**Bootstrap dependency summary:**
+- Hard dependency on LSTM models (conf_score is meaningless without them)
+- Soft dependency on optimizer (win rate more representative with optimized params)
+- Always wait for both before running bootstrap
+
+---
+
+## 3. Parameter Optimizer
+
+See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 6 for full detail.
+
+**Summary of how it reads/writes:**
+- Reads: `symbols.json`, `strategies.json`, OHLCV from MT5
+- Writes: `config/optimized_params.json` (atomic write, 5-version archive)
+- The backtester reads `optimized_params.json` automatically at the start of each run via `optimizer.get_params()`
+
+---
+
+## 4. Trade Memory
+
+See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 7 for full detail.
 
 **Sources:**
-| Source | Written by | Notes |
+
+| Source | Written by | Mode tag |
 |---|---|---|
-| Live trades | `signal_bus._poll_outcome()` | Full data: confidence, pips, money P&L, volume |
-| Paper trades | `signal_bus._poll_outcome()` | Same as live — uses XM Demo account |
-| Backtest simulations | `api/routes/backtest.py` | `source="backtest"` in `extra` field; `confidence=0.5` (no live score); `profit` = `pnl_pct` |
-
-**Storage:**
-- **Disk:** `ai/data/trade_memory.jsonl` — append-only, unlimited, one JSON object per line
-- **RAM:** Rolling buffer of last 5,000 entries for fast reads by the RL agent
-
-**Key fields per entry:**
-
-| Field | Description |
-|---|---|
-| `ticket` | MT5 ticket number (0 for backtest entries) |
-| `symbol` | e.g. `EURUSD` |
-| `strategy` | e.g. `ema_scalp` |
-| `trading_type` | `scalping` \| `day_trading` \| `swing` |
-| `direction` | `BUY` \| `SELL` |
-| `confidence` | LSTM score at signal time (0–1) |
-| `outcome` | `tp_hit` \| `sl_hit` \| `manual_close` \| `timeout` |
-| `profit_pct` | % of account balance P&L |
-| `extra.source` | `"live"`, `"paper"`, or `"backtest"` |
-
-**Dashboard:** AI/ML Brain page → "Trade Memory" section — shows win rate, avg P&L, TP/SL hit counts, and last N entries.
+| Live trades | `signal_bus._poll_outcome()` | `"live"` |
+| Paper trades | `signal_bus._poll_outcome()` or paper ledger sync | `"paper"` |
+| Backtest simulations | `api/routes/backtest.py` | `"backtest"` |
 
 ---
 
@@ -132,117 +135,143 @@ Live/Paper Trade Closes ───▶ trade_memory.jsonl
 
 ### What it is
 
-A walk-forward strategy simulation run on real MT5 historical bars. Used to validate and audit a strategy's historical performance before or after deploying it live.
-
-### What it is NOT
-
-It is not a paper trade simulation — it runs purely on historical bar data, no real orders are placed. The strategy sees only bars up to the current simulation point (no look-ahead bias).
+A walk-forward strategy simulation on real MT5 historical OHLCV bars. Validates strategy historical performance before or after deploying live. No real orders are placed — purely historical simulation.
 
 ### How a backtest run flows
 
 ```
-User selects: symbol + strategy + mode + bars + balance + risk %
+User selects: symbol + strategy + mode + bars + balance + risk % + use_ai_filters
         │
         ▼
 POST /backtest/run
         │
-        ├── Fetch OHLCV from MT5 (real historical bars)
+        ├── Fetch primary TF OHLCV from MT5
+        ├── Fetch secondary TF OHLCV (for multi-TF strategies)
         │
         ├── Walk-forward simulation:
         │     For each bar i:
-        │       Run strategy on bars[0..i]
+        │       Load optimized params for strategy×symbol
+        │       Run strategy on bars[0..i] (rolling window, not growing slice)
+        │       If use_ai_filters:
+        │         Score with SignalScorer (LSTM + R:R + trend + volume)
+        │         Apply RL gate (conf_thresh check)
+        │         Apply RL risk_factor to lot sizing
         │       If signal fires → simulate SL/TP hit bar-by-bar
-        │       Record trade (entry, exit, outcome, P&L, equity)
+        │       Conservative: SL counted first when both hit same bar
+        │       Record trade (entry, exit, outcome, pnl_pct, conf_score, equity)
         │
-        ├── Compute metrics (win rate, profit factor, max DD, Sharpe, etc.)
+        ├── Compute metrics (win rate, profit factor, max DD, Sharpe, Sortino, etc.)
         │
         ├── Save full result as JSON: data/backtest_history/{run_id}.json
         ├── Append summary to index: data/backtest_history/_index.jsonl
         │
-        ├── Feed each simulated trade → trade_memory.jsonl  ← RL agent learns
-        │
-        └── If total_trades ≥ 30 → trigger param optimizer  ← strategy params update
+        └── If total_trades ≥ 30 → trigger param optimizer on same OHLCV bars
 ```
 
-### Backtest strategy timeframe mapping
+### Backtest timeframe mapping
 
-Each strategy fetches data at **two** timeframes: a **primary** TF where entry signals are timed, and an optional **secondary** TF used for trend/bias confirmation. The secondary dataframe is sliced up to the current walk-forward bar at each step — no look-ahead bias.
-
-**Scalping**
-
-| Strategy | Primary | Secondary |
+| Strategy | Primary TF | Secondary TF |
 |---|---|---|
-| `ema_scalp` | M1 | M5 |
+| `ema_scalp` | M1 | M5 (bias) |
 | `bb_squeeze` | M5 | — |
 | `vwap_reversion` | M5 | — |
-
-**Day Trading**
-
-| Strategy | Primary | Secondary |
-|---|---|---|
-| `macd_ema_trend` | M15 | H1 |
-| `rsi_divergence` | M30 | H1 |
+| `macd_ema_trend` | M15 | H1 (trend) |
+| `rsi_divergence` | M30 | H1 (trend) |
 | `sr_breakout` | H1 | — |
-
-**Swing**
-
-| Strategy | Primary | Secondary |
-|---|---|---|
 | `ema_trend_rider` | H1 | H4 + D1 |
 | `fibonacci_rsi` | H4 | — |
 | `weekly_breakout` | H4 | D1 |
 
-The mapping is defined in `engine/backtester.py`:
-- `BT_STRATEGY_TIMEFRAME` — primary TF override per strategy
-- `BT_EXTRA_TIMEFRAMES` — secondary TF kwargs per strategy (e.g. `{"df_h1": "H1"}`)
+Secondary dataframes are time-sliced at bar `i` during walk-forward simulation — no lookahead bias.
 
-Strategies with no entry in these dicts fall back to the trading-type default (`M5` / `H1` / `H4`).
+### Result metrics
 
-### Saved run schema (summary fields in index)
-
-| Field | Description |
+| Metric | Description |
 |---|---|
-| `id` | UUID run identifier |
-| `run_at` | ISO timestamp (UTC) |
-| `symbol` | e.g. `EURUSD` |
-| `strategy` | e.g. `ema_scalp` |
-| `trading_type` | `scalping` \| `day_trading` \| `swing` |
-| `timeframe` | e.g. `M5` |
-| `bars_tested` | Number of OHLCV bars used |
-| `total_trades` | Simulated trades fired |
-| `win_rate` | 0–1 |
+| `win_rate` | Fraction of trades that were profitable |
 | `profit_factor` | Gross wins / gross losses |
-| `max_drawdown_pct` | Worst peak-to-trough % |
-| `sharpe_ratio` | Annualised Sharpe |
+| `max_drawdown_pct` | Peak-to-trough on equity curve (%) |
+| `sharpe_ratio` | Annualised Sharpe (per-TF annualisation factor applied) |
+| `sortino_ratio` | Annualised Sortino (downside deviation only) |
 | `total_pnl_pct` | Total % return from initial balance |
+| `avg_rr` | Average realised R-multiple |
+| `expectancy_pct` | Expected return per trade |
+| `ai_filters_applied` | True when LSTM + RL gate were active |
+| `avg_confidence` | Mean AI confidence score across accepted trades |
+| `equity_curve` | `[{time, equity}]` — one point per closed trade |
 
 ### Dashboard — Backtest page
 
-- **Symbol select:** Grouped `<select>` per mode — same symbol universe as the trading chart pages
-- **Results:** Equity curve, 10 stat cards, full paginated trade log
-- **History panel:** Table of all past runs (newest first, paginated 15/page) with mini sparkline, metrics, load button, delete button
-- Clicking a history row loads that full run result inline — no page refresh needed
+- Symbol grouped `<select>` per mode matching the full symbol scope
+- Run results: equity curve, stat cards, paginated trade log
+- History panel: all saved runs (newest first, paginated), with mini sparkline, metrics, load/delete buttons
+- History capped at 200 runs (oldest pruned automatically)
 
 ### API endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/backtest/run` | Run simulation, save result, feed ML |
+| `POST` | `/backtest/run` | Run simulation, save result, trigger optimizer |
 | `GET` | `/backtest/strategies` | List available strategies per mode |
 | `GET` | `/backtest/history` | Paginated run list (filters: symbol, strategy, mode) |
 | `GET` | `/backtest/history/{id}` | Full run data including trade log |
 | `DELETE` | `/backtest/history/{id}` | Delete a saved run |
+| `GET` | `/backtest/journal/replay` | Replay closed journal trades through current params |
 
 ---
 
-## 6. The Feedback Loop (summary)
+## 6. Analytics System
 
-The system implements the two-phase design requested:
+**Endpoint:** `GET /analytics/performance` (filters: account, trading_type, limit)
 
-**Phase 1 — Backtest first:**
-When you run a backtest, the optimizer runs on the same bars if enough trades fired. This finds optimal strategy parameters before going live.
+Returns comprehensive performance data from `data/trade_journal.jsonl`:
 
-**Phase 2 — Live/paper refine:**
-Every real trade that closes feeds the RL agent immediately and accumulates in trade memory. After 20 new outcomes, the LSTM auto-retrains. After 20+ outcomes for a strategy+symbol, the optimizer may re-run to refine parameters based on actual market conditions.
+| Metric Group | Fields |
+|---|---|
+| Counts | total_trades, wins, losses, win_rate |
+| P&L | total_profit, avg_profit, avg_win, avg_loss, avg_rr |
+| Risk-adjusted | sharpe_ratio, sortino_ratio, max_drawdown_pct |
+| Streaks | max_losing_streak, current_losing_streak |
+| Time series | equity_curve |
+| Breakdowns | by_strategy, by_symbol, by_mode, by_account, by_hour |
+| Quality | trade_quality (high/medium/low confidence tier counts) |
+| Failure | failure_analysis (worst symbols, worst strategies, streak badges) |
 
-The two phases compound — the longer the bot runs, the more refined its parameters become.
+**Endpoint:** `GET /analytics/regime/status` — current confirmed regime label for all classified symbols.
+
+### Analytics Dashboard page
+
+- Account tabs: Paper / Live / All
+- Mode tabs: All / Scalping / Day Trading / Swing
+- Equity curve: filled SVG, green when cumulative P&L ≥ 0, red when negative
+- Trade quality bar: stacked (green = high ≥ 0.75, yellow = medium 0.50–0.74, grey = low)
+- Regime pill bar: color-coded by label (green=bull, red=bear, blue=ranging-low, orange=ranging-high, purple=breakout, grey=quiet)
+- Hour-of-day heatmap: 24-cell UTC grid with win-rate colors
+- Stat card colors: green/yellow/red based on health thresholds (Sharpe ≥ 1.5 green, drawdown ≤ 8% green)
+
+---
+
+## 7. The Feedback Loop (Summary)
+
+```
+Phase 1 — Setup (offline, one-time):
+  run_retrain.py + run_retrain_scalping.py  [parallel with optimizer]
+  run_optimizer.py                          [parallel with retrain]
+  → both complete →
+  run_rl_bootstrap.py
+
+Phase 2 — Live adaptation (automatic):
+  Every trade close:
+    → trade_memory.record()
+    → RL.observe() (immediate Q-table update)
+    → Every 20 trades: LSTM auto-retrain
+    → Win rate < 45% + 30 trades: optimizer auto-trigger
+
+Phase 3 — Periodic maintenance (weekly recommended):
+  Re-run run_retrain.py (day_trading + swing)
+  Re-run run_retrain_scalping.py
+  Re-run run_optimizer.py (skips already-done 2yr jobs)
+  Re-run run_rl_bootstrap.py (after both complete)
+```
+
+The two phases compound — the longer the bot runs, the more refined its parameters, LSTM models, and RL thresholds become.
