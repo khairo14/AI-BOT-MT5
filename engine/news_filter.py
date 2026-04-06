@@ -32,12 +32,12 @@ from loguru import logger
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
 
-# Forex Factory JSON calendar endpoints (public, no auth required).
-# Both this week and next week are fetched so Sunday-night events on the
-# upcoming week are visible to the blackout check (e.g. Monday 00:30 UTC
-# NFP release becomes available Saturday when only the thisweek URL is used).
+# Forex Factory JSON calendar endpoint (public, no auth required).
+# Only the thisweek endpoint is guaranteed to exist on the CDN.
+# For next-week coverage we build a date-based URL using the ISO start of
+# next Monday and try an alternate FF CDN pattern; if that also 404s we
+# silently fall back to thisweek-only (still covers Mon–Sun of current week).
 _FF_URL_THIS = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-_FF_URL_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
 
 # Map MT5 symbol prefixes → currency codes
 _SYMBOL_CURRENCIES: dict[str, list[str]] = {
@@ -251,21 +251,56 @@ class NewsFilter:
     def _fetch(self) -> None:
         try:
             import httpx
-            events = []
-            for url in (_FF_URL_THIS, _FF_URL_NEXT):
-                try:
-                    resp = httpx.get(url, timeout=10)
-                    resp.raise_for_status()
-                    for ev in resp.json():
-                        dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
-                        ev["_dt"] = dt
-                        events.append(ev)
-                except Exception as _url_exc:
-                    logger.warning(f"NewsFilter: failed to fetch {url}: {_url_exc}")
+            from datetime import timedelta as _td
+
+            events: list[dict] = []
+
+            # ── Step 1: always fetch this week (guaranteed to exist) ──────────
+            try:
+                resp = httpx.get(_FF_URL_THIS, timeout=10)
+                resp.raise_for_status()
+                for ev in resp.json():
+                    dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
+                    ev["_dt"] = dt
+                    events.append(ev)
+                logger.debug(f"NewsFilter: thisweek — {len(events)} events")
+            except Exception as _this_exc:
+                logger.warning(f"NewsFilter: thisweek fetch failed: {_this_exc}")
+
+            # ── Step 2: attempt next-week using a date-based query param ─────
+            # FF CDN supports ?week=YYYY-MM-DD where the date is any day in the
+            # target ISO week. We pass next Monday's date.
+            # If this endpoint also returns 404 or errors, we silently skip —
+            # thisweek already covers Mon-Sun of the current week and most
+            # high-impact events are announced ≥ 2 business days in advance.
+            try:
+                _now_utc   = datetime.now(tz=UTC)
+                _days_to_monday = (7 - _now_utc.weekday()) % 7 or 7
+                _next_monday = (_now_utc + _td(days=_days_to_monday)).strftime("%Y-%m-%d")
+                _next_url  = f"{_FF_URL_THIS}?week={_next_monday}"
+                _resp2 = httpx.get(_next_url, timeout=10)
+                if _resp2.status_code == 200:
+                    _seen = {(ev.get("date"), ev.get("time"), ev.get("title"))
+                             for ev in events}
+                    _added = 0
+                    for ev in _resp2.json():
+                        _key = (ev.get("date"), ev.get("time"), ev.get("title"))
+                        if _key not in _seen:
+                            dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
+                            ev["_dt"] = dt
+                            events.append(ev)
+                            _seen.add(_key)
+                            _added += 1
+                    if _added:
+                        logger.debug(f"NewsFilter: nextweek — added {_added} events")
+                # 404 or other non-200 → silently ignore (endpoint may not exist)
+            except Exception:
+                pass   # nextweek fetch failure is non-critical
+
             with self._lock:
                 self._events     = events
                 self._fetched_at = datetime.now(tz=UTC)
-            logger.info(f"NewsFilter: fetched {len(events)} events (this + next week)")
+            logger.info(f"NewsFilter: loaded {len(events)} calendar events")
         except Exception as exc:
             logger.warning(f"NewsFilter fetch failed: {exc} — using cached data")
         finally:

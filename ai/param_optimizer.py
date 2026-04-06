@@ -732,12 +732,57 @@ class ParamOptimizer:
     # ── Persistence ──────────────────────────────────────────────────────────
 
     def _load_opt(self) -> dict:
+        """Load optimized params from disk.
+
+        Recovery logic for a corrupt/empty file (e.g. left by the old non-atomic
+        write path before the atomic-write fix was applied):
+          1. If the file is missing → return {}  (normal first-run)
+          2. If the file is empty or unparseable → log a warning, attempt to
+             restore the most recent archive copy, then return that data.
+             If no archive exists, delete the corrupt file and return {}.
+        """
+        if not OPT_FILE.exists():
+            return {}
         try:
-            if OPT_FILE.exists():
-                return json.loads(OPT_FILE.read_text(encoding="utf-8"))
+            _text = OPT_FILE.read_text(encoding="utf-8").strip()
+            if not _text:
+                raise ValueError("file is empty")
+            return json.loads(_text)
         except Exception as exc:
-            logger.warning(f"Optimizer: could not load params file: {exc}")
-        return {}
+            logger.warning(
+                f"Optimizer: could not load params file ({exc}) — "
+                "attempting archive recovery"
+            )
+            # Try to restore from the most recent archive copy
+            _archive_dir = OPT_FILE.parent / "params_archive"
+            _archives = sorted(_archive_dir.glob("optimized_params_*.json")) \
+                if _archive_dir.exists() else []
+            for _arc in reversed(_archives):   # newest first
+                try:
+                    _arc_text = _arc.read_text(encoding="utf-8").strip()
+                    if not _arc_text:
+                        continue
+                    _data = json.loads(_arc_text)
+                    # Restore the valid archive over the corrupt main file
+                    import shutil as _sh
+                    _sh.copy2(_arc, OPT_FILE)
+                    logger.info(
+                        f"Optimizer: restored params from archive {_arc.name} "
+                        f"({len(_data)} strategies recovered)"
+                    )
+                    return _data
+                except Exception:
+                    continue   # try the next older archive
+            # No usable archive — delete corrupt file so next save starts clean
+            try:
+                OPT_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
+            logger.warning(
+                "Optimizer: no valid archive found — corrupt params file removed. "
+                "Re-run run_optimizer.py to rebuild."
+            )
+            return {}
 
     def _save_params(
         self,
