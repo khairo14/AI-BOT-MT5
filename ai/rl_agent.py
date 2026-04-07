@@ -160,6 +160,11 @@ class RLAgent:
         self._last_state:  Optional[str] = None
         self._last_action: Optional[int] = None
         self._n_updates:   int            = 0  # total observe() calls — drives epsilon decay
+        # Initialize to startup time so idle decay can measure elapsed time
+        # from agent load, not from the first trade close. Without this,
+        # getattr(agent, '_last_update_ts', _now_ts) always returns _now_ts
+        # -> idle_hours = 0 -> decay never fires on a fresh account with no trades.
+        self._last_update_ts: float = datetime.now(tz=timezone.utc).timestamp()
 
         self._load()
 
