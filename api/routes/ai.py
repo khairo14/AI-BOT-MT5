@@ -359,9 +359,9 @@ def optimizer_status():
 # These cover 2+ years of history so UI-triggered optimizations are consistent
 # with the standalone run and will NOT downgrade already-optimized results.
 _OPT_BARS: dict[str, int] = {
-    "scalping":    99_000,   # M5  ~2 years
-    "day_trading": 17_000,   # H1  ~2 years
-    "swing":        5_000,   # H4  ~2 years
+    "scalping":    200_000,   # M5  ~2 years
+    "day_trading": 50_000,   # H1  ~2 years
+    "swing":        30_000,   # H4  ~2 years
 }
 
 

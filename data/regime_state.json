@@ -20,7 +20,7 @@
     "NZDUSD": "trending_bear",
     "SILVER": "volatile_breakout",
     "BRENTCash": "volatile_breakout",
-    "US100Cash": "trending_bull",
+    "US100Cash": "trending_bear",
     "US30Cash": "trending_bull",
     "US500Cash": "trending_bull",
     "Tesla": "volatile_breakout",
@@ -31,7 +31,7 @@
   "pending": {
     "EURUSD": [
       "trending_bear",
-      3
+      15
     ],
     "BTCUSD": [
       "trending_bull",
@@ -43,11 +43,11 @@
     ],
     "USDJPY": [
       "trending_bull",
-      3
+      15
     ],
     "GBPUSD": [
       "trending_bear",
-      3
+      15
     ],
     "XRPUSD": [
       "trending_bear",
@@ -59,7 +59,7 @@
     ],
     "EURJPY": [
       "trending_bull",
-      861
+      873
     ],
     "AUDUSD": [
       "trending_bull",
@@ -67,7 +67,7 @@
     ],
     "USDCHF": [
       "trending_bull",
-      688
+      692
     ],
     "GBPJPY": [
       "trending_bull",
@@ -111,11 +111,11 @@
     ],
     "US100Cash": [
       "trending_bear",
-      2
+      10
     ],
     "US30Cash": [
       "trending_bull",
-      3922
+      3930
     ],
     "US500Cash": [
       "trending_bull",
