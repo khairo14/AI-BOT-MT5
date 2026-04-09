@@ -256,19 +256,28 @@ class RLAgent:
 
             self._last_state  = new_state
             self._last_action = action_idx
-            # Snapshot payload to save outside the lock (avoid holding lock during I/O)
+            # Snapshot payload to save outside the lock (avoid holding lock during I/O).
+            # last_update_ts is persisted so idle decay measures elapsed time correctly
+            # after a restart — without it, every restart resets the idle clock to "now"
+            # and conf_thresh that decayed during a long idle run is lost on next reload.
             _save_payload = {
-                "q":            dict(self._q),
-                "conf_thresh":  self._conf_thresh,
-                "risk_factor":  self._risk_factor,
-                "last_state":   self._last_state,
-                "last_action":  self._last_action,
-                "n_updates":    self._n_updates,
+                "q":              dict(self._q),
+                "conf_thresh":    self._conf_thresh,
+                "risk_factor":    self._risk_factor,
+                "last_state":     self._last_state,
+                "last_action":    self._last_action,
+                "n_updates":      self._n_updates,
+                "last_update_ts": self._last_update_ts,
             }
             _save_path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
-        # Disk write happens outside the lock to avoid blocking concurrent reads.
-        # IMPROVE-1: only write every 10 updates to reduce I/O on busy sessions.
-        if self._n_updates % 10 == 0:
+        # Save frequency:
+        #   n_updates < 50  → save every update (early learning, highest volatility)
+        #   n_updates >= 50 → save every 5 updates (was 10 — halved to reduce loss window)
+        # This prevents a restart from rolling back recent conf/risk changes that
+        # haven't yet been persisted, which was causing conf_thresh to snap back
+        # to bootstrap values on restart.
+        _save_every = 1 if self._n_updates < 50 else 5
+        if self._n_updates % _save_every == 0:
             try:
                 with open(_save_path, "w", encoding="utf-8") as f:
                     json.dump(_save_payload, f)
@@ -307,12 +316,13 @@ class RLAgent:
         """Write the current Q-table and parameters to disk unconditionally."""
         with self._lock:
             _payload = {
-                "q":           dict(self._q),
-                "conf_thresh": self._conf_thresh,
-                "risk_factor": self._risk_factor,
-                "last_state":  self._last_state,
-                "last_action": self._last_action,
-                "n_updates":   self._n_updates,
+                "q":              dict(self._q),
+                "conf_thresh":    self._conf_thresh,
+                "risk_factor":    self._risk_factor,
+                "last_state":     self._last_state,
+                "last_action":    self._last_action,
+                "n_updates":      self._n_updates,
+                "last_update_ts": self._last_update_ts,
             }
         _path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
         try:
@@ -406,6 +416,13 @@ class RLAgent:
             self._last_state  = data.get("last_state")
             self._last_action = data.get("last_action")
             self._n_updates   = data.get("n_updates", 0)
+            # Restore last_update_ts from disk so idle decay continues measuring
+            # from when the last trade actually happened, not from restart time.
+            # Falls back to now() if not present (old file format) — the agent
+            # will then think it's fresh, which is safe (idle decay fires after 6h).
+            _saved_ts = data.get("last_update_ts")
+            if _saved_ts is not None:
+                self._last_update_ts = float(_saved_ts)
             # Enforce per-mode cap on load — prevents a previously saved value
             # that exceeded the new cap (e.g. 0.85 scalping) from bypassing it.
             _conf_max_load = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)

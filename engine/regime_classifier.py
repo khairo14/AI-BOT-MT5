@@ -74,21 +74,45 @@ _ADX_TREND_MIN: dict[str, float] = {
     "crypto":     30.0,   # BTC, ETH, XRP, SOL, etc.
     "indices":    28.0,   # US30, US100, GER40, etc.
     "commodities":25.0,   # XAUUSD, XAGUSD, USOIL, etc.
-    "forex":      22.0,   # default for FX pairs
+    "forex":      20.0,   # default for FX pairs (lowered from 22 — M1/M5 ADX is lower)
 }
 
 # ADX breakout threshold: ADX rising above this fast signals a breakout regime
 _ADX_BREAKOUT_MIN: dict[str, float] = {
-    "crypto":     40.0,
-    "indices":    35.0,
-    "commodities":32.0,
-    "forex":      30.0,
+    "crypto":     35.0,   # lowered from 40 — shorter TF ADX is structurally lower
+    "indices":    30.0,   # lowered from 35
+    "commodities":28.0,   # lowered from 32
+    "forex":      26.0,   # lowered from 30
 }
 
-# ATR% thresholds (ATR14 / close * 100)
-_ATR_QUIET_MAX:  float = 0.10   # below this → quiet (almost no movement)
-_ATR_HIGH_VOL:   float = 0.80   # above this → high-vol ranging (if ADX weak)
-_ATR_BREAKOUT:   float = 1.20   # above this + ADX rising → volatile breakout
+# ATR% thresholds — PER TIMEFRAME (ATR14 / close * 100)
+#
+# The original single-value thresholds (0.10, 0.80, 1.20) were calibrated
+# for H4/D1 bars. Applied to M1/M5 bars they make the classifier useless:
+#   M1 EURUSD typical ATR% = 0.018-0.073%  → always "quiet" → all strategies blocked
+#   M5 EURUSD typical ATR% = 0.037-0.23%   → always "quiet" or low-vol
+#   H1 EURUSD typical ATR% = 0.18-0.92%    → ok range but never breakout
+#
+# These per-timeframe values are calibrated to produce meaningful regime
+# labels across the full TF range used by the bot (M1 through H4).
+#
+# Quiet:    below this ATR% → truly stationary, no trade opportunity
+# HighVol:  above this ATR% → elevated ranging volatility (if ADX weak)
+# Breakout: above this ATR% + rising ADX → breakout regime
+#
+# Timeframe key maps: M1/M2/M5 → "m5", M15/M30 → "m30", H1 → "h1", H4+ → "h4"
+
+_ATR_THRESHOLDS: dict[str, dict[str, float]] = {
+    "m5":  {"quiet": 0.010, "high_vol": 0.10, "breakout": 0.20},
+    "m30": {"quiet": 0.030, "high_vol": 0.30, "breakout": 0.60},
+    "h1":  {"quiet": 0.060, "high_vol": 0.55, "breakout": 0.90},
+    "h4":  {"quiet": 0.10,  "high_vol": 0.80, "breakout": 1.20},
+}
+
+# Legacy single-value fallback (used when timeframe cannot be determined)
+_ATR_QUIET_MAX:  float = 0.060
+_ATR_HIGH_VOL:   float = 0.55
+_ATR_BREAKOUT:   float = 0.90
 
 # Hysteresis: a new label must hold for at least N consecutive bars
 _HYSTERESIS_BARS = 3
@@ -163,10 +187,33 @@ def _adx(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14)
 def _classify_raw(
     df: pd.DataFrame,
     symbol: str,
+    timeframe: str = "h1",
 ) -> str:
-    """Compute the raw (un-hysteresis'd) regime label from OHLCV bars."""
+    """Compute the raw (un-hysteresis'd) regime label from OHLCV bars.
+
+    timeframe hint is used to select the correct ATR% thresholds. Pass the
+    primary TF string (e.g. "M5", "H1", "H4") — it is normalised internally.
+    Defaults to "h1" which gives the original behaviour for callers that do
+    not pass a timeframe (e.g. the param optimizer's _classify_bar_regime).
+    """
     if len(df) < 210:
         return "quiet"
+
+    # Normalise timeframe to threshold key
+    _tf_upper = timeframe.upper()
+    if _tf_upper in ("M1", "M2", "M5"):
+        _tf_key = "m5"
+    elif _tf_upper in ("M15", "M30"):
+        _tf_key = "m30"
+    elif _tf_upper in ("H1",):
+        _tf_key = "h1"
+    else:
+        _tf_key = "h4"   # H4, D1, W1
+
+    _thresh = _ATR_THRESHOLDS.get(_tf_key, _ATR_THRESHOLDS["h1"])
+    _atr_quiet    = _thresh["quiet"]
+    _atr_high_vol = _thresh["high_vol"]
+    _atr_breakout = _thresh["breakout"]
 
     close = np.asarray(df["close"], dtype=float)
     high  = np.asarray(df["high"],  dtype=float)
@@ -197,17 +244,17 @@ def _classify_raw(
     bull = ema50[-1] > ema200[-1]
 
     # Classification logic
-    if atr_pct < _ATR_QUIET_MAX:
+    if atr_pct < _atr_quiet:
         return "quiet"
 
-    if curr_adx >= adx_brk and atr_pct >= _ATR_BREAKOUT and adx_rising:
+    if curr_adx >= adx_brk and atr_pct >= _atr_breakout and adx_rising:
         return "volatile_breakout"
 
     if curr_adx >= adx_trend:
         return "trending_bull" if bull else "trending_bear"
 
     # ADX weak → ranging
-    if atr_pct >= _ATR_HIGH_VOL:
+    if atr_pct >= _atr_high_vol:
         return "ranging_high_vol"
     return "ranging_low_vol"
 
@@ -260,22 +307,25 @@ class RegimeClassifier:
         except Exception as exc:
             logger.debug(f"RegimeClassifier: could not save state: {exc}")
 
-    def classify(self, symbol: str, df: pd.DataFrame) -> str:
+    def classify(self, symbol: str, df: pd.DataFrame, timeframe: str = "H1") -> str:
         """
         Return the current hysteresis-stable regime label for this symbol.
 
         Args:
-            symbol: MT5 symbol name (e.g. "EURUSD", "BTCUSD")
-            df:     Primary-timeframe OHLCV DataFrame, most-recent bar last.
-                    Requires columns: open, high, low, close, volume.
-                    Minimum 210 rows for reliable computation.
+            symbol:    MT5 symbol name (e.g. "EURUSD", "BTCUSD")
+            df:        Primary-timeframe OHLCV DataFrame, most-recent bar last.
+                       Requires columns: open, high, low, close, volume.
+                       Minimum 210 rows for reliable computation.
+            timeframe: Primary TF string (e.g. "M5", "H1", "H4"). Used to
+                       select the correct ATR% thresholds — M5 and H1 require
+                       much lower quiet/high-vol thresholds than H4/D1.
 
         Returns:
             One of: "trending_bull", "trending_bear", "ranging_low_vol",
                     "ranging_high_vol", "volatile_breakout", "quiet"
         """
         try:
-            raw = _classify_raw(df, symbol)
+            raw = _classify_raw(df, symbol, timeframe)
         except Exception as exc:
             logger.debug(f"RegimeClassifier error [{symbol}]: {exc}")
             return self._labels.get(symbol, "quiet")

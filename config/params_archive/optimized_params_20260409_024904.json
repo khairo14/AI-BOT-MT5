@@ -697,6 +697,26 @@
           "tp_rr": 1.8
         }
       }
+    },
+    "GBPJPY": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.5,
+      "tp_rr": 2.2,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.5,
+          "tp_rr": 2.2
+        },
+        "trending_bear": {
+          "lookback_bars": 30,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.2,
+          "tp_rr": 2.2
+        }
+      }
     }
   },
   "fibonacci_rsi": {
@@ -1229,6 +1249,23 @@
           "tp_rr": 2.5
         }
       }
+    },
+    "Netflix": {
+      "lookback_bars": 50,
+      "sl_atr_mult": 2.5,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "volatile_breakout": {
+          "lookback_bars": 50,
+          "sl_atr_mult": 2.5,
+          "tp_rr": 2.5
+        },
+        "trending_bull": {
+          "lookback_bars": 50,
+          "sl_atr_mult": 2.5,
+          "tp_rr": 2.5
+        }
+      }
     }
   },
   "ema_trend_rider": {
@@ -1565,6 +1602,184 @@
           "ema_slow": 60,
           "sl_atr_mult": 1.0,
           "tp_rr": 3.0
+        }
+      }
+    },
+    "Google": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "XRPUSD": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "Facebook": {
+      "ema_fast": 20,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 20,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "Netflix": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "SOLUSD": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.0
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.0
+        }
+      }
+    }
+  },
+  "ema_scalp": {
+    "USDCHF": {
+      "ema_fast": 13,
+      "ema_slow": 18,
+      "rsi_min": 40,
+      "rsi_max": 60,
+      "sl_pips": 10,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 18,
+          "rsi_min": 40,
+          "rsi_max": 60,
+          "sl_pips": 10,
+          "rr": 2.5
+        }
+      }
+    },
+    "__global__": {
+      "ema_fast": 13,
+      "ema_slow": 18,
+      "rsi_min": 40,
+      "rsi_max": 60,
+      "sl_pips": 10,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 18,
+          "rsi_min": 40,
+          "rsi_max": 60,
+          "sl_pips": 10,
+          "rr": 2.5
+        }
+      }
+    }
+  },
+  "bb_squeeze": {
+    "GBPUSD": {
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 3,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 3,
+          "sl_atr_mult": 1.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "__global__": {
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 3,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 3,
+          "sl_atr_mult": 1.0,
+          "tp_atr_mult": 3.0
         }
       }
     }

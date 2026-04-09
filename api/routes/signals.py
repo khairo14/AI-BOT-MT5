@@ -137,6 +137,15 @@ async def reject_signal(signal_id: str, body: RejectRequest = RejectRequest()):
     if body.reason:
         signal["rejection_reason"] = body.reason
     bus.queue.pop(signal_id, None)
+    # Release dedup key so the next bar can generate a fresh signal for this
+    # symbol/strategy/direction. Without this, the key stays locked until
+    # purge_stale TTL (1 hr) — but purge_stale never sees the signal because
+    # it was already removed from the queue here.
+    _dk = (
+        signal.get("symbol"), signal.get("strategy"),
+        signal.get("direction"), signal.get("trading_mode"),
+    )
+    bus._pending_keys.discard(_dk)
     # Broadcast rejection to dashboard so signal cards update in real time
     try:
         from api.websocket.feed import broadcast_signal

@@ -1598,6 +1598,72 @@
           "tp_rr": 2.0
         }
       }
+    },
+    "XRPUSD": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "Facebook": {
+      "ema_fast": 20,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 20,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "Netflix": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 3.0
+        }
+      }
     }
   }
 }

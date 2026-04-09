@@ -78,15 +78,24 @@ async def _rl_idle_decay_loop() -> None:
     while True:
         await asyncio.sleep(1800)  # check every 30 minutes
         try:
-            from ai.rl_agent import rl_manager as _rl
+            from ai.rl_agent import rl_manager as _rl, DEFAULT_CONF_THRESH, CONF_STEP
             from datetime import datetime, timezone
             _now_ts = datetime.now(tz=timezone.utc).timestamp()
+            # Per-mode idle thresholds — must match _IDLE_DECAY_HOURS in rl_agent.py
+            # so this background loop behaves identically to the in-observe() decay.
+            _IDLE_HOURS = {"scalping": 4.0, "day_trading": 6.0, "swing": 12.0}
             for trading_type, agent in _rl._agents.items():
-                # Only decay if threshold is above default and no recent trades
                 _last_ts = getattr(agent, "_last_update_ts", _now_ts)
                 _hours_idle = (_now_ts - _last_ts) / 3600
-                if _hours_idle >= 6.0 and agent._conf_thresh > 0.55:
-                    from ai.rl_agent import DEFAULT_CONF_THRESH, CONF_STEP, _CONF_MAX_BY_MODE
+                _threshold = _IDLE_HOURS.get(trading_type, 6.0)
+                # Decay whenever above the hard floor (DEFAULT_CONF_THRESH = 0.55).
+                # The old condition "> 0.55" excluded agents at exactly 0.55 — but
+                # bootstrap can set values below 0.55 (e.g. scalping 0.54) that should
+                # still decay upward toward 0.55 if they were manually set lower.
+                # Use ">= floor of this mode" instead so decay always trends toward default.
+                _CONF_FLOOR = {"scalping": 0.52, "day_trading": 0.52, "swing": 0.50}
+                _floor = _CONF_FLOOR.get(trading_type, 0.52)
+                if _hours_idle >= _threshold and agent._conf_thresh > DEFAULT_CONF_THRESH:
                     agent._conf_thresh = max(
                         DEFAULT_CONF_THRESH,
                         agent._conf_thresh - CONF_STEP

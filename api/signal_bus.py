@@ -148,7 +148,12 @@ class SignalBus:
                 except Exception:
                     to_delete.append(sid)
                 continue
-            # Expire pending signals past their expiry window
+            # Expire pending signals past their expiry window.
+            # Exception: swing signals with auto_execute_at set are managed
+            # by the _swing_auto_execute coroutine — do not expire them here,
+            # because the coroutine is already scheduled to run at that time.
+            if sig.get("auto_execute_at"):
+                continue
             if sig.get("status") == "pending" and sig.get("expires_at"):
                 try:
                     exp = datetime.fromisoformat(sig["expires_at"].replace("Z", "+00:00"))
@@ -281,6 +286,77 @@ class SignalBus:
                     )
                     return signal
                 
+            # ── Swing auto mode: pending-then-auto-execute ───────────────────
+            # Swing trades are multi-day commitments with wide SLs. Even in auto
+            # mode, show the signal as "pending" for a review window so it appears
+            # in the Signal Queue UI before executing. After the window the signal
+            # auto-executes unless the user manually rejects it first.
+            #
+            # Review window is read from app.json:
+            #   ai.swing_auto_review_seconds (default 300 = 5 minutes)
+            #
+            # Scalping and day_trading: execute immediately (no review window).
+            # Their signals are time-sensitive and should not be delayed.
+            if mode == "swing":
+                try:
+                    _review_secs = int(
+                        _get_bus_app_cfg().get("ai", {}).get(
+                            "swing_auto_review_seconds", 300
+                        )
+                    )
+                except Exception:
+                    _review_secs = 300
+
+                from datetime import timedelta
+                signal["status"] = "pending"
+                signal["expires_at"] = (
+                    datetime.now(tz=timezone.utc) + timedelta(seconds=_review_secs)
+                ).isoformat()
+                signal["auto_execute_at"] = signal["expires_at"]
+                self.queue[signal["id"]] = signal
+                self._pending_keys.add(_dedup_key)
+                self.purge_stale()
+                # Broadcast as pending so UI shows the card with full details
+                asyncio.create_task(broadcast_signal(dict(signal)))
+                logger.info(
+                    f"Swing signal queued for review: {signal.get('symbol')}/{signal.get('strategy')} "
+                    f"— auto-executes in {_review_secs}s unless rejected"
+                )
+
+                async def _swing_auto_execute(sig: dict, delay: float) -> None:
+                    """Wait for the review window, then execute if still pending."""
+                    await asyncio.sleep(delay)
+                    # Only execute if the signal is still pending (not manually rejected)
+                    if sig.get("status") == "pending":
+                        sig["status"] = "executing"
+                        await broadcast_signal({**sig, "type": "signal_update"})
+                        # RISK-5 check at execution time
+                        try:
+                            from api.runner_loop import _risk_manager as _rm_swing
+                            if _rm_swing is not None:
+                                _cb_ok, _cb_msg = _rm_swing.is_trading_allowed(mode)
+                                if not _cb_ok:
+                                    sig["status"] = "rejected"
+                                    sig["rejection_reason"] = _cb_msg
+                                    self._pending_keys.discard(_dedup_key)
+                                    logger.info(f"Swing auto-execute blocked: {_cb_msg}")
+                                    await broadcast_signal({**sig, "type": "signal_update"})
+                                    return
+                        except Exception:
+                            pass
+                        await self._execute_async(sig)
+                    else:
+                        logger.info(
+                            f"Swing auto-execute cancelled: {sig.get('symbol')}/{sig.get('strategy')} "
+                            f"status={sig.get('status')} (manually actioned during review window)"
+                        )
+
+                _exec_task = asyncio.create_task(_swing_auto_execute(signal, _review_secs))
+                self._active_tasks.add(_exec_task)
+                _exec_task.add_done_callback(self._active_tasks.discard)
+                return signal
+
+            # ── Scalping / day_trading auto: execute immediately ─────────────
             signal["status"] = "executing"
             self.queue[signal["id"]] = signal
             self._pending_keys.add(_dedup_key)
@@ -303,16 +379,7 @@ class SignalBus:
                 pass
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
-            
-            # Small delay for swing so UI renders the card before status flips
-            # to "executed". Scalping/day_trading stay at 0 — speed matters there.
-            async def _delayed_execute(sig: dict, delay: float) -> None:
-                if delay > 0:
-                    await asyncio.sleep(delay)
-                await self._execute_async(sig)
-
-            _exec_delay = 2.0 if mode == "swing" else 0.0
-            _exec_task = asyncio.create_task(_delayed_execute(signal, _exec_delay))
+            _exec_task = asyncio.create_task(self._execute_async(signal))
             self._active_tasks.add(_exec_task)
             _exec_task.add_done_callback(self._active_tasks.discard)
         else:
@@ -340,13 +407,20 @@ class SignalBus:
         """
         Manually approved from the dashboard — execute the queued signal.
         Returns the signal dict immediately (execution happens in background).
+
+        For swing signals in auto mode (which sit as "pending" for the review
+        window), manual approval fires immediately instead of waiting for the
+        auto-execute timer. The coroutine checks signal status before executing,
+        so the scheduled auto-execute will safely no-op when it fires later.
         """
         signal = self.queue.get(signal_id)
         if signal is None:
             raise KeyError(signal_id)
         # GAP-5: reject stale signals at approval time, not just at queue time.
+        # Exception: swing auto-execute signals have expires_at = auto_execute_at —
+        # don't reject them here, the user is approving early (before the timer).
         expires_at = signal.get("expires_at")
-        if expires_at:
+        if expires_at and not signal.get("auto_execute_at"):
             try:
                 exp_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
                 if datetime.now(tz=timezone.utc) > exp_dt:

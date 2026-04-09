@@ -37,8 +37,8 @@
   "weekend_gap_protection": true,
   "ai": {
     "price_prediction_enabled": true,
-    "confidence_filter_enabled": true,
-    "confidence_threshold": 45,
+    "confidence_filter_enabled": false,
+    "confidence_threshold": 55,
     "rl_agent_enabled": true,
     "swing_scorer_weights": {
       "lstm": 0.4,

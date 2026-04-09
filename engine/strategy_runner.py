@@ -316,7 +316,7 @@ class StrategyRunner:
         primary_df = tf_data.get(_ptf, next(iter(tf_data.values()))) if _ptf else next(iter(tf_data.values()))
         try:
             from engine.regime_classifier import regime_classifier as _rc
-            _regime: str | None = _rc.classify(symbol, primary_df)
+            _regime: str | None = _rc.classify(symbol, primary_df, timeframe=_ptf or "H1")
         except Exception:
             _regime = None
 
