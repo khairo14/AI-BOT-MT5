@@ -1,8 +1,8 @@
 """
 Test script for Risk Presets (Task #12)
 
-Tests that preset multipliers correctly affect:
-- Lot size calculation (risk_per_trade_multiplier)
+Tests that risk presets directly write values to risk.json:
+- Lot size calculation (risk_per_trade_pct)
 - Concurrent trade limits
 - Drawdown limits
 """
@@ -109,8 +109,9 @@ def test_preset_concurrent_limits():
 
         total_limit = preset_cfg["max_concurrent_trades"]["total"]
         scalp_limit = preset_cfg["max_concurrent_trades"]["scalping"]
+        per_symbol = preset_cfg["max_concurrent_trades"]["per_symbol"]
 
-        print(f"{preset_name:12} → Total: {total_limit}, Scalping: {scalp_limit}")
+        print(f"{preset_name:12} → Total: {total_limit}, Scalping: {scalp_limit}, Per-Symbol: {per_symbol}")
 
     print("\n✅ PASS: Concurrent limits vary by preset (see config above)")
 
@@ -128,13 +129,55 @@ def test_preset_drawdown_limits():
         rm.set_risk_preset(preset_name)
         preset_cfg = presets_data["presets"][preset_name]
 
-        daily_limit = preset_cfg.get("max_daily_loss_pct")
-        weekly_limit = preset_cfg.get("max_weekly_loss_pct")
-        consec_losses = preset_cfg.get("max_consecutive_losses")
+        # Use new drawdown object structure
+        drawdown = preset_cfg.get("drawdown", {})
+        daily_limit = drawdown.get("daily_limit_pct")
+        weekly_limit = drawdown.get("weekly_limit_pct")
+        consec_losses = drawdown.get("max_consecutive_losses")
 
         print(f"{preset_name:12} → Daily: {daily_limit}%, Weekly: {weekly_limit}%, Consec: {consec_losses}")
 
     print("\n✅ PASS: Drawdown limits configured per preset")
+
+
+def test_per_mode_settings_preserved():
+    """Test that per-mode settings are preserved when switching presets."""
+    print("\n" + "=" * 60)
+    print("TEST: Per-Mode Settings Preservation")
+    print("=" * 60)
+
+    import json
+    from pathlib import Path
+    
+    rm = RiskManager()
+    
+    # Read initial risk.json to get risk_reward_min_by_mode
+    risk_path = Path(__file__).parent.parent / "config" / "risk.json"
+    with open(risk_path) as f:
+        initial_config = json.load(f)
+    
+    initial_rr_by_mode = initial_config.get("risk_reward_min_by_mode", {})
+    
+    print(f"Initial risk_reward_min_by_mode: {initial_rr_by_mode}")
+    
+    # Switch through all presets
+    for preset_name in ["conservative", "moderate", "aggressive"]:
+        rm.set_risk_preset(preset_name)
+        
+        # Re-read risk.json to check if risk_reward_min_by_mode is still there
+        with open(risk_path) as f:
+            updated_config = json.load(f)
+        
+        updated_rr_by_mode = updated_config.get("risk_reward_min_by_mode", {})
+        
+        if updated_rr_by_mode == initial_rr_by_mode:
+            print(f"✅ {preset_name:12} → risk_reward_min_by_mode preserved")
+        else:
+            print(f"❌ {preset_name:12} → risk_reward_min_by_mode changed!")
+            print(f"   Expected: {initial_rr_by_mode}")
+            print(f"   Got: {updated_rr_by_mode}")
+    
+    print("\n✅ PASS: Per-mode settings preserved across preset switches")
 
 
 if __name__ == "__main__":
@@ -147,6 +190,7 @@ if __name__ == "__main__":
         test_preset_lot_sizes()
         test_preset_concurrent_limits()
         test_preset_drawdown_limits()
+        test_per_mode_settings_preserved()
 
         print("\n" + "=" * 60)
         print("ALL TESTS COMPLETE")

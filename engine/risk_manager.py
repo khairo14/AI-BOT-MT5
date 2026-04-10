@@ -184,12 +184,6 @@ class RiskManager:
 
         risk_pct = risk_pct or self._config["risk_per_trade_pct"]
         max_risk_pct = self._config["max_risk_per_trade_pct"]
-        
-        # Apply risk preset multiplier
-        preset = self._get_current_preset_config()
-        if preset:
-            risk_pct *= preset.get("risk_per_trade_multiplier", 1.0)
-        
         risk_pct = min(risk_pct, max_risk_pct)
 
         risk_amount = _balance * (risk_pct / 100)
@@ -593,7 +587,8 @@ class RiskManager:
 
     def set_risk_preset(self, preset_name: str) -> tuple[bool, str]:
         """
-        Set the active risk preset (conservative/moderate/aggressive).
+        Set the active risk preset by writing its values directly to risk.json.
+        This replaces the multiplier approach with direct value writes.
         Returns (success, message).
         """
         presets = self._presets_data.get("presets", {})
@@ -601,43 +596,34 @@ class RiskManager:
             available = ", ".join(presets.keys())
             return False, f"Unknown preset '{preset_name}'. Available: {available}"
 
+        preset = presets[preset_name]
+        
+        # Update in-memory config with preset values
+        self._config["risk_per_trade_pct"] = preset.get("risk_per_trade_pct", 1.5)
+        self._config["max_risk_per_trade_pct"] = preset.get("max_risk_per_trade_pct", 2.0)
+        self._config["max_concurrent_trades"] = preset.get("max_concurrent_trades", {})
+        self._config["drawdown"] = preset.get("drawdown", {})
+        
+        # Write to risk.json on disk
+        try:
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(self._config, f, indent=2)
+            logger.info(f"Risk config updated from '{preset_name}' preset")
+        except Exception as exc:
+            logger.error(f"Failed to write risk.json: {exc}")
+            return False, f"Failed to save risk config: {exc}"
+        
+        # Update preset selection tracker
         self._current_preset = preset_name
         self._presets_data["current_preset"] = preset_name
-
-        # Save to disk
         try:
             with open(_PRESETS_PATH, "w") as f:
                 json.dump(self._presets_data, f, indent=2)
             logger.info(f"Risk preset changed to '{preset_name}'")
-            return True, f"Risk preset set to '{preset_name}'"
+            return True, f"Risk preset '{preset_name}' applied successfully"
         except Exception as exc:
             logger.error(f"Failed to save preset selection: {exc}")
-            return False, f"Failed to save: {exc}"
-
-    def get_adjusted_config(self, key: str, default=None):
-        """
-        Get a config value with preset multipliers applied.
-        Useful for drawdown limits, max concurrent trades, etc.
-        """
-        base_value = self._config.get(key, default)
-        preset = self._get_current_preset_config()
-
-        if not preset:
-            return base_value
-
-        # Apply preset overrides for specific keys
-        if key == "drawdown":
-            if isinstance(base_value, dict):
-                adjusted = base_value.copy()
-                adjusted["daily_limit_pct"] = preset.get("max_daily_loss_pct", base_value.get("daily_limit_pct", 5.0))
-                adjusted["weekly_limit_pct"] = preset.get("max_weekly_loss_pct", base_value.get("weekly_limit_pct", 10.0))
-                adjusted["max_consecutive_losses"] = preset.get("max_consecutive_losses", base_value.get("max_consecutive_losses", 5))
-                return adjusted
-
-        elif key == "max_concurrent_trades":
-            return preset.get("max_concurrent_trades", base_value)
-
-        return base_value
+            return False, f"Failed to save preset selection: {exc}"
 
 
 # Application-level singleton
