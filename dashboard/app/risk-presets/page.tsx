@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { toast } from "react-hot-toast";
+import { useBotStore } from "@/lib/store";
 
 interface PresetConfig {
   name: string;
@@ -27,6 +27,7 @@ interface PresetsResponse {
 }
 
 export default function RiskPresetsPage() {
+  const { pushNotification } = useBotStore();
   const [presetsData, setPresetsData] = useState<PresetsResponse | null>(null);
   const [currentPreset, setCurrentPreset] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -44,7 +45,11 @@ export default function RiskPresetsPage() {
       setCurrentPreset(data.current);
     } catch (error) {
       console.error("Failed to fetch risk presets:", error);
-      toast.error("Failed to load risk presets");
+      pushNotification({
+        type: "error",
+        title: "Failed to load risk presets",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
     }
   };
 
@@ -64,11 +69,19 @@ export default function RiskPresetsPage() {
 
       const result = await response.json();
       setCurrentPreset(result.current);
-      toast.success(result.message || `Risk preset set to ${presetName}`);
+      pushNotification({
+        type: "success",
+        title: "Risk preset updated",
+        message: result.message || `Risk preset set to ${presetName}`
+      });
       await fetchPresets(); // Refresh to show updated state
     } catch (error: any) {
       console.error("Failed to set preset:", error);
-      toast.error(error.message || "Failed to update risk preset");
+      pushNotification({
+        type: "error",
+        title: "Failed to update risk preset",
+        message: error.message || "Unknown error"
+      });
     } finally {
       setLoading(false);
     }
