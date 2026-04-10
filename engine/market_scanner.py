@@ -407,8 +407,9 @@ class MarketScanner:
         
         # Smooth with Wilder's moving average
         atr = self._wilder_smooth(tr, period)
-        plus_di = 100 * self._wilder_smooth(plus_dm, period) / atr
-        minus_di = 100 * self._wilder_smooth(minus_dm, period) / atr
+        # Add epsilon to prevent division by zero
+        plus_di = 100 * self._wilder_smooth(plus_dm, period) / (atr + 1e-10)
+        minus_di = 100 * self._wilder_smooth(minus_dm, period) / (atr + 1e-10)
         
         # Calculate DX and ADX
         dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
