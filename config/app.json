@@ -98,6 +98,25 @@
     }
   },
   "max_correlated_positions": 1,
+  "trailing_stops": {
+    "enabled": true,
+    "scalping": {
+      "enabled": false,
+      "activation_pips": 10,
+      "trail_distance_pips": 8,
+      "note": "Scalping uses EA (AIBotScalper.mq5) for sub-millisecond trailing"
+    },
+    "day_trading": {
+      "enabled": true,
+      "activation_pips": 20,
+      "trail_distance_pips": 15
+    },
+    "swing": {
+      "enabled": true,
+      "activation_pips": 50,
+      "trail_distance_pips": 40
+    }
+  },
   "signal_expiry_seconds": {
     "M1": 60,
     "M5": 300,

@@ -55,8 +55,10 @@ _last_bar_time: dict[str, object] = {
 
 _runner_task: Optional[asyncio.Task] = None
 _news_refresh_task: Optional[asyncio.Task] = None
+_trailing_stop_task: Optional[asyncio.Task] = None
 _mode_tasks: dict[str, asyncio.Task] = {}  # per-mode task refs to detect accumulation
 _risk_manager = None  # exposed so /risk/status can read live state
+_trailing_stop_manager = None  # exposed so /positions endpoint can read trailing status
 _paused: bool = False  # set True during account mode switch
 
 
@@ -302,7 +304,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
 
 def start_runner_loop(client, order_manager, risk_manager) -> None:
     """Start the background strategy runner (idempotent)."""
-    global _runner_task, _news_refresh_task, _risk_manager
+    global _runner_task, _news_refresh_task, _trailing_stop_task, _risk_manager, _trailing_stop_manager
     _risk_manager = risk_manager
     if _runner_task is None or _runner_task.done():
         _runner_task = asyncio.create_task(
@@ -312,6 +314,11 @@ def start_runner_loop(client, order_manager, risk_manager) -> None:
     if _news_refresh_task is None or _news_refresh_task.done():
         _news_refresh_task = asyncio.create_task(_news_refresh_loop())
         logger.info("News filter auto-refresh task created.")
+    if _trailing_stop_task is None or _trailing_stop_task.done():
+        from engine.trailing_stop import TrailingStopManager
+        _trailing_stop_manager = TrailingStopManager(client, order_manager)
+        _trailing_stop_task = asyncio.create_task(_trailing_stop_loop(_trailing_stop_manager))
+        logger.info("Trailing stop monitor task created.")
 
 
 async def _news_refresh_loop() -> None:
@@ -349,3 +356,41 @@ async def _news_refresh_loop() -> None:
             # news_filter._refresh() already logs event count, so no extra log needed
         except Exception as exc:
             logger.warning(f"News filter: auto-refresh failed: {exc}")
+
+
+async def _trailing_stop_loop(manager) -> None:
+    """
+    Background task that monitors open positions and updates trailing stops.
+    
+    Runs every 5 seconds to check if any positions can have their SL moved
+    to lock in profit. Only trails positions that have reached their
+    activation threshold (e.g., 10+ pips profit for scalping).
+    """
+    logger.info("Trailing stop monitor: starting...")
+    
+    # Read config to check if trailing stops are enabled
+    try:
+        _app_cfg = json.loads((CONFIG_DIR / "app.json").read_text(encoding="utf-8"))
+        _enabled = _app_cfg.get("trailing_stops", {}).get("enabled", False)
+    except Exception:
+        _enabled = False
+    
+    if not _enabled:
+        logger.info("Trailing stops disabled in config — monitor inactive")
+        return
+    
+    logger.info("Trailing stop monitor active (5-second tick)")
+    
+    while True:
+        await asyncio.sleep(5)  # Check every 5 seconds
+        
+        if _paused:
+            continue
+        
+        try:
+            trailed_count = await asyncio.to_thread(manager.update_trailing_stops)
+            if trailed_count > 0:
+                logger.debug(f"Trailing stop: updated {trailed_count} position(s)")
+        except Exception as exc:
+            logger.warning(f"Trailing stop monitor error: {exc}")
+

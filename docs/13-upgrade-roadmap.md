@@ -541,11 +541,90 @@ Added `_news_refresh_loop()` background task in `api/runner_loop.py` that:
 
 ---
 
-### Task 15: Trailing Stop Implementation ⚠️ NOT STARTED
+### Task 15: Trailing Stop Implementation ✅ COMPLETE
 
 **Priority:** MEDIUM  
-**Effort:** 3 days  
+**Effort:** 3 days (completed in 1 day)  
+**Completed:** April 10, 2026  
 **Reason:** Only static SL/TP, missing profit protection
+
+**Deliverables:**
+
+- [x] ✅ Created `engine/trailing_stop.py` (TrailingStopManager class)
+- [x] ✅ Background asyncio task in `api/runner_loop.py` (5-second tick)
+- [x] ✅ Configuration in `app.json` per trading mode
+- [x] ✅ API endpoint `/api/trades/trailing-stops` for status
+- [x] ✅ Enriched `/api/trades/positions` with trailing status
+- [x] ✅ Thread-safe position tracking
+- [x] ✅ Never moves SL against profit (only in profit direction)
+
+**Implementation:**
+
+**Scope:**
+- **Day Trading:** ✅ Enabled (activation: 20 pips, trail: 15 pips)
+- **Swing:** ✅ Enabled (activation: 50 pips, trail: 40 pips)  
+- **Scalping:** ❌ Disabled (EA handles this at sub-millisecond speed)
+
+**Why scalping is disabled:**
+- `AIBotScalper.mq5` EA already trails scalping positions on 1-second timer
+- EA configuration: 8 pips trail distance, 5 pips breakeven
+- EA runs natively in MT5 (1-5ms latency vs 50-300ms from Python)
+- Python trailing would be redundant and slower
+
+**Configuration (`config/app.json`):**
+
+```json
+"trailing_stops": {
+  "enabled": true,
+  "scalping": {
+    "enabled": false,
+    "note": "Scalping uses EA (AIBotScalper.mq5) for sub-millisecond trailing"
+  },
+  "day_trading": {
+    "enabled": true,
+    "activation_pips": 20,
+    "trail_distance_pips": 15
+  },
+  "swing": {
+    "enabled": true,
+    "activation_pips": 50,
+    "trail_distance_pips": 40
+  }
+}
+```
+
+**How it works:**
+
+1. Background task monitors all open positions every 5 seconds
+2. For each position in profit ≥ activation threshold:
+   - Calculates new SL = highest_profit_price - trail_distance
+   - Only moves SL upward (BUY) or downward (SELL), never backwards
+   - Logs each trailing action with pips moved
+3. Position state tracked in memory (highest profit price, total pips trailed)
+4. Cleaned up automatically when position closes
+
+**Example log:**
+
+```
+TrailingStop: #12345 EURUSD BUY | Moved SL 1.08500 → 1.08650 (15.0 pips) | Total trailed: 45.0 pips
+```
+
+**API Endpoints:**
+
+- `GET /api/trades/positions` — includes `trailing` object with status
+- `GET /api/trades/trailing-stops` — dedicated trailing stop status for all positions
+
+**Dashboard UI:** Deferred to future phase (data available via API).
+
+**Testing:** Will be verified with next live day_trading or swing position.
+
+---
+
+### Task 16: In-App Notifications ⚠️ NOT STARTED
+
+**Priority:** MEDIUM  
+**Effort:** 2 days  
+**Reason:** User wants alerts for signals, circuit breakers, etc.
 
 **Deliverables:**
 
@@ -838,7 +917,7 @@ WEEK 5-6: UX Features
 ├─ Task 12: Risk presets ✅
 ├─ Task 13: Symbol performance analytics ✅
 ├─ Task 14: News auto-update ✅
-├─ Task 15: Trailing stops
+├─ Task 15: Trailing stops ✅
 └─ Task 16: In-app notifications
 
 WEEK 7-8: Database Migration

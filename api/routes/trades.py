@@ -54,7 +54,26 @@ def get_positions(
     client: MT5Client = Depends(get_client),
 ):
     """Return all currently open positions, optionally filtered by symbol."""
-    return client.get_open_positions(symbol=symbol)
+    positions = client.get_open_positions(symbol=symbol)
+    
+    # Enrich positions with trailing stop status
+    try:
+        from api.runner_loop import _trailing_stop_manager
+        if _trailing_stop_manager:
+            for pos in positions:
+                trailing_status = _trailing_stop_manager.get_trailing_status(pos["ticket"])
+                if trailing_status:
+                    pos["trailing"] = {
+                        "active": True,
+                        "pips_trailed": trailing_status["pips_trailed"],
+                        "last_trail_at": trailing_status["last_trail_at"],
+                    }
+                else:
+                    pos["trailing"] = {"active": False}
+    except Exception:
+        pass  # Trailing stop data optional
+    
+    return positions
 
 
 @router.get("/history")
@@ -270,6 +289,24 @@ def modify_position(
     if not success:
         raise HTTPException(status_code=500, detail=f"Failed to modify ticket #{ticket}")
     return {"status": "modified", "ticket": ticket}
+
+
+@router.get("/trailing-stops")
+def get_trailing_stops():
+    """Get trailing stop status for all tracked positions."""
+    try:
+        from api.runner_loop import _trailing_stop_manager
+        if not _trailing_stop_manager:
+            return {"enabled": False, "positions": []}
+        
+        statuses = _trailing_stop_manager.get_all_trailing_status()
+        return {
+            "enabled": True,
+            "positions": statuses,
+            "count": len(statuses),
+        }
+    except Exception as exc:
+        return {"enabled": False, "error": str(exc), "positions": []}
 
 
 # ---------------------------------------------------------------------------
