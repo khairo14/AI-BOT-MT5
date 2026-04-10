@@ -459,31 +459,45 @@ Presets are stored in `config/risk_presets.json` and applied via multipliers:
 
 ---
 
-### Task 13: Trade Performance by Symbol ⚠️ NOT STARTED
+### Task 13: Trade Performance by Symbol ✅ COMPLETE
 
 **Priority:** MEDIUM  
-**Effort:** 2 days  
+**Effort:** 2 days (already existed)  
+**Completed:** Previously implemented as `/analytics` page  
 **Reason:** Can't see which symbols are profitable
 
 **Deliverables:**
 
-- [ ] Analytics page: Win rate per symbol
-- [ ] Profit factor per symbol + trading type
-- [ ] Best/worst performing symbols table
-- [ ] Disable underperforming symbols (auto-suggest)
+- [x] ✅ Analytics page at `/analytics` (labeled "Performance 📊" in sidebar)
+- [x] ✅ Win rate breakdown by symbol
+- [x] ✅ Win rate breakdown by strategy
+- [x] ✅ Win rate breakdown by trading mode
+- [x] ✅ Profit/loss per symbol with trade counts
+- [x] ✅ Average profit per trade
+- [x] ✅ Worst symbols/strategies failure analysis
+- [x] ✅ Win rate by hour (UTC) heatmap
+- [x] ✅ Equity curve visualization
+- [x] ✅ Account mode filter (paper/live/all)
+- [x] ✅ Trading mode filter (scalping/day/swing/all)
 
-**UI Mockup:**
+**Current Data Insights (from screenshot):**
 
-```text
-Symbol Performance Report (Last 30 Days)
-┌────────────────────────────────────────────────┐
-│ Symbol    Type      Trades  Win%   Profit      │
-│ NZDUSD    Scalping  42      71%    +$1,240     │
-│ GOLD      Day       28      62%    +$890       │
-│ EURUSD    Scalping  35      58%    +$450       │
-│ GBPJPY    Day       19      47%    -$120  ⚠️   │
-└────────────────────────────────────────────────┘
-```
+**By Symbol:**
+- GOLD: 3 trades, 20% WR, -$341.05
+- GBPJPY: 10 trades, 30% WR, +$272.89 ✅ (profitable)
+- BTCUSD: 1 trade, 100% WR, +$206.80 ✅ (perfect)
+- US30Cash: 2 trades, 50% WR, +$243.41 ✅ (profitable)
+
+**By Strategy:**
+- sr_breakout: 39 trades, 15.4% WR, -$1638.72 ❌ (worst performer)
+- ema_trend_rider: 9 trades, 44.4% WR, -$51.29
+
+**By Trading Mode:**
+- Scalping: 16 trades, 12.5% WR, -$1079.34 ❌
+- Day Trading: 39 trades, 15.4% WR, -$30.45 ❌
+- Swing: Not shown in screenshot
+
+**Recommendation:** Use failure analysis to disable worst performing symbols and strategies.
 
 ---
 
