@@ -159,6 +159,7 @@ const NAV = [
   { href: "/scalping", label: "Scalping", icon: "⚡" },
   { href: "/day-trading", label: "Day Trading", icon: "☀" },
   { href: "/swing", label: "Swing", icon: "〰" },
+  { href: "/scanner", label: "Market Scanner", icon: "🔍" },
   { href: "/ml", label: "AI / ML Brain", icon: "🧠" },
   { href: "/backtest",  label: "Backtest",  icon: "📈" },
   { href: "/analytics", label: "Analytics", icon: "📊" },

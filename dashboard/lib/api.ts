@@ -221,6 +221,66 @@ export const fetchScannerConfig = (): Promise<Record<string, ScannerModeConfig>>
 export const patchScannerConfig = (patch: Record<string, unknown>) =>
   api.patch("/config/scanner", { data: patch }).then((r) => r.data);
 
+// ── Market Scanner (New) ---------------------------------------------------
+export interface ScanResult {
+  symbol: string;
+  category: string;
+  trading_type: string;
+  atr_pips: number;
+  spread_pips: number;
+  adx: number;
+  daily_volume: number;
+  volatility_percentile: number;
+  liquidity_score: number;
+  momentum_score: number;
+  volatility_score: number;
+  spread_score: number;
+  trend_score: number;
+  liquidity_subscore: number;
+  momentum_subscore: number;
+  composite_score: number;
+  current_price: number;
+  pip_value: number;
+  trading_hours_active: boolean;
+  last_updated: string;
+}
+
+export interface ScanSummary {
+  timestamp: string;
+  trading_types: Record<string, ScanResult[]>;
+  total_scanned: number;
+  total_passed: number;
+  scan_duration_seconds: number;
+  config_hash: string;
+}
+
+export const fetchScanResults = (forceRefresh = false): Promise<{ status: string; data: ScanSummary }> =>
+  api.get(`/scanner/?force_refresh=${forceRefresh}`).then((r) => r.data);
+
+export const fetchScanByType = (
+  tradingType: "scalping" | "day_trading" | "swing",
+  forceRefresh = false
+): Promise<{ status: string; trading_type: string; count: number; results: ScanResult[] }> =>
+  api.get(`/scanner/type/${tradingType}?force_refresh=${forceRefresh}`).then((r) => r.data);
+
+export const triggerScan = (tradingType?: string, forceRefresh = true) =>
+  api.post("/scanner/scan", { trading_type: tradingType, force_refresh: forceRefresh }).then((r) => r.data);
+
+export const fetchScannerCacheStatus = () =>
+  api.get("/scanner/cache").then((r) => r.data);
+
+export const invalidateScannerCache = () =>
+  api.post("/scanner/cache/invalidate").then((r) => r.data);
+
+export const addSymbolToConfig = (symbol: string, tradingType: string, enabled = true) =>
+  api.post("/scanner/add-symbol", { symbol, trading_type: tradingType, enabled }).then((r) => r.data);
+
+export const fetchScannerSystemConfig = () =>
+  api.get("/scanner/config").then((r) => r.data);
+
+export const fetchScannerHealth = () =>
+  api.get("/scanner/health").then((r) => r.data);
+
 // ── Analytics ---------------------------------------------------------------
 export const fetchAnalyticsPerformance = (
   account: "paper" | "live" | "all" = "all",
