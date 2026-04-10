@@ -38,6 +38,7 @@ data/processed/
 
 # Optimizer & RL runtime outputs
 config/optimized_params.json
+config/scanner.json
 
 # Logs — keep directory, exclude runtime files
 logs/*.log
