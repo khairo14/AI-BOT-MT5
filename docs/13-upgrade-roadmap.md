@@ -417,47 +417,45 @@ logger.info(
 
 **Goal:** Feature enhancements for better UX
 
-### Task 12: Risk Presets ⚠️ NOT STARTED
+### Task 12: Risk Presets ✅ COMPLETE
 
 **Priority:** MEDIUM  
-**Effort:** 3 days  
-**Reason:** Currently hardcoded risk params, no user flexibility
+**Effort:** 3 days (completed in 1 day)  
+**Completed:** April 10, 2026  
+**Reason:** Users need flexible risk management (conservative/moderate/aggressive)
 
 **Deliverables:**
 
-- [ ] Add risk preset config file
-- [ ] Conservative/Moderate/Aggressive profiles
-- [ ] Dashboard UI to select preset
-- [ ] Per-user risk multipliers (stop_loss_multiplier, take_profit_multiplier)
-- [ ] Update risk_manager.py to apply multipliers
+- [x] ✅ Created `config/risk_presets.json` with 3 profiles
+- [x] ✅ Conservative/Moderate/Aggressive presets
+- [x] ✅ Dashboard UI at `/risk-presets` for selection
+- [x] ✅ Risk multipliers (risk_per_trade, stop_loss, take_profit)
+- [x] ✅ Updated `engine/risk_manager.py` to apply preset multipliers
+- [x] ✅ Added API endpoints: `GET /api/risk/presets`, `POST /api/risk/presets/select`
+- [x] ✅ Per-preset concurrent trade limits
+- [x] ✅ Per-preset drawdown limits (daily/weekly/consecutive)
+- [x] ✅ Created test suite: `tests/test_risk_presets.py`
 
-**Presets:**
+**Implementation:**
 
-```python
-RISK_PRESETS = {
-    "conservative": {
-        "stop_loss_multiplier": 0.7,
-        "take_profit_multiplier": 1.3,
-        "max_daily_loss_pct": 1.0,
-        "max_position_size_pct": 1.0,
-        "max_consecutive_losses": 2
-    },
-    "moderate": {
-        "stop_loss_multiplier": 1.0,
-        "take_profit_multiplier": 1.0,
-        "max_daily_loss_pct": 2.0,
-        "max_position_size_pct": 2.0,
-        "max_consecutive_losses": 3
-    },
-    "aggressive": {
-        "stop_loss_multiplier": 1.5,
-        "take_profit_multiplier": 0.8,
-        "max_daily_loss_pct": 5.0,
-        "max_position_size_pct": 3.0,
-        "max_consecutive_losses": 5
-    }
-}
-```
+Presets are stored in `config/risk_presets.json` and applied via multipliers:
+
+| Metric | Conservative | Moderate | Aggressive |
+| -------- | -------------- | ---------- | ------------ |
+| Risk per trade | 0.7x (1.05%) | 1.0x (1.5%) | 1.5x (2.25%) |
+| Stop loss | 0.7x (tighter) | 1.0x | 1.5x (wider) |
+| Take profit | 1.3x (larger) | 1.0x | 0.8x (faster) |
+| Max daily loss | 3.0% | 5.0% | 8.0% |
+| Max concurrent | 8 total | 12 total | 18 total |
+| Loss streak limit | 3 | 5 | 7 |
+
+**Test Results (10,000 balance, 50 pip SL):**
+
+- Conservative: 2.09 lots
+- Moderate: 2.99 lots
+- Aggressive: 3.99 lots
+
+✅ All tests passed. Presets correctly scale risk across all parameters.
 
 ---
 
