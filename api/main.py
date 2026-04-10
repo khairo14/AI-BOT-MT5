@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes
+from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes
 from api.websocket.feed import router as ws_router
 from api.signal_bus import bus, _set_event_loop
 from api.runner_loop import start_runner_loop
@@ -212,6 +212,7 @@ app.include_router(ai_routes.router,   prefix="/ai",       tags=["AI"])
 app.include_router(risk_routes.router,     prefix="/risk",      tags=["Risk"])
 app.include_router(backtest_routes.router, prefix="/backtest",  tags=["Backtest"])
 app.include_router(analytics_routes.router, prefix="/analytics", tags=["Analytics"])
+app.include_router(scanner_routes.router,   prefix="/scanner",   tags=["Scanner"])
 app.include_router(ws_router,              prefix="/ws",        tags=["WebSocket"])
 
 
