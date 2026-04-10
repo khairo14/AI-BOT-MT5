@@ -19,7 +19,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes, profitability as profitability_routes, auth as auth_routes
+from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes, profitability as profitability_routes, auth as auth_routes, mt5_accounts as mt5_accounts_routes
 from api.websocket.feed import router as ws_router
 from api.signal_bus import bus, _set_event_loop
 from api.runner_loop import start_runner_loop
@@ -331,6 +331,7 @@ async def add_correlation_id(request: Request, call_next):
 # Routes
 # ---------------------------------------------------------------------------
 app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
+app.include_router(mt5_accounts_routes.router, prefix="/api", tags=["MT5 Accounts"])
 app.include_router(account.router,     prefix="/account",  tags=["Account"])
 app.include_router(trades.router,      prefix="/trades",   tags=["Trades"])
 app.include_router(signals.router,     prefix="/signals",  tags=["Signals"])
