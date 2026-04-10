@@ -15,6 +15,7 @@ import {
   toggleCircuitBreaker,
   fetchHealth,
   reconnectMT5,
+  type HealthResponse,
 } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import type { TradingMode, ExecutionMode } from "@/types";
@@ -145,7 +146,7 @@ export default function SettingsPage() {
       setNewsFilter((nf?.enabled as boolean) ?? true);
       setSessionFilter((sf?.enabled as boolean) ?? true);
       setCbStatus(cbData);
-      setMt5Connected((healthData as { mt5_connected: boolean }).mt5_connected ?? false);
+      setMt5Connected(healthData.checks.mt5_connection === "ok");
     } catch {
       pushNotification({ type: "error", title: "Settings load failed", message: "Could not reach the API." });
     }
@@ -267,11 +268,13 @@ export default function SettingsPage() {
               try {
                 await reconnectMT5();
                 const h = await fetchHealth();
-                setMt5Connected(h.mt5_connected);
+                setMt5Connected(h.checks.mt5_connection === "ok");
                 pushNotification({ type: "success", title: "MT5 reconnected", message: "" });
               } catch {
-                const h = await fetchHealth().catch(() => ({ mt5_connected: false }));
-                setMt5Connected(h.mt5_connected);
+                const h = await fetchHealth().catch(() => ({ 
+                  checks: { mt5_connection: "disconnected" }
+                } as HealthResponse));
+                setMt5Connected(h.checks.mt5_connection === "ok");
                 pushNotification({ type: "error", title: "Reconnect failed", message: "Check the MT5 terminal is running." });
               } finally {
                 setReconnecting(false);

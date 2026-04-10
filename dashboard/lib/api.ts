@@ -175,8 +175,29 @@ export const resetConsecutiveLosses = () =>
 export const toggleCircuitBreaker = (enabled: boolean) =>
   api.post("/risk/circuit-breaker", { enabled }).then((r) => r.data);
 
+export interface HealthResponse {
+  status: "healthy" | "degraded";
+  timestamp: string;
+  version: string;
+  checks: {
+    mt5_connection: "ok" | "disconnected" | string;
+    disk_space: "ok" | "warning" | string;
+    memory: "ok" | "warning" | string;
+    risk_manager: "ok" | "circuit_breaker_active" | "not_initialized" | string;
+  };
+  metrics: {
+    disk_free_gb: number;
+    disk_usage_pct: number;
+    memory_usage_pct: number;
+    memory_available_gb: number;
+    circuit_breaker_active: boolean;
+  };
+  trading_mode: string;
+  correlation_id?: string | null;
+}
+
 export const fetchHealth = () =>
-  api.get("/health").then((r) => r.data as { status: string; mt5_connected: boolean });
+  api.get("/health").then((r) => r.data as HealthResponse);
 
 export const reconnectMT5 = () =>
   api.post("/account/reconnect").then((r) => r.data);
