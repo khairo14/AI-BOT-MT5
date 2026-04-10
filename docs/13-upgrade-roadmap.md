@@ -501,18 +501,43 @@ Presets are stored in `config/risk_presets.json` and applied via multipliers:
 
 ---
 
-### Task 14: News Filter Auto-Update ⚠️ NOT STARTED
+### Task 14: News Filter Auto-Update ✅ COMPLETE
 
 **Priority:** MEDIUM  
 **Effort:** 1 day  
+**Completed:** April 10, 2026  
 **Reason:** Forex Factory cache expires, manual refresh needed
 
 **Deliverables:**
 
-- [ ] Background cron job to refresh news every hour
-- [ ] Fallback if Forex Factory API down
-- [ ] Log when news events are loaded
-- [ ] Dashboard indicator showing last news update time
+- [x] ✅ Background asyncio task to refresh news every 60 minutes
+- [x] ✅ Initial refresh on API startup (non-blocking)
+- [x] ✅ Configurable via `risk.json` news_filter.cache_minutes (default 60)
+- [x] ✅ Thread-safe refresh using `asyncio.to_thread()`
+- [x] ✅ Graceful error handling (logs warning, continues with cached data)
+- [x] ✅ Log when news events are loaded (currently 90 events)
+
+**Implementation:**
+
+Added `_news_refresh_loop()` background task in `api/runner_loop.py` that:
+
+1. Performs initial refresh on startup (ensures fresh data before trading)
+2. Spawns non-blocking background task using `asyncio.create_task()`
+3. Sleeps for N minutes (from config), then calls `news_filter._refresh()`
+4. `_refresh()` is idempotent and thread-safe (prevents duplicate fetches)
+5. Fetches thisweek + nextweek from Forex Factory (7-14 day coverage)
+
+**Logs (Verified Working):**
+
+```
+2026-04-10 22:01:45.627 | INFO | News filter auto-refresh task created.
+2026-04-10 22:01:45.628 | INFO | News filter: initial refresh on startup...
+2026-04-10 22:01:45.632 | INFO | News filter: initial refresh complete
+2026-04-10 22:01:45.632 | INFO | News filter: auto-refresh every 60 minutes
+2026-04-10 22:01:46.568 | INFO | NewsFilter: loaded 90 calendar events
+```
+
+**Note:** Dashboard indicator deferred to Task #16 In-App Notifications.
 
 ---
 
@@ -810,9 +835,9 @@ WEEK 3-4: Production Stability
 
 ```text
 WEEK 5-6: UX Features
-├─ Task 12: Risk presets
-├─ Task 13: Symbol performance analytics
-├─ Task 14: News auto-update
+├─ Task 12: Risk presets ✅
+├─ Task 13: Symbol performance analytics ✅
+├─ Task 14: News auto-update ✅
 ├─ Task 15: Trailing stops
 └─ Task 16: In-app notifications
 
