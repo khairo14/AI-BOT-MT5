@@ -48,6 +48,7 @@ logs/pids.json
 # Runtime data — keep directory structure, exclude generated files
 data/backtest_history/*.json
 data/backtest_history/*.jsonl
+data/*.json
 data/*.jsonl
 !data/.gitkeep
 !data/backtest_history/.gitkeep
