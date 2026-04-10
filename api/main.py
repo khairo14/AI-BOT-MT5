@@ -7,6 +7,7 @@ import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -110,6 +111,46 @@ async def _rl_idle_decay_loop() -> None:
         except Exception as _exc:
             logger.debug(f"RL idle decay loop error: {_exc}")
 
+async def _market_scanner_loop() -> None:
+    """
+    Background task that runs market scanner every 60 minutes.
+    Discovers new trading opportunities and updates cached results.
+    """
+    # Wait 2 minutes after startup before first scan (let system stabilize)
+    await asyncio.sleep(120)
+    
+    while True:
+        try:
+            if mt5_client is None or not mt5_client.is_connected():
+                logger.debug("Market scanner: MT5 not connected, skipping scan")
+                await asyncio.sleep(600)  # check again in 10 minutes
+                continue
+            
+            logger.info("Market scanner: Starting automatic scan...")
+            start_time = datetime.now(timezone.utc)
+            
+            from engine.market_scanner import MarketScanner
+            scanner = MarketScanner(mt5_client)
+            summary = await asyncio.to_thread(scanner.scan_all, force_refresh=True)
+            
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+            
+            logger.info(
+                f"Market scanner: Complete | "
+                f"Scanned: {summary.total_scanned} | "
+                f"Passed: {summary.total_passed} | "
+                f"Duration: {duration:.1f}s | "
+                f"Scalping: {len(summary.trading_types.get('scalping', []))} | "
+                f"Day: {len(summary.trading_types.get('day_trading', []))} | "
+                f"Swing: {len(summary.trading_types.get('swing', []))}"
+            )
+            
+        except Exception as _exc:
+            logger.warning(f"Market scanner loop error: {_exc}")
+        
+        # Wait 60 minutes before next scan
+        await asyncio.sleep(3600)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global mt5_client, _risk_manager
@@ -166,6 +207,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_mt5_watchdog())
         # RL idle decay — runs every 30 min to decay thresholds during no-trade periods
         asyncio.create_task(_rl_idle_decay_loop())
+        # Market scanner — runs every 60 min to discover new trading opportunities
+        asyncio.create_task(_market_scanner_loop())
     yield
     # Shutdown
     try:
