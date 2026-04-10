@@ -248,8 +248,8 @@ async def invalidate_cache(scanner: MarketScanner = Depends(get_scanner)):
 @router.post("/add-symbol")
 async def add_symbol_to_config(body: AddSymbolRequest):
     """
-    Add a scanned symbol to the enabled symbols list for a trading type.
-    Updates config/symbols.json.
+    Add a scanned symbol to the strategy scanner (active trading symbols).
+    Updates config/scanner.json (used by strategy scanner on trading pages).
     
     Body:
     - symbol: Symbol name (e.g., "EURUSD")
@@ -266,48 +266,37 @@ async def add_symbol_to_config(body: AddSymbolRequest):
         )
     
     try:
-        # Load current symbols config
-        symbols_path = "config/symbols.json"
-        if not os.path.exists(symbols_path):
-            raise HTTPException(status_code=500, detail="symbols.json not found")
+        # Load current strategy scanner config
+        scanner_path = "config/scanner.json"
+        if not os.path.exists(scanner_path):
+            raise HTTPException(status_code=500, detail="scanner.json not found")
         
-        with open(symbols_path, "r") as f:
-            symbols_cfg = json.load(f)
+        with open(scanner_path, "r") as f:
+            scanner_cfg = json.load(f)
+        
+        # Get symbols list for this trading type
+        if body.trading_type not in scanner_cfg:
+            scanner_cfg[body.trading_type] = {
+                "enabled": True,
+                "symbols": [],
+                "timeframe": "M5" if body.trading_type == "scalping" else "H1"
+            }
+        
+        symbols_list = scanner_cfg[body.trading_type].get("symbols", [])
         
         # Check if symbol already exists
-        existing = [
-            s for s in symbols_cfg.get(body.trading_type, [])
-            if s["symbol"] == body.symbol
-        ]
-        
-        if existing:
-            # Update existing entry
-            for s in symbols_cfg[body.trading_type]:
-                if s["symbol"] == body.symbol:
-                    s["enabled"] = body.enabled
-            message = f"Updated {body.symbol} enabled status to {body.enabled}"
+        if body.symbol in symbols_list:
+            message = f"{body.symbol} already in {body.trading_type} strategy scanner"
         else:
-            # Add new entry (need to determine category)
-            # Import scanner to use category detection
-            from engine.market_scanner import MarketScanner
-            temp_scanner = MarketScanner(None)  # type: ignore
-            category = temp_scanner._get_symbol_category(body.symbol) or "unknown"
+            # Add symbol to list
+            symbols_list.append(body.symbol)
+            scanner_cfg[body.trading_type]["symbols"] = symbols_list
             
-            new_entry = {
-                "symbol": body.symbol,
-                "enabled": body.enabled,
-                "category": category
-            }
+            # Save updated config
+            with open(scanner_path, "w") as f:
+                json.dump(scanner_cfg, f, indent=2)
             
-            if body.trading_type not in symbols_cfg:
-                symbols_cfg[body.trading_type] = []
-            
-            symbols_cfg[body.trading_type].append(new_entry)
-            message = f"Added {body.symbol} to {body.trading_type} symbols"
-        
-        # Save updated config
-        with open(symbols_path, "w") as f:
-            json.dump(symbols_cfg, f, indent=2)
+            message = f"Added {body.symbol} to {body.trading_type} strategy scanner"
         
         logger.info(message)
         
@@ -316,7 +305,8 @@ async def add_symbol_to_config(body: AddSymbolRequest):
             "message": message,
             "symbol": body.symbol,
             "trading_type": body.trading_type,
-            "enabled": body.enabled
+            "enabled": body.enabled,
+            "total_symbols": len(symbols_list)
         }
     
     except Exception as e:
@@ -325,21 +315,32 @@ async def add_symbol_to_config(body: AddSymbolRequest):
 
 
 @router.get("/config")
-async def get_scanner_config(scanner: MarketScanner = Depends(get_scanner)):
+async def get_scanner_system_config():
     """
-    Get current scanner configuration.
-    Returns criteria, weights, and filters for all trading types.
+    Get current market scanner configuration (criteria, weights, filters).
+    This is separate from the strategy scanner (active symbols).
+    Returns criteria from config/market_scanner.json.
     """
+    import json
+    import os
+    
+    config_path = "config/market_scanner.json"
+    if not os.path.exists(config_path):
+        raise HTTPException(status_code=500, detail="market_scanner.json not found")
+    
+    with open(config_path, "r") as f:
+        cfg = json.load(f)
+    
     return {
         "status": "success",
         "config": {
-            "enabled": scanner.cfg.get("enabled", True),
-            "scan_interval_minutes": scanner.cfg.get("scan_interval_minutes"),
-            "max_results_per_type": scanner.cfg.get("max_results_per_type"),
-            "trading_types": scanner.cfg.get("trading_types"),
-            "categories": scanner.cfg.get("categories"),
-            "filters": scanner.cfg.get("filters"),
-            "advanced": scanner.cfg.get("advanced")
+            "enabled": cfg.get("enabled", True),
+            "scan_interval_minutes": cfg.get("scan_interval_minutes"),
+            "max_results_per_type": cfg.get("max_results_per_type"),
+            "trading_types": cfg.get("trading_types"),
+            "categories": cfg.get("categories"),
+            "filters": cfg.get("filters"),
+            "advanced": cfg.get("advanced")
         }
     }
 

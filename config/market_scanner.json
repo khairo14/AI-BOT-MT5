@@ -1,0 +1,144 @@
+{
+  "enabled": true,
+  "scan_interval_minutes": 60,
+  "max_results_per_type": 20,
+  "exclude_symbols": [
+    "XAUAUD", "XAUEUR", "XAGGBP", "XAGEUR",
+    "CHFJPY", "AUDNZD", "EURCAD", "EURNZD",
+    "CADCHF", "CADJPY", "NZDCHF", "NZDJPY"
+  ],
+  "trading_types": {
+    "scalping": {
+      "enabled": true,
+      "description": "High-frequency intraday trading (M1/M5 timeframes)",
+      "criteria": {
+        "atr_min_pips": 5.0,
+        "atr_max_pips": 50.0,
+        "max_spread_pips": 2.0,
+        "min_daily_volume_lots": 1000,
+        "adx_min": 20,
+        "adx_max": 60,
+        "volatility_percentile_min": 40,
+        "volatility_percentile_max": 90,
+        "liquidity_score_min": 7.0
+      },
+      "weights": {
+        "volatility": 0.30,
+        "spread": 0.25,
+        "trend_strength": 0.20,
+        "liquidity": 0.15,
+        "momentum": 0.10
+      },
+      "timeframe": "M5",
+      "lookback_bars": 288
+    },
+    "day_trading": {
+      "enabled": true,
+      "description": "Intraday position trading (M15/H1 timeframes)",
+      "criteria": {
+        "atr_min_pips": 10.0,
+        "atr_max_pips": 150.0,
+        "max_spread_pips": 5.0,
+        "min_daily_volume_lots": 500,
+        "adx_min": 18,
+        "adx_max": 70,
+        "volatility_percentile_min": 30,
+        "volatility_percentile_max": 95,
+        "liquidity_score_min": 6.0
+      },
+      "weights": {
+        "volatility": 0.25,
+        "trend_strength": 0.25,
+        "spread": 0.20,
+        "momentum": 0.15,
+        "liquidity": 0.15
+      },
+      "timeframe": "H1",
+      "lookback_bars": 168
+    },
+    "swing": {
+      "enabled": true,
+      "description": "Multi-day position trading (H4/D1 timeframes)",
+      "criteria": {
+        "atr_min_pips": 20.0,
+        "atr_max_pips": 500.0,
+        "max_spread_pips": 10.0,
+        "min_daily_volume_lots": 200,
+        "adx_min": 15,
+        "adx_max": 80,
+        "volatility_percentile_min": 25,
+        "volatility_percentile_max": 98,
+        "liquidity_score_min": 5.0
+      },
+      "weights": {
+        "trend_strength": 0.30,
+        "volatility": 0.25,
+        "momentum": 0.20,
+        "spread": 0.15,
+        "liquidity": 0.10
+      },
+      "timeframe": "H4",
+      "lookback_bars": 168
+    }
+  },
+  "categories": {
+    "forex": {
+      "enabled": true,
+      "priority": 1,
+      "pip_multiplier": 1.0,
+      "session_weight": 1.0
+    },
+    "crypto": {
+      "enabled": true,
+      "priority": 2,
+      "pip_multiplier": 10.0,
+      "session_weight": 1.0
+    },
+    "us_index": {
+      "enabled": true,
+      "priority": 3,
+      "pip_multiplier": 0.1,
+      "session_weight": 0.9
+    },
+    "eu_index": {
+      "enabled": true,
+      "priority": 4,
+      "pip_multiplier": 0.1,
+      "session_weight": 0.8
+    },
+    "commodity": {
+      "enabled": true,
+      "priority": 5,
+      "pip_multiplier": 1.0,
+      "session_weight": 0.85
+    },
+    "stock": {
+      "enabled": true,
+      "priority": 6,
+      "pip_multiplier": 1.0,
+      "session_weight": 0.8
+    }
+  },
+  "filters": {
+    "skip_low_liquidity": true,
+    "skip_wide_spread": true,
+    "skip_extreme_volatility": true,
+    "respect_trading_hours": true,
+    "require_trend": false
+  },
+  "advanced": {
+    "correlation_check": true,
+    "max_correlated_pairs": 3,
+    "correlation_threshold": 0.7,
+    "regime_aware": true,
+    "news_blacklist_hours": 1,
+    "cache_duration_minutes": 30
+  },
+  "scoring": {
+    "method": "weighted_composite",
+    "normalize": true,
+    "percentile_window": 30,
+    "boost_recent_movers": true,
+    "boost_multiplier": 1.2
+  }
+}

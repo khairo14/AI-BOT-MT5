@@ -83,9 +83,9 @@ class MarketScanner:
         self._cache_time: Optional[datetime] = None
         
         # Load configuration
-        config_path = "config/scanner.json"
+        config_path = "config/market_scanner.json"
         if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Scanner config not found: {config_path}")
+            raise FileNotFoundError(f"Market scanner config not found: {config_path}")
         
         with open(config_path, "r") as f:
             self.cfg = json.load(f)
