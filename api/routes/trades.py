@@ -259,10 +259,31 @@ def close_position(
     client: MT5Client = Depends(get_client),
 ):
     """Close an open position by ticket number."""
+    # Get position info before closing for notification
+    import MetaTrader5 as mt5
+    with client._lock:
+        positions = mt5.positions_get(ticket=ticket)
+    pos_info = positions[0] if positions else None
+    
     om = OrderManager(client)
     success = om.close_position(ticket, reason=reason)
     if not success:
         raise HTTPException(status_code=500, detail=f"Failed to close ticket #{ticket}")
+    
+    # Broadcast position_closed notification
+    if pos_info:
+        try:
+            from api.websocket.feed import manager as _ws_manager
+            import asyncio
+            asyncio.create_task(_ws_manager.broadcast_alert({
+                "type": "position_closed",
+                "symbol": pos_info.symbol,
+                "profit": round(pos_info.profit, 2),
+                "strategy": pos_info.comment if pos_info.comment else "",
+            }))
+        except Exception:
+            pass  # WebSocket broadcast is optional
+    
     return {"status": "closed", "ticket": ticket}
 
 

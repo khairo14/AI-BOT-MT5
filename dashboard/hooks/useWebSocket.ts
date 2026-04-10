@@ -105,6 +105,35 @@ export function useWebSocket(symbols: string[]) {
             }
             break;
           }
+          case "circuit_breaker": {
+            const raw = msg.data as Record<string, unknown>;
+            pushNotification({
+              type: "error",
+              title: "Circuit Breaker Triggered",
+              message: `${raw.reason ?? "Drawdown limit reached"} — Trading paused`,
+            });
+            break;
+          }
+          case "position_closed": {
+            const raw = msg.data as Record<string, unknown>;
+            const pnl = raw.profit as number;
+            const pnlStr = pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
+            pushNotification({
+              type: pnl >= 0 ? "success" : "warning",
+              title: `Position Closed — ${raw.symbol}`,
+              message: `${pnlStr} | ${raw.strategy ?? ""}`,
+            });
+            break;
+          }
+          case "optimizer_complete": {
+            const raw = msg.data as Record<string, unknown>;
+            pushNotification({
+              type: "success",
+              title: "Optimizer Complete",
+              message: `${raw.completed ?? 0} jobs finished | Best score: ${((raw.best_score as number ?? 0) * 100).toFixed(1)}%`,
+            });
+            break;
+          }
         }
       } catch {
         // malformed frame — ignore

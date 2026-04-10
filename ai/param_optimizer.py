@@ -42,7 +42,14 @@ CONFIG_DIR = Path(__file__).parent.parent / "config"
 OPT_FILE   = CONFIG_DIR / "optimized_params.json"
 
 MIN_TRADES_FOR_REFINEMENT = 20   # closed trades before live refinement kicks in
-MIN_BACKTEST_SIGNALS      = 10   # discard combos that fired fewer signals (≥10 allows low-frequency strategies like sr_breakout on commodities)
+# Discard combos with fewer signals than these thresholds:
+# Scalping (M5, 250k bars ~2.4yr) needs lower threshold due to extended history
+# Day/swing need higher threshold for statistical significance
+MIN_BACKTEST_SIGNALS: dict[str, int] = {
+    "scalping":     7,    # 250k M5 bars over 2+ years → ~3 signals/year minimum
+    "day_trading":  10,   # 50k H1 bars over 5+ years → ~2 signals/year minimum  
+    "swing":        8,    # 30k H4 bars over 13+ years → ~0.6 signals/year minimum
+}
 MAX_GRID_COMBOS           = 64   # cap to keep backtest fast
 BACKTEST_COOLDOWN_HOURS   = 24   # min hours between automatic re-backtests
 LIVE_REFINE_WIN_THRESH    = 0.45 # re-optimize when win_rate drops below this
@@ -296,6 +303,7 @@ def _backtest_combo(
     symbol: str = "__bt__",
     extra_dfs: "dict | None" = None,
     bt_window: int = 500,
+    trading_type: str = "scalping",
 ) -> tuple[float, float, int, dict[str, dict]]:
     """Walk-forward backtest one param combo.
     Returns (win_rate, avg_rr, n_trades, regime_stats).
@@ -363,7 +371,8 @@ def _backtest_combo(
         i += step
 
     n = len(wins)
-    if n < MIN_BACKTEST_SIGNALS:
+    min_signals = MIN_BACKTEST_SIGNALS.get(trading_type, 10)
+    if n < min_signals:
         return 0.0, 0.0, n, {}
     win_rate = float(np.mean(wins))
     avg_rr   = float(np.mean(rrs))
@@ -688,9 +697,10 @@ class ParamOptimizer:
             wr_train, avg_rr_train, n_train, regime_stats = _backtest_combo(
                 strategy_cls, dispatch, _df_train, combo,
                 cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
-                _extra_dfs_train, bt_window,
+                _extra_dfs_train, bt_window, trading_type,
             )
-            train_score = wr_train * max(avg_rr_train, 0.0) if n_train >= MIN_BACKTEST_SIGNALS else 0.0
+            min_signals = MIN_BACKTEST_SIGNALS.get(trading_type, 10)
+            train_score = wr_train * max(avg_rr_train, 0.0) if n_train >= min_signals else 0.0
             if train_score <= 0.0:
                 continue  # skip combos that don't work on training data
 
@@ -700,10 +710,10 @@ class ParamOptimizer:
                 wr_val, avg_rr_val, n_val, _ = _backtest_combo(
                     strategy_cls, dispatch, _df_val, combo,
                     cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
-                    _extra_dfs_val, bt_window,
+                    _extra_dfs_val, bt_window, trading_type,
                 )
-                # Require minimum signals on validation set too
-                val_score = wr_val * max(avg_rr_val, 0.0) if n_val >= max(MIN_BACKTEST_SIGNALS // 3, 3) else 0.0
+                # Require minimum signals on validation set too (33% of training threshold)
+                val_score = wr_val * max(avg_rr_val, 0.0) if n_val >= max(min_signals // 3, 3) else 0.0
                 # Use blended score: 40% train + 60% validation
                 # Weighted toward validation to penalize overfitting
                 score = 0.4 * train_score + 0.6 * val_score
@@ -718,7 +728,7 @@ class ParamOptimizer:
 
             # Track per-regime best combo
             for regime_label, rs in regime_stats.items():
-                if rs["total"] >= max(MIN_BACKTEST_SIGNALS // 3, 5):
+                if rs["total"] >= max(min_signals // 3, 5):
                     rwr    = rs["wins"] / rs["total"]
                     ravg   = rs["rr_sum"] / rs["total"]
                     rscore = rwr * max(ravg, 0.0)

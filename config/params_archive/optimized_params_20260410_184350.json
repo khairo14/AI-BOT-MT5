@@ -697,6 +697,26 @@
           "tp_rr": 1.8
         }
       }
+    },
+    "GBPJPY": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.5,
+      "tp_rr": 2.2,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.5,
+          "tp_rr": 2.2
+        },
+        "trending_bear": {
+          "lookback_bars": 30,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.2,
+          "tp_rr": 2.2
+        }
+      }
     }
   },
   "fibonacci_rsi": {
@@ -1726,6 +1746,92 @@
           "rsi_max": 60,
           "sl_pips": 10,
           "rr": 2.5
+        }
+      }
+    },
+    "EURUSD": {
+      "ema_fast": 13,
+      "ema_slow": 26,
+      "rsi_min": 40,
+      "rsi_max": 65,
+      "sl_pips": 4,
+      "rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 26,
+          "rsi_min": 40,
+          "rsi_max": 65,
+          "sl_pips": 4,
+          "rr": 3.0
+        }
+      }
+    },
+    "AUDUSD": {
+      "ema_fast": 13,
+      "ema_slow": 21,
+      "rsi_min": 45,
+      "rsi_max": 60,
+      "sl_pips": 6,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 21,
+          "rsi_min": 45,
+          "rsi_max": 60,
+          "sl_pips": 6,
+          "rr": 2.5
+        }
+      }
+    }
+  },
+  "bb_squeeze": {
+    "GBPUSD": {
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 3,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 3,
+          "sl_atr_mult": 1.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "__global__": {
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 3,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 3,
+          "sl_atr_mult": 1.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "EURJPY": {
+      "bb_period": 20,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 7,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 20,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 7,
+          "sl_atr_mult": 1.0,
+          "tp_atr_mult": 3.0
         }
       }
     }

@@ -104,7 +104,7 @@ export const useBotStore = create<BotStore>()(
           timestamp: Date.now(),
         },
         ...state.notifications,
-      ].slice(0, 20),
+      ].slice(0, 50),
     })),
   dismissNotification: (id) =>
     set((state) => ({

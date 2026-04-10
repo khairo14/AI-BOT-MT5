@@ -343,6 +343,24 @@ app.include_router(profitability_routes.router, prefix="/profitability", tags=["
 app.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
 
 
+# Internal endpoint for optimizer completion notification
+@app.post("/internal/optimizer-complete", tags=["Internal"])
+async def optimizer_complete_notification(request: Request):
+    """Receive optimizer completion notification and broadcast via WebSocket."""
+    try:
+        data = await request.json()
+        from api.websocket.feed import manager as _ws_manager
+        await _ws_manager.broadcast_alert({
+            "type": "optimizer_complete",
+            "completed": data.get("completed", 0),
+            "best_score": data.get("best_score", 0.0),
+        })
+        return {"status": "ok"}
+    except Exception as exc:
+        logger.error(f"Optimizer complete notification failed: {exc}")
+        return {"status": "error", "message": str(exc)}
+
+
 @app.get("/health", tags=["Health"])
 @limiter.limit("60/minute")
 def health(request: Request):

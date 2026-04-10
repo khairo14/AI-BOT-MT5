@@ -59,8 +59,13 @@ _STRATEGIES: dict[str, list[str]] = {
     "swing":       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
 }
 
-# Jobs with bars_used >= this threshold are treated as already done and skipped.
-_DONE_BARS_THRESHOLD = 30000
+# Jobs with bars_used >= mode-specific threshold are treated as already done and skipped.
+# Set to ~80% of requested bars to handle broker data limitations
+_DONE_BARS_THRESHOLD: dict[str, int] = {
+    "scalping":     200_000,   # 80% of 250k — handles symbols that only return ~200-250k bars
+    "day_trading":  40_000,    # 80% of 50k  — day trades need at least 40k H1 bars (~4.5 years)
+    "swing":        25_000,    # ~83% of 30k — swing trades need at least 25k H4 bars (~11 years)
+}
 
 
 # ---------------------------------------------------------------------------
@@ -129,11 +134,14 @@ def main() -> None:
             existing = json.loads(status_file.read_text(encoding="utf-8"))
         except Exception:
             pass
-    already_done: set[str] = {
-        k for k, v in existing.items()
-        if v.get("bars_used", 0) >= _DONE_BARS_THRESHOLD
-    }
-    logger.info(f"Already completed (2yr data): {len(already_done)} — skipping")
+    # Mode-aware threshold: check bars_used against the correct threshold for each trading_type
+    already_done: set[str] = set()
+    for k, v in existing.items():
+        ttype = v.get("trading_type", "scalping")  # fallback to scalping if missing
+        threshold = _DONE_BARS_THRESHOLD.get(ttype, 30000)
+        if v.get("bars_used", 0) >= threshold:
+            already_done.add(k)
+    logger.info(f"Already completed: {len(already_done)} jobs — skipping")
 
     # ── Phase 1: fetch all historical data upfront ───────────────────────────
     logger.info("\nPhase 1 — Fetching historical data …")
@@ -248,6 +256,22 @@ def main() -> None:
     )
     logger.info(f"Results written to: {ROOT / 'config' / 'optimized_params.json'}")
     logger.info("=" * 70)
+    
+    # Broadcast optimizer_complete notification
+    try:
+        import requests
+        best_score_val = max(
+            (v.get("best_score", 0.0) for v in optimizer._status.values()),
+            default=0.0,
+        )
+        # Trigger WebSocket broadcast via internal API endpoint (if API is running)
+        requests.post(
+            "http://127.0.0.1:8000/internal/optimizer-complete",
+            json={"completed": success, "best_score": best_score_val},
+            timeout=1.0,
+        )
+    except Exception:
+        pass  # API may not be running — notification is optional
 
 
 if __name__ == "__main__":
