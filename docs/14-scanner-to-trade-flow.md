@@ -1,7 +1,30 @@
 # Market Scanner to Trade Execution - Complete Flow
 
 **Last Updated:** April 10, 2026  
-**Purpose:** Explain end-to-end flow from scanner discovering symbols → placing trades
+**Purpose:** Explain end-to-end flow from scanner discovering symbols → placing trades  
+**Status:** ✅ **BACKEND IMPLEMENTED** (config + engine + API complete)
+
+---
+
+## 📊 Implementation Status
+
+**Completed:**
+- ✅ `config/scanner.json` - Scanner criteria for scalping/day/swing
+- ✅ `engine/market_scanner.py` - Core scanner (850 lines, full metrics calculation)
+- ✅ `api/routes/scanner.py` - REST API endpoints (320 lines)
+- ✅ API integration in `api/main.py` - `/scanner/*` routes registered
+- ✅ Test script `test_scanner.py` - Verify scanner functionality
+
+**Pending:**
+- ⏳ Dashboard UI - `dashboard/app/scanner/page.tsx` (React component)
+- ⏳ Auto-scan scheduler - Background task every 60 minutes
+- ⏳ WebSocket live updates - Push scan results to dashboard
+
+**Next Steps:**
+1. Build React dashboard page (4-5 hours)
+2. Add background scheduler to `api/main.py` lifespan
+3. Test with live MT5 connection
+4. Deploy and validate 3-5 → 15-25 signals/day improvement
 
 ---
 
