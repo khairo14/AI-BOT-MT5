@@ -12,12 +12,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+
+# Load environment variables before any imports that use them
+load_dotenv()
 
 from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes, profitability as profitability_routes, auth as auth_routes, mt5_accounts as mt5_accounts_routes
 from api.websocket.feed import router as ws_router

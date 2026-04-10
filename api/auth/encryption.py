@@ -6,13 +6,10 @@ import base64
 import os
 
 from cryptography.fernet import Fernet
-from dotenv import load_dotenv
 from loguru import logger
 
-# Load environment variables
-load_dotenv()
-
-# Load encryption key from environment
+# Load encryption key from environment (loaded by main.py dotenv)
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
 if not ENCRYPTION_KEY:
