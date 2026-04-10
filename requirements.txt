@@ -21,6 +21,7 @@ slowapi==0.1.9  # Rate limiting middleware (Task #7)
 # --- Authentication ---
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.1.2  # Pin version for passlib compatibility
 cryptography==42.0.5  # AES encryption for MT5 passwords in database
 
 # --- Environment Variables ---

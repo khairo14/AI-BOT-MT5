@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from typing import Generator
 
 from loguru import logger
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -109,7 +109,7 @@ def test_connection() -> bool:
     """Test database connectivity — returns True if successful."""
     try:
         with engine.connect() as conn:
-            result = conn.execute("SELECT 1").scalar()
+            result = conn.execute(text("SELECT 1")).scalar()
             logger.info(f"Database connection OK (result: {result})")
             return True
     except Exception as exc:
