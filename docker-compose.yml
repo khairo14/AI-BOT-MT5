@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-bot-mt5-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aibot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
+      POSTGRES_DB: aibot_mt5
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5433:5432"  # Use 5433 to avoid conflicts with existing PostgreSQL installs
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d  # Auto-run init scripts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aibot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aibot-network
+
+  # pgAdmin for database GUI management (optional, comment out if not needed)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ai-bot-mt5-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@aibot.local
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - aibot-network
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  aibot-network:
+    driver: bridge

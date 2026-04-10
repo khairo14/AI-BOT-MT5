@@ -44,6 +44,11 @@ if exist "%LOG_DIR%\api.pid"   del "%LOG_DIR%\api.pid"   >nul 2>&1
 if exist "%LOG_DIR%\dash.pid"  del "%LOG_DIR%\dash.pid"  >nul 2>&1
 if exist "%LOG_DIR%\pids.json" del "%LOG_DIR%\pids.json" >nul 2>&1
 
+:: -- stop PostgreSQL Docker container --
+echo   Stopping PostgreSQL database...
+docker-compose down >nul 2>&1
+echo   [OK] PostgreSQL stopped
+
 echo.
 echo ================================================
 echo   Bot stopped.

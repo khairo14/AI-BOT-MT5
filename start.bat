@@ -62,6 +62,21 @@ if errorlevel 1 (
 :: -- create log dir --
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
+:: -- start PostgreSQL via Docker Compose --
+echo   Starting PostgreSQL database...
+where docker >nul 2>&1
+if errorlevel 1 (
+    echo   [FAIL] Docker not found. Install Docker Desktop from https://docker.com
+    goto :fail
+)
+docker-compose up -d
+if errorlevel 1 (
+    echo   [FAIL] Docker Compose failed to start database.
+    goto :fail
+)
+timeout /t 3 /nobreak >nul
+echo   [OK] PostgreSQL started (localhost:5433)
+
 :: -- read API host/port from .env --
 set "API_HOST=127.0.0.1"
 set "API_PORT=8000"
