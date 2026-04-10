@@ -54,6 +54,7 @@ _last_bar_time: dict[str, object] = {
 }
 
 _runner_task: Optional[asyncio.Task] = None
+_news_refresh_task: Optional[asyncio.Task] = None
 _mode_tasks: dict[str, asyncio.Task] = {}  # per-mode task refs to detect accumulation
 _risk_manager = None  # exposed so /risk/status can read live state
 _paused: bool = False  # set True during account mode switch
@@ -301,10 +302,50 @@ def _signal_to_dict(sig, mode: str) -> dict:
 
 def start_runner_loop(client, order_manager, risk_manager) -> None:
     """Start the background strategy runner (idempotent)."""
-    global _runner_task, _risk_manager
+    global _runner_task, _news_refresh_task, _risk_manager
     _risk_manager = risk_manager
     if _runner_task is None or _runner_task.done():
         _runner_task = asyncio.create_task(
             _runner_loop(client, order_manager, risk_manager)
         )
         logger.info("Strategy runner task created.")
+    if _news_refresh_task is None or _news_refresh_task.done():
+        _news_refresh_task = asyncio.create_task(_news_refresh_loop())
+        logger.info("News filter auto-refresh task created.")
+
+
+async def _news_refresh_loop() -> None:
+    """
+    Background task that auto-refreshes the news filter cache.
+    
+    Runs every N minutes (configurable via risk.json news_filter.cache_minutes).
+    Ensures the Forex Factory calendar stays current for the next 7-14 days
+    to prevent trading during surprise high-impact news events.
+    """
+    from engine.news_filter import news_filter
+    
+    # Initial refresh on startup (non-blocking)
+    logger.info("News filter: initial refresh on startup...")
+    try:
+        await asyncio.to_thread(news_filter._refresh)
+        logger.info("News filter: initial refresh complete")
+    except Exception as exc:
+        logger.warning(f"News filter: initial refresh failed: {exc}")
+    
+    # Read cache interval from config (default 60 minutes)
+    try:
+        _risk_cfg = json.loads((CONFIG_DIR / "risk.json").read_text(encoding="utf-8"))
+        _cache_minutes = _risk_cfg.get("news_filter", {}).get("cache_minutes", 60)
+    except Exception:
+        _cache_minutes = 60
+    
+    _interval_seconds = _cache_minutes * 60
+    logger.info(f"News filter: auto-refresh every {_cache_minutes} minutes")
+    
+    while True:
+        await asyncio.sleep(_interval_seconds)
+        try:
+            await asyncio.to_thread(news_filter._refresh)
+            # news_filter._refresh() already logs event count, so no extra log needed
+        except Exception as exc:
+            logger.warning(f"News filter: auto-refresh failed: {exc}")
