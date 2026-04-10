@@ -215,3 +215,72 @@ def set_circuit_breaker(body: dict):
 
     rm.set_circuit_breaker_enabled(enabled)
     return {"ok": True, "circuit_breaker_enabled": enabled}
+
+
+# ---------------------------------------------------------------------------
+# GET /risk/presets — Task #12
+# ---------------------------------------------------------------------------
+
+@router.get("/presets")
+def get_risk_presets():
+    """
+    Returns all available risk presets and current selection.
+    
+    Response:
+      - current:  Name of currently active preset
+      - presets:  Dict of {preset_name: config} for all available presets
+    """
+    from engine.risk_manager import RiskManager
+    try:
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is None:
+            raise AttributeError
+    except (ImportError, AttributeError):
+        rm = RiskManager()
+
+    return rm.get_available_presets()
+
+
+# ---------------------------------------------------------------------------
+# POST /risk/presets/select — Task #12
+# ---------------------------------------------------------------------------
+
+@router.post("/presets/select")
+def select_risk_preset(body: dict):
+    """
+    Set the active risk preset.
+    
+    Body:
+      - preset: Name of preset to activate (conservative/moderate/aggressive)
+    
+    Returns:
+      - ok:      True if successful
+      - message: Success/error message
+      - current: Name of now-active preset
+    """
+    from engine.risk_manager import RiskManager
+    try:
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is None:
+            raise AttributeError
+    except (ImportError, AttributeError):
+        rm = RiskManager()
+
+    preset_name = body.get("preset")
+    if not preset_name or not isinstance(preset_name, str):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="'preset' field required (string)")
+
+    success, message = rm.set_risk_preset(preset_name)
+    
+    if not success:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {
+        "ok": True,
+        "message": message,
+        "current": preset_name
+    }

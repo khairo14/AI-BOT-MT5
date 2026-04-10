@@ -183,6 +183,7 @@ const NAV_SECTIONS = [
     title: "System",
     items: [
       { href: "/notifications", label: "Notifications", icon: "🔔" },
+      { href: "/risk-presets", label: "Risk Presets", icon: "⚖️" },
       { href: "/guide", label: "Trading Guide", icon: "📖" },
       { href: "/settings", label: "Settings", icon: "⚙️" },
     ],

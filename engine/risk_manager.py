@@ -17,11 +17,21 @@ from loguru import logger
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
 _STATE_PATH = Path(__file__).parent.parent / "data" / "risk_state.json"
+_PRESETS_PATH = Path(__file__).parent.parent / "config" / "risk_presets.json"
 
 
 def _load_config() -> dict:
     with open(CONFIG_PATH, "r") as f:
         return json.load(f)
+
+
+def _load_presets() -> dict:
+    try:
+        with open(_PRESETS_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.warning(f"Risk presets not found at {_PRESETS_PATH}, using defaults")
+        return {"current_preset": "moderate", "presets": {}}
 
 
 class RiskManager:
@@ -32,6 +42,8 @@ class RiskManager:
 
     def __init__(self, config: Optional[dict] = None):
         self._config = config or _load_config()
+        self._presets_data = _load_presets()
+        self._current_preset = self._presets_data.get("current_preset", "moderate")
 
         # Drawdown tracking (reset daily / weekly)
         self._day_start_balance: Optional[float] = None
@@ -172,6 +184,12 @@ class RiskManager:
 
         risk_pct = risk_pct or self._config["risk_per_trade_pct"]
         max_risk_pct = self._config["max_risk_per_trade_pct"]
+        
+        # Apply risk preset multiplier
+        preset = self._get_current_preset_config()
+        if preset:
+            risk_pct *= preset.get("risk_per_trade_multiplier", 1.0)
+        
         risk_pct = min(risk_pct, max_risk_pct)
 
         risk_amount = _balance * (risk_pct / 100)
@@ -553,6 +571,74 @@ class RiskManager:
                 k: v.isoformat() if v else None
                 for k, v in self._paused_modes.items()
             },
+            "current_risk_preset": self._current_preset,
         }
+
+    # ------------------------------------------------------------------
+    # Risk Presets (Task #12)
+    # ------------------------------------------------------------------
+
+    def _get_current_preset_config(self) -> Optional[dict]:
+        """Get the configuration for the currently active preset."""
+        if not self._presets_data.get("presets"):
+            return None
+        return self._presets_data["presets"].get(self._current_preset)
+
+    def get_available_presets(self) -> dict:
+        """Return all available presets with their configurations."""
+        return {
+            "current": self._current_preset,
+            "presets": self._presets_data.get("presets", {})
+        }
+
+    def set_risk_preset(self, preset_name: str) -> tuple[bool, str]:
+        """
+        Set the active risk preset (conservative/moderate/aggressive).
+        Returns (success, message).
+        """
+        presets = self._presets_data.get("presets", {})
+        if preset_name not in presets:
+            available = ", ".join(presets.keys())
+            return False, f"Unknown preset '{preset_name}'. Available: {available}"
+
+        self._current_preset = preset_name
+        self._presets_data["current_preset"] = preset_name
+
+        # Save to disk
+        try:
+            with open(_PRESETS_PATH, "w") as f:
+                json.dump(self._presets_data, f, indent=2)
+            logger.info(f"Risk preset changed to '{preset_name}'")
+            return True, f"Risk preset set to '{preset_name}'"
+        except Exception as exc:
+            logger.error(f"Failed to save preset selection: {exc}")
+            return False, f"Failed to save: {exc}"
+
+    def get_adjusted_config(self, key: str, default=None):
+        """
+        Get a config value with preset multipliers applied.
+        Useful for drawdown limits, max concurrent trades, etc.
+        """
+        base_value = self._config.get(key, default)
+        preset = self._get_current_preset_config()
+
+        if not preset:
+            return base_value
+
+        # Apply preset overrides for specific keys
+        if key == "drawdown":
+            if isinstance(base_value, dict):
+                adjusted = base_value.copy()
+                adjusted["daily_limit_pct"] = preset.get("max_daily_loss_pct", base_value.get("daily_limit_pct", 5.0))
+                adjusted["weekly_limit_pct"] = preset.get("max_weekly_loss_pct", base_value.get("weekly_limit_pct", 10.0))
+                adjusted["max_consecutive_losses"] = preset.get("max_consecutive_losses", base_value.get("max_consecutive_losses", 5))
+                return adjusted
+
+        elif key == "max_concurrent_trades":
+            return preset.get("max_concurrent_trades", base_value)
+
+        return base_value
+
+
 # Application-level singleton
 risk_manager = RiskManager()
