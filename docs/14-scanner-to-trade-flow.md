@@ -38,7 +38,7 @@ The market scanner transforms the system from **passive** (only trading hardcode
    ├─ Filters: visible=true, select=true, tradeable=true
    └─ Result: ~100-120 tradeable symbols
    ↓
-3. For each symbol, calculate opportunity score:
+3. For each symbol, calculate opportunity score **per trading type**:
    ├─ Fetch OHLCV bars (200 bars for scalping/day, 100 for swing)
    ├─ Calculate metrics:
    │  ├─ ATR (Average True Range) → Volatility
@@ -47,14 +47,27 @@ The market scanner transforms the system from **passive** (only trading hardcode
    │  ├─ Volume (broker tick volume)
    │  ├─ Regime classification (trending/ranging/breakout)
    │  └─ Time since last news event
-   └─ Score: 0-100 based on criteria match
+   └─ Score: 0-100 based on **different criteria per trading type**:
+      ├─ SCALPING: Tight spread + ranging regime + high volatility
+      ├─ DAY TRADING: Trending market + ADX >25 + acceptable spread
+      └─ SWING: Very strong trend + ADX >30 + multi-day pattern
    ↓
-4. Rank all symbols by score (descending)
+4. Rank symbols separately for each trading type:
+   ├─ Scalping top 20 (sorted by scalping score)
+   ├─ Day Trading top 20 (sorted by day trading score)
+   └─ Swing top 20 (sorted by swing score)
    ↓
-5. Filter by threshold (score >= 70 for "good opportunity")
+   **Note:** Same symbol (e.g., EURUSD) can appear in multiple lists
+           with different scores. EURUSD might score 65 for scalping
+           but 88 for swing due to different criteria.
    ↓
-6. Return top 20 results per trading type
+5. Filter each list by threshold (score >= 70 for "good opportunity")
+   ↓
+6. Return **3 separate lists** (top 20 per trading type)
    └─ Store in database: scanner_results table
+      ├─ scalping_opportunities: [{symbol, score, reason}, ...]
+      ├─ day_trading_opportunities: [{symbol, score, reason}, ...]
+      └─ swing_opportunities: [{symbol, score, reason}, ...]
 
 ┌─────────────────────────────────────────────────────────────────┐
 │  PHASE 2: USER REVIEW & SELECTION (Dashboard)                   │
@@ -62,21 +75,59 @@ The market scanner transforms the system from **passive** (only trading hardcode
 
 7. User opens Scanner Dashboard (/scanner page)
    ↓
-8. Dashboard displays top opportunities:
+8. Dashboard displays top opportunities **grouped by trading type**:
    ┌──────────────────────────────────────────────────────────┐
-   │ SCALPING - Top Opportunities                             │
+   │ Market Scanner - Top Opportunities                       │
+   │ [Scalping] [Day Trading] [Swing]  🔄 Last scan: 2m ago   │
+   └──────────────────────────────────────────────────────────┘
+   
+   ┌──────────────────────────────────────────────────────────┐
+   │ 📊 SCALPING - Top 10 (M1-M5)                             │
    │ ┌────────────────────────────────────────────────────┐  │
-   │ │ NZDUSD        Score: 87.5    [Add Symbol +]        │  │
-   │ │ ✓ High volatility (0.82% ATR)                      │  │
-   │ │ ✓ Tight spread (1.5 pips)                          │  │
-   │ │ ✓ Ranging regime (mean-reversion setup)            │  │
-   │ │ Metrics: ADX 18 | Volume 15k | Last update: 2m ago │  │
+   │ │ #1 NZDUSD     Score: 87.5    [+ Add Symbol]        │  │
+   │ │    ✓ High volatility (0.82% ATR)                   │  │
+   │ │    ✓ Tight spread (1.5 pips)                       │  │
+   │ │    ✓ Ranging regime (mean-reversion setup)         │  │
+   │ │    Metrics: ADX 18 | Volume 15k                    │  │
    │ └────────────────────────────────────────────────────┘  │
    │ ┌────────────────────────────────────────────────────┐  │
-   │ │ GBPJPY        Score: 84.2    [Add Symbol +]        │  │
-   │ │ ✓ Breakout pattern detected                        │  │
-   │ │ ✓ Good volume (12k)                                │  │
+   │ │ #2 GBPJPY     Score: 84.2    [+ Add Symbol]        │  │
+   │ │    ✓ Breakout pattern detected                     │  │
+   │ │    ✓ Good volume (12k) | ADX 22                    │  │
    │ └────────────────────────────────────────────────────┘  │
+   │ │ #3 EURJPY     Score: 81.7    [+ Add Symbol]        │  │
+   │ │ ... (Show top 10, expandable to top 20)            │  │
+   └──────────────────────────────────────────────────────────┘
+   
+   ┌──────────────────────────────────────────────────────────┐
+   │ 📈 DAY TRADING - Top 10 (M15-H1)                         │
+   │ ┌────────────────────────────────────────────────────┐  │
+   │ │ #1 GOLD       Score: 92.3    [+ Add Symbol]        │  │
+   │ │    ✓ Strong trend (ADX 42)                         │  │
+   │ │    ✓ Breakout pattern                              │  │
+   │ │    ✓ 1.5% daily range                              │  │
+   │ │    Metrics: Spread 3.5 pips | Volume 25k           │  │
+   │ └────────────────────────────────────────────────────┘  │
+   │ │ #2 BTCUSD     Score: 88.9    [+ Add Symbol]        │  │
+   │ │    ✓ High volatility (2.1% ATR) | ADX 38           │  │
+   │ └────────────────────────────────────────────────────┘  │
+   │ │ #3 GBPUSD     Score: 85.4    [+ Add Symbol]        │  │
+   │ │ ... (Show top 10, expandable to top 20)            │  │
+   └──────────────────────────────────────────────────────────┘
+   
+   ┌──────────────────────────────────────────────────────────┐
+   │ 📊 SWING TRADING - Top 10 (H4-D1)                        │
+   │ ┌────────────────────────────────────────────────────┐  │
+   │ │ #1 Tesla      Score: 90.1    [+ Add Symbol]        │  │
+   │ │    ✓ Very strong trend (ADX 48)                    │  │
+   │ │    ✓ 3.2% weekly range                             │  │
+   │ │    ✓ Confirmed uptrend (5-day)                     │  │
+   │ └────────────────────────────────────────────────────┘  │
+   │ │ #2 EURUSD     Score: 87.6    [+ Add Symbol]        │  │
+   │ │    ✓ Trending market | ADX 35                      │  │
+   │ └────────────────────────────────────────────────────┘  │
+   │ │ #3 US500Cash  Score: 84.3    [+ Add Symbol]        │  │
+   │ │ ... (Show top 10, expandable to top 20)            │  │
    └──────────────────────────────────────────────────────────┘
    ↓
 9. User clicks "Add Symbol +"
@@ -333,7 +384,76 @@ The market scanner transforms the system from **passive** (only trading hardcode
 
 ---
 
-## 📊 Data Flow Summary
+## � API Response Structure
+
+**Scanner API returns grouped results:**
+```json
+GET /scanner/scan
+Response:
+{
+  "scan_time": "2026-04-10T14:30:00Z",
+  "total_symbols_scanned": 142,
+  "results": {
+    "scalping": [
+      {
+        "rank": 1,
+        "symbol": "NZDUSD",
+        "score": 87.5,
+        "reason": "High volatility (0.82% ATR), tight spread (1.5 pips), ranging regime",
+        "metrics": {
+          "atr_pct": 0.82,
+          "spread_pips": 1.5,
+          "adx": 18,
+          "regime": "ranging",
+          "volume_24h": 15000
+        }
+      },
+      {
+        "rank": 2,
+        "symbol": "GBPJPY",
+        "score": 84.2,
+        "reason": "Breakout pattern, good volume",
+        "metrics": { ... }
+      }
+      // ... up to 20 results
+    ],
+    "day_trading": [
+      {
+        "rank": 1,
+        "symbol": "GOLD",
+        "score": 92.3,
+        "reason": "Strong trend (ADX 42), breakout pattern, 1.5% daily range",
+        "metrics": {
+          "atr_pct": 1.48,
+          "spread_pips": 3.5,
+          "adx": 42,
+          "regime": "trending",
+          "trend_strength": 0.78
+        }
+      }
+      // ... up to 20 results
+    ],
+    "swing": [
+      {
+        "rank": 1,
+        "symbol": "Tesla",
+        "score": 90.1,
+        "reason": "Very strong trend (ADX 48), 3.2% weekly range",
+        "metrics": { ... }
+      }
+      // ... up to 20 results
+    ]
+  }
+}
+```
+
+**Important:** Same symbol can appear in multiple trading types with different scores:
+- EURUSD: 65 (scalping), 88 (swing) ← Different criteria evaluate differently
+- GOLD: 75 (scalping), 92 (day trading) ← Strong trend better for day trading
+
+---
+
+## �📊 Data Flow Summary
 
 **User Symbols Database:**
 ```sql
