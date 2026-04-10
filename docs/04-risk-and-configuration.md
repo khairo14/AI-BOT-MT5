@@ -13,21 +13,24 @@
 ## Per-Trade Risk
 
 | Parameter | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `risk_per_trade_pct` | `1.0` | % of current account balance risked per trade |
 | `max_risk_per_trade_pct` | `2.0` | Hard ceiling — no single trade can exceed this |
 | `risk_reward_min` | `1.5` | Minimum R:R ratio; signals below this are discarded before scoring |
 | `sl_required` | `true` | Enforced in order_manager.py at code level — not just config |
 
 **Position size formula (MT5-native):**
-```
+
+```text
 sl_ticks    = abs(entry - sl) / tick_size
 risk_amount = balance × risk_pct / 100
 lot         = floor(risk_amount / (sl_ticks × tick_value) / lot_step) × lot_step
 ```
+
 Floor-rounded (never rounds up — avoids over-risking). Warns in logs when broker `min_lot` forces actual risk above intended.
 
 **Additional lot sizing layers applied in order:**
+
 1. Base lot from formula above
 2. RL risk_factor multiplier (×0.60–1.50)
 3. Volatility adjustment (ATR% vs baseline, up to ×0.50 reduction)
@@ -38,7 +41,7 @@ Floor-rounded (never rounds up — avoids over-risking). Warns in logs when brok
 ## Concurrent Trade Limits
 
 | Mode | Default Max | Configurable |
-|---|---|---|
+| --- | --- | --- |
 | Scalping | 3 | 1–10 |
 | Day Trading | 5 | 1–15 |
 | Swing | 8 | 1–20 |
@@ -55,7 +58,7 @@ Prevents compounding losses when a macro event (DXY spike, crypto liquidation ca
 **8 asset groups — direction-aware:**
 
 | Group | Examples |
-|---|---|
+| --- | --- |
 | USD Short (BUY weakens USD) | EURUSD, GBPUSD, AUDUSD, NZDUSD, GOLD |
 | USD Long (BUY strengthens USD) | USDJPY, USDCAD, USDCHF |
 | Crypto | BTCUSD, ETHUSD, XRPUSD, SOLUSD |
@@ -72,7 +75,7 @@ Prevents compounding losses when a macro event (DXY spike, crypto liquidation ca
 ## Drawdown Circuit Breakers
 
 | Parameter | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `daily_limit_pct` | `5.0` | Daily loss ≥ 5% of day-start balance → all modes pause until midnight UTC |
 | `weekly_limit_pct` | `10.0` | Weekly loss ≥ 10% → all modes pause until Monday UTC |
 | `max_consecutive_losses` | `5` | Per-mode: 5 consecutive losses → mode pauses for `consecutive_loss_pause_hours` |
@@ -85,6 +88,7 @@ Prevents compounding losses when a macro event (DXY spike, crypto liquidation ca
 **Persistence:** Circuit breaker state (halted flags, balance anchors, consecutive loss counters, paused modes) is saved to `data/risk_state.json` after every update and restored on restart. A server crash does not clear accumulated drawdown context.
 
 **Behaviour when triggered:**
+
 - No new trades are opened
 - Existing open trades are NOT forcibly closed — they run to natural SL/TP
 - Circuit breaker events are broadcast to all connected dashboard clients via WebSocket
@@ -97,7 +101,7 @@ Prevents compounding losses when a macro event (DXY spike, crypto liquidation ca
 The bot checks the Forex Factory economic calendar before opening any trade affected by the filter.
 
 | Parameter | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `enabled` | `true` | Globally enable/disable |
 | `pause_minutes_before` | `30` | Pause new entries 30 min before high-impact events |
 | `pause_minutes_after` | `15` | Resume 15 min after the event |
@@ -117,7 +121,7 @@ The bot checks the Forex Factory economic calendar before opening any trade affe
 Certain instruments should not be traded outside their active exchange hours.
 
 | Instrument | Active Hours (UTC) | Bot Behaviour |
-|---|---|---|
+| --- | --- | --- |
 | Forex Majors | 07:00–21:00 Mon–Fri | Scalp/day signals suppressed |
 | US Stock CFDs | 14:30–21:00 Mon–Fri | Signals suppressed |
 | EU Indices (GER40) | 08:00–16:30 Mon–Fri | Signals suppressed |
@@ -154,7 +158,7 @@ If the current spread exceeds the limit, the signal is rejected with `"Spread to
 Pending manual signals expire after one bar's worth of time for their timeframe:
 
 | Timeframe | Expiry |
-|---|---|
+| --- | --- |
 | M1 | 60 s |
 | M5 | 300 s |
 | H1 | 3600 s |
@@ -169,7 +173,7 @@ When a signal expires, its status is set to `"expired"` and broadcast to all das
 
 When a signal is generated, entry/SL/TP are calculated from the bar's close price. By the time the order is placed (especially for scalping), the live tick may have moved. Order manager reanchors SL/TP to the live fill price before sending:
 
-```
+```text
 sl_dist = abs(signal_entry - signal_sl)
 live_sl = live_price - sl_dist  (for BUY)
 live_tp = live_price + tp_dist  (for BUY)
@@ -184,10 +188,12 @@ This prevents "Invalid stops" broker rejections and stops the SL from being hit 
 Applied by `_poll_outcome` which monitors every open position every 30 seconds:
 
 **Day Trading positions:**
+
 1. When price hits TP1: close 50% of position, move SL to entry (breakeven)
 2. After TP1: trail remaining position with ATR(14, H1) × 1.5. If ATR unavailable, trail at 50% of original SL distance.
 
 **Swing positions:**
+
 1. When price reaches 50% of TP distance: move SL to entry (breakeven)
 2. After breakeven: trail with ATR(14, H4) × 2.0. Falls back to 50% of original SL distance.
 

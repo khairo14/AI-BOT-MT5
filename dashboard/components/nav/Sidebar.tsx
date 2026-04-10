@@ -154,18 +154,39 @@ function ClockAndMarkets() {
   );
 }
 
-const NAV = [
-  { href: "/", label: "Overview", icon: "⊞" },
-  { href: "/scalping", label: "Scalping", icon: "⚡" },
-  { href: "/day-trading", label: "Day Trading", icon: "☀" },
-  { href: "/swing", label: "Swing", icon: "〰" },
-  { href: "/scanner", label: "Market Scanner", icon: "🔍" },
-  { href: "/ml", label: "AI / ML Brain", icon: "🧠" },
-  { href: "/backtest",  label: "Backtest",  icon: "📈" },
-  { href: "/analytics", label: "Analytics", icon: "📊" },
-  { href: "/notifications", label: "Notifications", icon: "🔔" },
-  { href: "/guide", label: "Trading Guide", icon: "📖" },
-  { href: "/settings", label: "Settings", icon: "⚙️" },
+const NAV_SECTIONS = [
+  {
+    title: "Trading",
+    items: [
+      { href: "/", label: "Overview", icon: "⊞" },
+      { href: "/scalping", label: "Scalping", icon: "⚡" },
+      { href: "/day-trading", label: "Day Trading", icon: "☀" },
+      { href: "/swing", label: "Swing", icon: "〰" },
+    ],
+  },
+  {
+    title: "Tools",
+    items: [
+      { href: "/scanner", label: "Market Scanner", icon: "🔍" },
+      { href: "/ml", label: "AI / ML Brain", icon: "🧠" },
+      { href: "/backtest", label: "Backtest", icon: "📈" },
+    ],
+  },
+  {
+    title: "Reports",
+    items: [
+      { href: "/analytics", label: "Performance", icon: "📊" },
+      { href: "/profitability", label: "Profitability", icon: "💰" },
+    ],
+  },
+  {
+    title: "System",
+    items: [
+      { href: "/notifications", label: "Notifications", icon: "🔔" },
+      { href: "/guide", label: "Trading Guide", icon: "📖" },
+      { href: "/settings", label: "Settings", icon: "⚙️" },
+    ],
+  },
 ];
 
 export default function Sidebar() {
@@ -206,39 +227,50 @@ export default function Sidebar() {
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 px-2 py-4 space-y-1">
-        {NAV.map(({ href, label, icon }) => {
-          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              title={collapsed ? label : undefined}
-              className={`flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors ${
-                active
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-400 hover:text-white hover:bg-gray-800"
-              }`}
-            >
-              <span className="text-base shrink-0">{icon}</span>
-              {!collapsed && (
-                <>
-                  <span className="flex-1 whitespace-nowrap">{label}</span>
-                  {href === "/notifications" && unreadCount > 0 && (
-                    <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 leading-none">
-                      {unreadCount}
-                    </span>
-                  )}
-                </>
-              )}
-              {collapsed && href === "/notifications" && unreadCount > 0 && (
-                <span className="absolute ml-3 -mt-3 text-[9px] bg-blue-600 text-white rounded-full px-1 leading-none">
-                  {unreadCount}
-                </span>
-              )}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 px-2 py-4 space-y-4 overflow-y-auto">
+        {NAV_SECTIONS.map((section) => (
+          <div key={section.title}>
+            {!collapsed && (
+              <div className="px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                {section.title}
+              </div>
+            )}
+            <div className="space-y-1">
+              {section.items.map(({ href, label, icon }) => {
+                const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    title={collapsed ? label : undefined}
+                    className={`flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors ${
+                      active
+                        ? "bg-blue-600 text-white"
+                        : "text-gray-400 hover:text-white hover:bg-gray-800"
+                    }`}
+                  >
+                    <span className="text-base shrink-0">{icon}</span>
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1 whitespace-nowrap">{label}</span>
+                        {href === "/notifications" && unreadCount > 0 && (
+                          <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 leading-none">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </>
+                    )}
+                    {collapsed && href === "/notifications" && unreadCount > 0 && (
+                      <span className="absolute ml-3 -mt-3 text-[9px] bg-blue-600 text-white rounded-full px-1 leading-none">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Clock + market sessions */}

@@ -9,6 +9,7 @@
 ## 📊 Implementation Status
 
 **✅ COMPLETE - All Components Operational:**
+
 - ✅ `config/scanner.json` - Scanner criteria for scalping/day/swing (140 lines)
 - ✅ `engine/market_scanner.py` - Core scanner engine (850 lines, full metrics)
 - ✅ `api/routes/scanner.py` - REST API endpoints (320 lines, 9 endpoints)
@@ -19,12 +20,14 @@
 - ✅ `test_scanner.py` - Validation script (100 lines)
 
 **Implementation Metrics:**
+
 - **Total Lines of Code:** ~1,700 (backend + frontend + config)
 - **Development Time:** 1 day (vs 10 day estimate)
 - **Git Commits:** 5 commits
 - **Test Coverage:** Manual test script + live API endpoints
 
 **Operational Features:**
+
 - Scans 150+ symbols from MT5 broker (forex, crypto, stocks, indices, commodities)
 - Groups results by trading type with separate criteria
 - Composite scoring: volatility, spread, trend, liquidity, momentum
@@ -35,11 +38,13 @@
 - Color-coded score visualization (green >70, yellow 50-70, red <50)
 
 **Pending (Production Validation):**
+
 - ⏳ Live MT5 testing - Awaits broker connection
 - ⏳ 2-week monitoring period - Track 5x signal increase
 - ⏳ Performance optimization - If needed based on scan times
 
 **Next Steps:**
+
 1. Connect to live MT5 account
 2. Run test_scanner.py to validate functionality
 3. Monitor signals for 2 weeks
@@ -53,11 +58,13 @@
 The market scanner transforms the system from **passive** (only trading hardcoded symbols) to **active** (hunting for best opportunities across 100+ symbols).
 
 **Current Problem:**
+
 - 27 hardcoded symbols → only 3-5 signals/day
 - Missing 90% of market opportunities
 - Can't adapt when EURUSD goes flat but NZDUSD is pumping
 
 **Scanner Solution:**
+
 - Scans broker's full catalog (100+ symbols)
 - Ranks by volatility, spread, trend strength, regime
 - Auto-discovers hot symbols
@@ -68,7 +75,7 @@ The market scanner transforms the system from **passive** (only trading hardcode
 
 ## 🔄 Complete Flow Diagram
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │  PHASE 1: DISCOVERY (Every 15 minutes)                          │
 └─────────────────────────────────────────────────────────────────┘
@@ -430,6 +437,7 @@ The market scanner transforms the system from **passive** (only trading hardcode
 ## � API Response Structure
 
 **Scanner API returns grouped results:**
+
 ```json
 GET /scanner/scan
 Response:
@@ -491,6 +499,7 @@ Response:
 ```
 
 **Important:** Same symbol can appear in multiple trading types with different scores:
+
 - EURUSD: 65 (scalping), 88 (swing) ← Different criteria evaluate differently
 - GOLD: 75 (scalping), 92 (day trading) ← Strong trend better for day trading
 
@@ -499,6 +508,7 @@ Response:
 ## �📊 Data Flow Summary
 
 **User Symbols Database:**
+
 ```sql
 -- Initially: 27 hardcoded symbols
 SELECT * FROM user_symbols WHERE user_id=1;
@@ -516,6 +526,7 @@ GBPJPY   | forex       | true    | scanner_auto   | 84.2
 ```
 
 **Signal Generation Loop:**
+
 ```python
 # Before scanner: Only 27 symbols checked
 for symbol in ["EURUSD", "GBPUSD", ...]:  # Hardcoded
@@ -528,7 +539,8 @@ for symbol in user_symbols:  # 27 default + X scanner-added
 ```
 
 **Execution Flow:**
-```
+
+```text
 Signal Generated
     ↓
 Risk Checks (10+ validation rules)
@@ -555,20 +567,26 @@ Scanner Re-evaluates (next cycle)
 ## 🎯 Key Decision Points
 
 ### Decision 1: Add Symbol or Not?
+
 **Trigger:** Scanner shows NZDUSD with 87.5 score  
 **User Choice:**
+
 - ✅ Add → Signal generation starts for NZDUSD
 - ❌ Skip → NZDUSD ignored, rescanned next cycle
 
 ### Decision 2: Execute Signal or Not?
+
 **Trigger:** Signal confidence 0.78 (above 0.65 threshold)  
 **System Choice:**
+
 - **Manual mode:** Wait for user approval
 - **Auto mode:** Execute immediately (if risk checks pass)
 
 ### Decision 3: Close Position or Hold?
+
 **Trigger:** Position in profit, TP 5 pips away  
 **System Behavior:**
+
 - TP hit → Auto-close
 - Manual close → User decides
 - Trailing stop → System adjusts SL automatically
@@ -578,7 +596,7 @@ Scanner Re-evaluates (next cycle)
 ## 🔄 Scanner Impact - Before vs After
 
 | Metric | Before Scanner | After Scanner | Improvement |
-|--------|---------------|---------------|-------------|
+| -------- | --------------- | --------------- | ------------- |
 | **Symbols monitored** | 27 (hardcoded) | 50-100 (dynamic) | 3-4x |
 | **Signals per day** | 3-5 | 15-25 | 5x |
 | **Adaptability** | None | Real-time | ∞ |
@@ -591,14 +609,17 @@ Scanner Re-evaluates (next cycle)
 ## 🚨 Important Notes
 
 ### LSTM Model Availability
+
 **Scanner discovers NZDUSD (new symbol), but no LSTM model exists yet:**
+
 - ✅ System still works: Uses strategy signals only (EMA, RSI, MACD)
 - ✅ Confidence score lower (0.60-0.65 vs 0.75-0.85 with LSTM)
 - ⚠️ LSTM training triggered after 20 trades on NZDUSD
 - ✅ After training: LSTM predictions improve signal quality
 
 **Gradual LSTM expansion:**
-```
+
+```text
 Week 1: 27 LSTM models (hardcoded symbols)
 Week 2: 32 LSTM models (scanner added 5 symbols with 20+ trades)
 Week 3: 40 LSTM models (more scanner symbols accumulated data)
@@ -606,7 +627,9 @@ Week 4: 50+ LSTM models (system now covers top opportunities)
 ```
 
 ### Risk Validation is MANDATORY
+
 **Even scanner-discovered symbols must pass all risk checks:**
+
 - Circuit breakers (daily loss, consecutive losses)
 - Position limits (per symbol, per type, total)
 - Correlation guard (no excessive exposure to correlated assets)
@@ -615,7 +638,8 @@ Week 4: 50+ LSTM models (system now covers top opportunities)
 - Spread gate (reject if spread too wide)
 
 **Example rejection:**
-```
+
+```text
 Scanner: "GBPJPY score 84.2, add symbol!"
 User: "Added GBPJPY"
 Signal Bus: "GBPJPY BUY signal, confidence 0.72"
@@ -624,8 +648,10 @@ Risk Manager: "REJECT - Already have 2 JPY crosses open (correlation)"
 ```
 
 ### Auto-Add Possibility (Future)
+
 **Current flow:** Manual user approval required  
 **Future enhancement:** Auto-add symbols with score >85
+
 ```python
 # config/scanner.json
 {
@@ -641,6 +667,7 @@ Risk Manager: "REJECT - Already have 2 JPY crosses open (correlation)"
 ## 💡 Example End-to-End Scenario
 
 **Time: 14:00 UTC**
+
 1. Scanner runs (scheduled every 15 minutes)
 2. Ranks 142 symbols from XM broker
 3. Top result: NZDUSD (87.5 score)
@@ -699,18 +726,21 @@ Risk Manager: "REJECT - Already have 2 JPY crosses open (correlation)"
 
 ## 🔧 Technical Components Modified
 
-### New Files Created:
+### New Files Created
+
 - `engine/market_scanner.py` - Core scanning logic
 - `api/routes/scanner.py` - REST API endpoints
 - `config/scanner.json` - Criteria configuration
 - `dashboard/app/scanner/page.tsx` - Scanner UI
 
-### Existing Files Modified:
+### Existing Files Modified
+
 - `api/signal_bus.py` - Load user_symbols dynamically (not hardcoded)
 - `config/symbols.json` - Becomes template/defaults only
 - Database - Add `user_symbols` table
 
-### No Changes Needed:
+### No Changes Needed
+
 - `engine/risk_manager.py` - Already validates any symbol
 - `engine/order_manager.py` - Already places orders for any symbol
 - `ai/predictor.py` - Already handles missing models gracefully

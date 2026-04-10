@@ -67,8 +67,8 @@ def _get_bus_app_cfg() -> dict:
         return _app_cfg_cache_bus
     try:
         _app_cfg_cache_bus = json.loads((CONFIG_DIR / "app.json").read_text(encoding="utf-8-sig"))
-    except Exception:
-        pass  # return stale cache on read error
+    except Exception as exc:
+        logger.debug(f"SignalBus app config reload failed, using stale cache: {exc}")
     _app_cfg_loaded_at_bus = now
     return _app_cfg_cache_bus
 
@@ -79,21 +79,23 @@ def _get_bus_app_cfg() -> dict:
 _retrain_last_triggered: dict[str, float] = {}
 _RETRAIN_DEDUP_SECS = 120   # 2-minute cooldown window per key
 
-# Bar counts for auto-retrain (LSTM) — match run_retrain.py (MT5 per-request limit ~99k for M5)
+# Bar counts for auto-retrain (LSTM) — matches manual retrain dataset sizes.
+# Uses get_ohlcv_range() for scalping to exceed MT5's copy_rates_from_pos() practical limit.
 _RETRAIN_BARS: dict[str, int] = {
-    "scalping":    99_000,  # M5  ≈ 1 yr
-    "day_trading": 17_000,  # H1  ≈ 2 yr
-    "swing":        5_000,  # H4  ≈ 2 yr
+    "scalping":    200_000,  # M5  ≈ 2 years (694 days)
+    "day_trading":  50_000,  # H1  ≈ 5.7 years
+    "swing":        20_000,  # H4  ≈ 9.1 years
 }
 
-# Bar counts for auto-optimizer triggers — same as manual (full 2-year dataset).
-# Option A: Both manual and auto use 2-year data for robustness.
-# Avoids overwriting robust long-term params with recent drawdown data.
-# Frequency: 20 trades + 24hr cooldown ensures fast-enough adaptation without thrashing.
+# Bar counts for auto-optimizer — same as manual (full historical dataset).
+# Uses full history rather than recent-only data to avoid overfitting to drawdown periods.
+# Walk-forward validation (75/25 split) + composite scoring (60% val weight) prevents
+# overfitting while maintaining robustness. Win-rate trigger (< 45% + 30 trades) +
+# 24-hour cooldown ensures adaptation without thrashing or corrupting good params.
 _AUTO_OPT_BARS: dict[str, int] = {
-    "scalping":    99_000,  # M5  ≈ 2 years
-    "day_trading": 17_000,  # H1  ≈ 2 years
-    "swing":        5_000,  # H4  ≈ 2 years
+    "scalping":    200_000,  # M5  ≈ 2 years
+    "day_trading":  50_000,  # H1  ≈ 5.7 years
+    "swing":        20_000,  # H4  ≈ 9.1 years
 }
 
 
@@ -145,7 +147,8 @@ class SignalBus:
                     created = datetime.fromisoformat(sig["created_at"].replace("Z", "+00:00"))
                     if (now - created).total_seconds() > _SIGNAL_TTL_SECONDS:
                         to_delete.append(sid)
-                except Exception:
+                except Exception as exc:
+                    logger.debug(f"SignalBus stale-signal purge fallback for {sid[:8]}: {exc}")
                     to_delete.append(sid)
                 continue
             # Expire pending signals past their expiry window.
@@ -172,8 +175,8 @@ class SignalBus:
                                 )
                         except Exception as _be:
                             logger.warning(f"Signal expiry broadcast failed: {_be}")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"Signal expiry parse failed for {sid[:8]}: {exc}")
         for sid in to_delete:
             sig = self.queue.pop(sid, None)
             if sig:
@@ -190,8 +193,8 @@ class SignalBus:
         try:
             from api.websocket.feed import broadcast_signal
             await broadcast_signal({**signal, "type": "signal_update"})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Signal expiry websocket broadcast skipped: {exc}")
 
     # ── public API ──────────────────────────────────────────────────────────
 
@@ -1429,22 +1432,31 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     from api.main import get_mt5_client
                     _client = get_mt5_client()
                     if _client and _client.is_connected():
-                        _df = await asyncio.to_thread(
-                            _client.get_ohlcv, _sym, _tf_str,
-                            _RETRAIN_BARS.get(_type, 5_000)
-                        )
+                        # Scalping uses get_ohlcv_range with 2-year date window;
+                        # day_trading & swing use get_ohlcv with bar count.
+                        if _type == "scalping":
+                            from datetime import timedelta
+                            _date_to = datetime.now(tz=timezone.utc)
+                            _date_from = _date_to - timedelta(days=694)  # ≈ 2 years for 200k M5 bars
+                            _df = await asyncio.to_thread(
+                                _client.get_ohlcv_range, _sym, _tf_str, _date_from, _date_to
+                            )
+                        else:
+                            _df = await asyncio.to_thread(
+                                _client.get_ohlcv, _sym, _tf_str,
+                                _RETRAIN_BARS.get(_type, 20_000)
+                            )
                         if _df is not None and not _df.empty:
                             _retrain_last_triggered[_key] = time.monotonic()   # stamp dedup timer
                             predictor.train_async(_sym, _df, _type)
-                            logger.info(f"Auto LSTM retrain triggered [{_retrain_reason}]: {_key} ({_total} trades)")
+                            logger.info(f"Auto LSTM retrain triggered [{_retrain_reason}]: {_key} ({_total} trades, {len(_df)} bars)")
             except Exception as _exc:
                 logger.debug(f"Auto LSTM retrain skipped: {_exc}")
 
-            # ── Auto param optimizer (recent data) ───────────────────────────────
+            # ── Auto param optimizer ─────────────────────────────────────────────
             # Trigger when enough trades exist and win_rate suggests re-optimization.
-            # Uses recent 3-6 month data only (not full 2-year) for FAST adaptation
-            # to current market regime — avoids expensive backtest when parameters
-            # are underperforming due to market shift.
+            # Uses full historical data (same as manual optimizer) for robustness.
+            # Walk-forward validation prevents overfitting to recent drawdown periods.
             try:
                 from ai.param_optimizer import optimizer as _opt
                 _strat = signal.get("strategy", "")
@@ -1454,13 +1466,22 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     from api.main import get_mt5_client as _gclient
                     _client2 = _gclient()
                     if _client2 and _client2.is_connected():
-                        _df2 = await asyncio.to_thread(
-                            _client2.get_ohlcv, _sym, _tf_str2,
-                            _AUTO_OPT_BARS.get(trading_type, 150)  # Use recent data, not 2-year
-                        )
+                        # Scalping uses date range, others use bar count
+                        if trading_type == "scalping":
+                            from datetime import timedelta
+                            _date_to2 = datetime.now(tz=timezone.utc)
+                            _date_from2 = _date_to2 - timedelta(days=694)  # ≈ 2 years
+                            _df2 = await asyncio.to_thread(
+                                _client2.get_ohlcv_range, _sym, _tf_str2, _date_from2, _date_to2
+                            )
+                        else:
+                            _df2 = await asyncio.to_thread(
+                                _client2.get_ohlcv, _sym, _tf_str2,
+                                _AUTO_OPT_BARS.get(trading_type, 20_000)
+                            )
                         if _df2 is not None and not _df2.empty:
                             _opt.optimize_async(_strat, _sym, _df2, trading_type)
-                            logger.info(f"Auto param optimizer triggered (recent {_AUTO_OPT_BARS.get(trading_type, 150)} bars): {_strat}/{_sym}")
+                            logger.info(f"Auto param optimizer triggered ({len(_df2)} bars): {_strat}/{_sym}")
             except Exception as _exc2:
                 logger.debug(f"Auto param optimizer skipped: {_exc2}")
 

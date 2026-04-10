@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import pickle
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -42,7 +43,7 @@ TRADING_TYPE_TF: dict[str, str] = {
 SEQUENCE_LEN = 60   # look-back window in bars
 HIDDEN_SIZE  = 64
 NUM_LAYERS   = 2
-EPOCHS       = 50   # raised from 20 — 20 was insufficient for 99k-bar datasets
+EPOCHS       = 60   # raised from 50 for 200k-bar datasets (more data = more epochs needed)
 BATCH_SIZE   = 32
 INPUT_SIZE   = 7    # close_return, hl_range, oc_body, volume_norm, upper_wick, is_near_news, atr_norm
 
@@ -102,6 +103,7 @@ class PricePredictor:
         self._metadata: dict[str, dict]   = {}   # symbol → {trained_at, accuracy, bars_used}
         self._training: set[str]          = set()
         self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="LSTM-train")
         self._calibration: dict[str, tuple[float, float]] = {}
         self._load_calibration()
         self._load_all()
@@ -149,6 +151,7 @@ class PricePredictor:
     def train_async(self, symbol: str, df: pd.DataFrame, trading_type: str = "day_trading") -> bool:
         """
         Start background training for a symbol+type. Returns False if already in progress.
+        Queues job in ThreadPoolExecutor (max 2 concurrent, auto-queues additional).
         Poll status() to check completion.
         """
         key = _model_key(symbol, trading_type)
@@ -156,9 +159,9 @@ class PricePredictor:
             if key in self._training:
                 return False
             self._training.add(key)
-        t = threading.Thread(target=self._train, args=(symbol, trading_type, df), daemon=True)
-        t.start()
-        logger.info(f"LSTM training started for {key} ({len(df)} bars)")
+        # Submit to executor pool (max 2 concurrent, additional jobs auto-queue)
+        self._executor.submit(self._train, symbol, trading_type, df)
+        logger.info(f"LSTM training queued for {key} ({len(df)} bars)")
         return True
 
     def is_training(self, symbol: str, trading_type: str = "day_trading") -> bool:

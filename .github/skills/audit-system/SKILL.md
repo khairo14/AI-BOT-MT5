@@ -39,6 +39,7 @@ Before scanning anything, read [docs/08-audit-findings.md](../../../docs/08-audi
 - Use existing IDs as reference — new findings get the next sequential ID in each category
 
 **Existing finding ID prefixes:**
+
 - `C-` Concurrency/Critical
 - `H-` High severity
 - `M-` Medium severity
@@ -55,6 +56,7 @@ For new findings, continue the `GAP-` / `BUG-` / `MATH-` / `LOGIC-` / `IMPROVE-`
 For each file in scope, apply the relevant category checklist below. Read the actual source code — do not infer from docs.
 
 ### A. Concurrency Safety
+
 - [ ] Every mutable shared state protected by `threading.Lock` or `asyncio.Lock`
 - [ ] No `threading.Lock` used inside `async def` (use `asyncio.Lock`)
 - [ ] No MT5 API calls (`mt5.*`) outside `with self._client._lock:`
@@ -62,6 +64,7 @@ For each file in scope, apply the relevant category checklist below. Read the ac
 - [ ] Module-level mutable vars accessed from both async loop and HTTP threads (e.g. `_paused` in `runner_loop.py`)
 
 ### B. State Persistence
+
 - [ ] All circuit breaker, halt, and pause state written to `data/risk_state.json` on every mutation
 - [ ] State correctly restored on restart (no `None` fields that bypass guards on first run)
 - [ ] RL Q-tables saved on shutdown or within acceptable update window (current: every 10 updates)
@@ -69,6 +72,7 @@ For each file in scope, apply the relevant category checklist below. Read the ac
 - [ ] Backtest results have a retention policy
 
 ### C. Math & Lot Sizing
+
 - [ ] Lot rounding uses `math.floor(/ step) * step` — never `round()`
 - [ ] `volume_min` clamp applied **after** floor-round (not before — over-close risk)
 - [ ] SL distance > 0 before lot calculation (division-by-zero guard)
@@ -79,6 +83,7 @@ For each file in scope, apply the relevant category checklist below. Read the ac
 - [ ] Signal scorer weights sum check: `lstm + rr + trend + volume` weights should be verified for each regime
 
 ### D. Logic & Guard Correctness
+
 - [ ] `_verify_paper_mode()` called at top of both `scan_and_signal()` and `place_paper_order()`
 - [ ] `is_trading_allowed(trading_type)` checked before every order dispatch (RISK-5 pre-check)
 - [ ] Signal age check before manual approval (`expires_at` re-checked at execution time)
@@ -88,18 +93,21 @@ For each file in scope, apply the relevant category checklist below. Read the ac
 - [ ] Dedup key `(symbol, strategy, direction, trading_type)` — check for edge cases where strategy name changes between runs
 
 ### E. Configuration Coverage
+
 - [ ] Every field read from `app.json` / `risk.json` / `strategies.json` / `scanner.json` has a documented default fallback in code
 - [ ] No `app.json` keys read on hot paths without TTL cache (5 s TTL via `_get_app_config()`)
 - [ ] `_SYMBOL_CURRENCIES` in `news_filter.py` is **hardcoded** — verify all active symbols from `config/scanner.json` are covered; symbols not in the dict silently fall back to USD-only news check
 - [ ] Session filter times in `risk.json` are UTC — not DST-aware; US stocks/indices need manual update at DST transitions (second Sunday March / first Sunday November)
 
 ### F. API & WebSocket
+
 - [ ] All `PATCH /config/*` endpoints validate input before writing to disk (no arbitrary JSON injection)
 - [ ] `POST /trades/place` and `POST /signals/{id}/approve` both go through `is_trading_allowed()` pre-check
 - [ ] WebSocket `broadcast_alert` fires on circuit breaker trigger (G-3 fix — verify still wired)
 - [ ] `POST /account/switch-mode` with `force=true` — confirm existing open positions are handled safely
 
 ### G. Backtester Fidelity
+
 - [ ] `initial_balance` parameter passed from live account balance (not hardcoded `10_000`)
 - [ ] No concurrent-position cap modelled (positions can overlap unrealistically in backtest)
 - [ ] No swap/commission model beyond `SPREAD_COST_R`

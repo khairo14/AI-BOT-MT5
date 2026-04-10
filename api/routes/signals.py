@@ -9,12 +9,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from api.signal_bus import bus
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 # Lock to prevent two simultaneous approve requests from placing duplicate orders.
 # asyncio.Lock — correct for async endpoints; threading.Lock would block the event loop.
 _approve_lock = asyncio.Lock()
@@ -39,7 +42,8 @@ class Signal(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/archive")
-def get_archive(limit: int = 100):
+@limiter.limit("100/minute")  # Task #7: Rate limiting
+def get_archive(request: Request, limit: int = 100):
     """Return the last N completed/expired/rejected signals (G-5: signal archive)."""
     items = list(bus.archive)[-limit:]
     items.reverse()   # newest first
@@ -47,7 +51,8 @@ def get_archive(limit: int = 100):
 
 
 @router.get("/")
-def list_signals(trading_mode: Optional[str] = None, status: Optional[str] = None):
+@limiter.limit("100/minute")  # Task #7: Rate limiting
+def list_signals(request: Request, trading_mode: Optional[str] = None, status: Optional[str] = None):
     """Return signals, optionally filtered by trading_mode and/or status."""
     signals = list(bus.queue.values())
     if trading_mode:
@@ -58,7 +63,8 @@ def list_signals(trading_mode: Optional[str] = None, status: Optional[str] = Non
 
 
 @router.get("/{signal_id}")
-def get_signal(signal_id: str):
+@limiter.limit("100/minute")  # Task #7: Rate limiting
+def get_signal(request: Request, signal_id: str):
     """Return a single signal by ID."""
     signal = bus.queue.get(signal_id)
     if not signal:
@@ -67,7 +73,8 @@ def get_signal(signal_id: str):
 
 
 @router.post("/")
-async def add_signal(signal: Signal):
+@limiter.limit("50/minute")  # Task #7: Rate limiting (write endpoint - stricter)
+async def add_signal(request: Request, signal: Signal):
     """
     Add a new signal to the queue.
     If execution_mode is 'auto' for this trading_mode, executes immediately.
@@ -82,7 +89,8 @@ async def add_signal(signal: Signal):
 
 
 @router.post("/{signal_id}/approve")
-async def approve_signal(signal_id: str):
+@limiter.limit("50/minute")  # Task #7: Rate limiting (write endpoint - stricter)
+async def approve_signal(request: Request, signal_id: str):
     """
     Manually approve a signal — places the order immediately.
     Rejects with 410 if the signal has passed its expiry window.

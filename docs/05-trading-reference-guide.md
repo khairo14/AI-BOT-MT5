@@ -13,7 +13,7 @@ Use this as a fast reminder when choosing symbols or reviewing bot settings.
 > Rule: Only trade instruments with the tightest spreads and highest liquidity. Every pip of spread is a direct cost on a 5–15 pip target.
 
 | Symbol | Why It's Good for Scalping |
-|---|---|
+| --- | --- |
 | **EURUSD** | Tightest spread of any instrument. Moves predictably on M1. #1 scalp pair |
 | **GBPUSD** | Slightly wider spread but high volatility — great 5–15 pip moves on M1/M5 |
 | **USDJPY** | Second most liquid pair. Clean technical levels on short timeframes |
@@ -31,7 +31,7 @@ Use this as a fast reminder when choosing symbols or reviewing bot settings.
 > Rule: Strong intraday range, active during your session, manageable spread for 30–100 pip targets.
 
 | Symbol | Why It's Good for Day Trading | Best Session |
-|---|---|---|
+| --- | --- | --- |
 | **EURUSD** | Highest volume, reliable H1 trends | London + NY overlap |
 | **GBPUSD** | Large daily range, strong trend days | London + NY |
 | **USDJPY** | Clean H1 structure, reacts well to US data | Tokyo + NY |
@@ -57,7 +57,7 @@ Use this as a fast reminder when choosing symbols or reviewing bot settings.
 > Rule: Clean H4/D1 structure, macro-driven price action, holds for days–weeks. Spread is irrelevant. Position size is smaller. Focus on the big picture.
 
 | Symbol | Why It's Good for Swing Trading | Typical Hold |
-|---|---|---|
+| --- | --- | --- |
 | **EURUSD** | Core trend pair. Weekly ranges of 100–300 pips | 3–10 days |
 | **GBPUSD** | Wide weekly swings. Strong reactions to UK/US macro events | 3–14 days |
 | **USDJPY** | Interest rate differential driven. Multi-week institutional flows | 5–20 days |
@@ -83,7 +83,7 @@ Use this as a fast reminder when choosing symbols or reviewing bot settings.
 ### At a Glance — Symbol Eligibility Summary
 
 | Symbol | Scalping | Day Trading | Swing |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | EURUSD | ✅ | ✅ | ✅ |
 | GBPUSD | ✅ | ✅ | ✅ |
 | USDJPY | ✅ | ✅ | ✅ |
@@ -121,6 +121,7 @@ Use this as a fast reminder when choosing symbols or reviewing bot settings.
 A trailing stop is a stop-loss that **automatically moves in your favor as price moves with you**, locking in profit progressively.
 
 **How it works:**
+
 - You open a BUY at 1.1000 with SL at 1.0950 (50 pip risk)
 - Price moves to 1.1060 — trailing stop moves SL up to 1.1010
 - Price moves to 1.1100 — SL is now at 1.1050
@@ -129,7 +130,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 **Where trailing stops are used in this bot:**
 
 | Mode | Strategy | When Activated |
-|---|---|---|
+| --- | --- | --- |
 | Day Trading | MACD EMA Trend (D1) | After TP1 is hit — remaining 50% of position trails at EMA 20 (H1) |
 | Day Trading | RSI Divergence (D3) | Move SL to breakeven after 1:1 R:R is reached |
 | Swing Trading | EMA Trend Rider (W1) | Move SL to breakeven after TP1, then trail at H4 EMA 50 |
@@ -142,6 +143,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ## Trading Types
 
 ### Scalping
+
 - **What it is:** Opening and closing trades within seconds to a few minutes to capture small price moves.
 - **Timeframes used:** M1 (1-minute), M2, M5
 - **Typical target per trade:** 5–15 pips
@@ -151,6 +153,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 - **Good for:** Fast, compounding small wins. High trade frequency.
 
 ### Day Trading
+
 - **What it is:** Trades opened and closed within the same trading session. No position held overnight.
 - **Timeframes used:** M15, M30, H1
 - **Typical target per trade:** 30–100 pips / 0.5–2% price move
@@ -160,6 +163,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 - **Good for:** Catching intraday trends. Balanced activity level.
 
 ### Swing Trading
+
 - **What it is:** Trades held for days to weeks to capture larger price swings.
 - **Timeframes used:** H4, D1
 - **Typical target per trade:** 100–500+ pips / 2–10% move
@@ -175,7 +179,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Price & Orders
 
 | Term | Meaning |
-|---|---|
+| --- | --- |
 | **Bid** | The price the broker buys from you (you sell at Bid) |
 | **Ask** | The price the broker sells to you (you buy at Ask) |
 | **Spread** | Ask − Bid. This is the broker's fee. Tighter = better for short-term trades |
@@ -189,7 +193,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Risk & Protection
 
 | Term | Meaning |
-|---|---|
+| --- | --- |
 | **Stop-Loss (SL)** | A price at which the trade automatically closes to limit your loss |
 | **Take-Profit (TP)** | A price at which the trade automatically closes to lock in your profit |
 | **Trailing Stop** | SL that moves with price as it goes in your favor — locks in more profit over time |
@@ -203,7 +207,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Performance Metrics
 
 | Term | Meaning |
-|---|---|
+| --- | --- |
 | **Win Rate** | % of trades that are profitable. A 50% win rate is fine with good R:R |
 | **Profit Factor** | Total gross profit ÷ total gross loss. >1.5 is good. >2.0 is excellent |
 | **Expectancy** | Average amount you expect to earn per trade: (Win Rate × Avg Win) − (Loss Rate × Avg Loss) |
@@ -217,7 +221,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Trend Indicators
 
 | Indicator | What It Shows |
-|---|---|
+| --- | --- |
 | **EMA (Exponential Moving Average)** | Smoothed average price weighted toward recent data. Used to identify trend direction. EMA 20 < EMA 50 = downtrend |
 | **MACD** | Moving Average Convergence Divergence. Shows trend momentum and direction. Histogram above zero = bullish momentum |
 | **ADX (Average Directional Index)** | Measures trend strength only (not direction). ADX > 25 = strong trend. ADX < 20 = ranging/choppy |
@@ -225,7 +229,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Momentum / Oscillators
 
 | Indicator | What It Shows |
-|---|---|
+| --- | --- |
 | **RSI (Relative Strength Index)** | Momentum oscillator 0–100. Above 70 = overbought (may reverse down). Below 30 = oversold (may reverse up). 50 = neutral |
 | **Stochastic** | Similar to RSI. Compares closing price to price range. Used for timing entries in ranging markets |
 | **ROC (Rate of Change)** | Speed of price change. Positive = price accelerating up. Negative = accelerating down |
@@ -233,14 +237,14 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Volatility
 
 | Indicator | What It Shows |
-|---|---|
+| --- | --- |
 | **Bollinger Bands (BB)** | 3 lines around price: middle (moving average) ± 2 standard deviations. Wide bands = high volatility. Narrow = low volatility (squeeze) |
 | **ATR (Average True Range)** | Average size of candles over N periods. Used to set realistic SL distance and detect abnormal volatility |
 
 ### Volume & Price Level Tools
 
 | Indicator | What It Shows |
-|---|---|
+| --- | --- |
 | **VWAP (Volume Weighted Average Price)** | Average price weighted by volume, reset each day. Price above VWAP = bullish intraday bias. Used as a mean-reversion target |
 | **Support Level** | A price zone where buying has repeatedly stopped price from falling further |
 | **Resistance Level** | A price zone where selling has repeatedly stopped price from rising further |
@@ -253,7 +257,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Reversal Patterns (signal end of a trend)
 
 | Pattern | Description |
-|---|---|
+| --- | --- |
 | **Pin Bar** | Candle with a long wick and small body. Wick points toward the rejected price direction. Strong reversal signal |
 | **Engulfing** | A candle that completely covers the body of the previous candle. Bullish engulfing after downtrend = reversal signal |
 | **Double Top / Bottom** | Price hits the same level twice and fails. Double top = potential reversal down. Double bottom = potential reversal up |
@@ -262,7 +266,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ### Continuation Patterns (signal trend resumes after pause)
 
 | Pattern | Description |
-|---|---|
+| --- | --- |
 | **Bull/Bear Flag** | Sharp move followed by a tight consolidation channel. Breakout from channel continues original move |
 | **Ascending/Descending Triangle** | Horizontal resistance/support with converging trendline. Breakout in direction of trend |
 | **Inside Bar** | A candle whose high and low are within the previous candle's range. Signals consolidation before a breakout |
@@ -272,7 +276,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ## Market Sessions (UTC)
 
 | Session | Open (UTC) | Close (UTC) | Key Pairs |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Sydney | 22:00 | 07:00 | AUD pairs, NZD pairs |
 | Tokyo (Asian) | 00:00 | 09:00 | JPY pairs, AUD pairs |
 | London | 07:00 | 16:00 | EUR pairs, GBP pairs, Gold |
@@ -298,7 +302,7 @@ A trailing stop is a stop-loss that **automatically moves in your favor as price
 ## Symbols Glossary
 
 | Symbol | Full Name | Category |
-|---|---|---|
+| --- | --- | --- |
 | EURUSD | Euro vs US Dollar | Forex Major |
 | GBPUSD | Great Britain Pound vs US Dollar | Forex Major |
 | USDJPY | US Dollar vs Japanese Yen | Forex Major |

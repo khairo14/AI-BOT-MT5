@@ -32,6 +32,7 @@ python ai/run_rl_bootstrap.py         # seeds Q-tables from backtest outcomes wi
 ```
 
 **Why this order matters:**
+
 - Retrain and optimizer are independent — they write to different files, have zero dependency on each other, and can safely run simultaneously
 - Bootstrap REQUIRES both to complete first:
   - Without LSTM: all backtest `conf_score = 0.55` uniform → RL cannot learn confidence-outcome relationships
@@ -48,6 +49,7 @@ start.bat        # Windows: starts FastAPI backend + Next.js dashboard
 ```
 
 Or manually:
+
 ```bash
 # Terminal 1:
 uvicorn api.main:app --reload --port 8000
@@ -99,7 +101,7 @@ When switching to a new demo account or clearing all historical data:
 ### Files to wipe (in order, bot stopped)
 
 | File | Action | Reason |
-|---|---|---|
+| --- | --- | --- |
 | `data/trade_journal.jsonl` | **Wipe** (after backup) | Fresh account = fresh history |
 | `ai/data/trade_memory.jsonl` | **Wipe** | Outcome scorer memory biased by old data |
 | `ai/data/rl_qtable_scalping_paper.json` | **Delete** | RL unlearns old loss history |
@@ -110,13 +112,13 @@ When switching to a new demo account or clearing all historical data:
 ### Files to update
 
 | File | What to change |
-|---|---|
+| --- | --- |
 | `config/app.json` | Update `accounts.paper.login` with new demo account number |
 
 ### Files to leave alone
 
 | File | Reason |
-|---|---|
+| --- | --- |
 | `ai/models/` | LSTM weights are symbol/strategy specific, not account-specific |
 | `config/optimized_params.json` | Optimizer results are symbol/strategy specific |
 | `data/regime_state.json` | Reads from live market — not account-specific |
@@ -167,6 +169,7 @@ GET /config/validate
 ```
 
 Returns:
+
 ```json
 {
   "all_ok": true,
@@ -234,7 +237,7 @@ Limits: scalping max 7 symbols, day_trading max 15, swing max 18. Scanner change
 ### Key log patterns to watch
 
 | Log pattern | Meaning |
-|---|---|
+| --- | --- |
 | `Bar-close guard: no new bar` | Normal — suppressed redundant scan |
 | `Regime gate blocked {strategy}/{symbol}` | Strategy suppressed by regime — normal |
 | `Correlation guard blocked` | Duplicate correlated exposure — normal |
@@ -248,7 +251,7 @@ Limits: scalping max 7 symbols, day_trading max 15, swing max 18. Scanner change
 ### WebSocket performance alerts (dashboard notifications)
 
 | Alert | Action |
-|---|---|
+| --- | --- |
 | Win rate < 40% for a mode | Check regime, reduce risk, consider pausing |
 | RL risk_factor < 0.60 | RL de-risking — monitor for recovery |
 | LSTM degraded symbols | Trigger manual retrain for those symbols |
@@ -261,7 +264,7 @@ Limits: scalping max 7 symbols, day_trading max 15, swing max 18. Scanner change
 ## API Quick Reference
 
 | Category | Endpoint | Method |
-|---|---|---|
+| --- | --- | --- |
 | Health | `/health` | GET |
 | Account | `/account/` | GET |
 | Mode switch | `/account/switch-mode` | POST |

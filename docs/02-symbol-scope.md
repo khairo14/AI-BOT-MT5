@@ -15,7 +15,7 @@
 ### FOREX
 
 | Symbol | Full Name | Scalping | Day Trading | Swing | Rationale |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | EURUSD | Euro vs US Dollar | ✅ | ✅ | ✅ | Tightest spread globally, highest liquidity |
 | GBPUSD | Great Britain Pound vs USD | ✅ | ✅ | ✅ | High volatility, strong intraday and weekly moves |
 | USDJPY | US Dollar vs Japanese Yen | ✅ | ✅ | ✅ | 2nd most liquid pair, clean technical levels |
@@ -33,7 +33,7 @@
 ### EQUITY INDICES (Cash only)
 
 | Symbol | Full Name | Scalping | Day Trading | Swing | Rationale |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | US100Cash | US 100 Index Cash | ✅ | ✅ | ✅ | Most traded index globally, clean technical levels |
 | US30Cash | Wall Street 30 Cash | ✅ | ✅ | ✅ | High liquidity, strong intraday trends |
 | US500Cash | US 500 Index Cash | ❌ | ✅ | ✅ | Broad market gauge, excellent for swing trends |
@@ -47,7 +47,7 @@
 ### COMMODITIES (Cash only)
 
 | Symbol | Full Name | Scalping | Day Trading | Swing | Rationale |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | GOLD | Gold Spot | ❌ | ✅ | ✅ | Most popular day-trade and swing instrument globally |
 | SILVER | Silver Spot | ❌ | ❌ | ✅ | Follows Gold with more volatility, wide spread makes day-trade difficult |
 | OilCash | WTI Oil Cash | ❌ | ✅ | ✅ | Strong intraday trends, macro-driven weekly swings |
@@ -65,7 +65,7 @@
 > The bot automatically suppresses signals outside market hours for these instruments.
 
 | Symbol | Full Name | Day Trading | Swing | Rationale |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | TSLA.OQ | Tesla Inc | ✅ | ✅ | Highest retail volume tech stock, strong intraday swings |
 | NVDA.OQ | NVIDIA Corp | ✅ | ✅ | AI sector leader, strong momentum trends |
 | AAPL.OQ | Apple Inc | ✅ | ✅ | Most stable mega-cap, reliable technical levels |
@@ -85,7 +85,7 @@
 > 24/7 market — no session restrictions. Spread is the main constraint; altcoins below top 5 have excessive spreads for systematic strategies.
 
 | Symbol | Full Name | Day Trading | Swing | Rationale |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | BTCUSD | Bitcoin vs USD | ✅ | ✅ | Most liquid crypto, lowest spread, institutional grade |
 | ETHUSD | Ethereum vs USD | ✅ | ✅ | 2nd most liquid, strong correlation/divergence trades from BTC |
 | XRPUSD | Ripple vs USD | ❌ | ✅ | Volatile swing plays, not suited for intraday systematic |
@@ -100,13 +100,13 @@
 
 ### Scalping (M1–M5) — 7 symbols
 
-```
+```text
 EURUSD, GBPUSD, USDJPY, EURJPY, USDCHF, US100Cash, US30Cash
 ```
 
 ### Day Trading (M15–H1) — 17 symbols
 
-```
+```text
 EURUSD, GBPUSD, USDJPY, AUDUSD, GBPJPY,
 GOLD, OilCash,
 US100Cash, US30Cash, US500Cash, GER40Cash, UK100Cash,
@@ -116,7 +116,7 @@ TSLA.OQ, NVDA.OQ, AAPL.OQ, MSFT.OQ, AMZN.OQ
 
 ### Swing Trading (H4–D1) — 19 symbols
 
-```
+```text
 EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, NZDUSD,
 GOLD, SILVER, OilCash, BRENTCash, NGASCash,
 US100Cash, US500Cash,
@@ -195,7 +195,7 @@ Symbol activation is controlled by `config/symbols.json`. Each symbol has an `en
 ## Excluded Categories Reference
 
 | Category | Reason |
-|---|---|
+| --- | --- |
 | Turbo Stocks | Knock-out barrier — position wiped if price touches barrier. Incompatible with standard SL logic |
 | Expiring Futures (US100-JUN26, OIL-MAY26, etc.) | Require rollover management; Cash equivalents are available |
 | Agricultural Commodities (CORN, WHEAT, SUGAR, COCOA, etc.) | Seasonal patterns, thin intraday liquidity, expiry dates |

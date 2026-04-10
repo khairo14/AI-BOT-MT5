@@ -281,6 +281,30 @@ export const fetchScannerSystemConfig = () =>
 export const fetchScannerHealth = () =>
   api.get("/scanner/health").then((r) => r.data);
 
+export const fetchScannerPerformance = (): Promise<{
+  status: string;
+  timestamp: string;
+  trading_types: Record<string, {
+    enabled: boolean;
+    total_active: number;
+    total_signals: number;
+    total_trades: number;
+    total_profit: number;
+    avg_win_rate: number;
+    active_pairs: Array<{
+      symbol: string;
+      signals: number;
+      trades: number;
+      wins: number;
+      losses: number;
+      win_rate: number;
+      total_profit: number;
+      last_signal: string | null;
+      status: string;
+    }>;
+  }>;
+}> => api.get("/scanner/performance").then((r) => r.data);
+
 // ── Analytics ---------------------------------------------------------------
 export const fetchAnalyticsPerformance = (
   account: "paper" | "live" | "all" = "all",
@@ -294,6 +318,68 @@ export const fetchAnalyticsPerformance = (
   });
   return api.get(`/analytics/performance?${params.toString()}`).then((r) => r.data);
 };
+
+// ── Profitability Reporting ------------------------------------------------
+export interface ProfitabilityReport {
+  generated_at: string;
+  period_days: number | "all";
+  overall: {
+    total_trades: number;
+    wins: number;
+    losses: number;
+    breakeven: number;
+    win_rate: number;
+    profit_factor: number;
+    total_profit: number;
+    avg_profit: number;
+    avg_loss: number;
+  };
+  by_symbol: Record<string, {
+    total_trades: number;
+    wins: number;
+    losses: number;
+    breakeven: number;
+    win_rate: number;
+    profit_factor: number;
+    total_profit: number;
+    avg_profit: number;
+    avg_loss: number;
+  }>;
+  by_trading_type: Record<string, {
+    total_trades: number;
+    wins: number;
+    losses: number;
+    breakeven: number;
+    win_rate: number;
+    profit_factor: number;
+    total_profit: number;
+    avg_profit: number;
+    avg_loss: number;
+  }>;
+  success_criteria: {
+    "50_trades": boolean;
+    win_rate_50: boolean;
+    win_rate_55: boolean;
+    profit_factor_1_5: boolean;
+    all_criteria_met: boolean;
+  };
+  task_2_status: {
+    status: "PASSED" | "IN_PROGRESS";
+    message: string;
+    recommendation: string;
+  };
+}
+
+export const fetchProfitabilityReport = (days?: number): Promise<ProfitabilityReport> =>
+  api.get(`/profitability/${days ? `?days=${days}` : ""}`).then((r) => r.data);
+
+export const fetchProfitabilityStatus = (): Promise<{
+  task: string;
+  status: "PASSED" | "IN_PROGRESS";
+  message: string;
+  overall_metrics: ProfitabilityReport["overall"];
+  success_criteria: ProfitabilityReport["success_criteria"];
+}> => api.get("/profitability/status").then((r) => r.data);
 
 export const fetchRegimeStatus = (): Promise<{ regimes: Record<string, string> }> =>
   api.get("/analytics/regime/status").then((r) => r.data);

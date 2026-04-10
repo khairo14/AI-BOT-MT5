@@ -43,12 +43,14 @@ Three axes govern execution in AI-BOT-MT5:
 3. Falls back to `"paper"` if both missing
 
 **Check at runtime:**
+
 ```python
 from engine.account_store import current_mode
 print(current_mode())          # "paper" or "live"
 ```
 
 **Check MT5Client is in sync:**
+
 ```python
 from engine.mt5_client import MT5Client
 client = MT5Client()
@@ -67,11 +69,13 @@ Config: `config/app.json` → `execution_mode.{scalping|day_trading|swing}`
 **Execution mode is per trade mode** — you can have scalping on `auto` while swing is on `manual`.
 
 **Resolution path inside `add_signal()`:**
+
 1. `_get_exec_mode(trading_type)` reads `app.json["execution_mode"][trading_type]`, defaults `"manual"`
 2. `"auto"` → immediately runs RISK-5 pre-check → dispatches `_execute_async()`
 3. `"manual"` → signal queued as `pending` with expiry; waits for dashboard approval
 
 **Debug checklist:**
+
 - [ ] Confirm `app.json["execution_mode"]` matches expectation for the affected **trade mode** (scalping / day_trading / swing)
 - [ ] If `"auto"` but not executing: check confidence floor next (§ below)
 - [ ] If `"manual"` but pending signals disappear: check signal expiry (`_DEFAULT_EXPIRY` per timeframe — scalping = 10 s, day_trading = 90 s, swing = 600 s)
@@ -97,15 +101,18 @@ State: [data/risk_state.json](../../../data/risk_state.json)
 The risk manager tracks circuit breakers **per trade mode** (scalping / day_trading / swing) independently, plus global halts that stop all trade modes.
 
 **`is_trading_allowed(trading_type)` gate order:**
+
 1. `_daily_halted` → global halt, blocks all three trade modes
 2. `_weekly_halted` → global halt, blocks all three trade modes
 3. `_paused_modes[trading_type]` → per-trade-mode pause; check if `now() >= pause_expiry`
 
 **`check_concurrent_limit(trading_type, ...)` additional guards:**
+
 - Position count per trade mode (MT5 comment prefix: `scalp|`, `day|`, `swing|`)
 - `_mode_switch_ts` 1-second settling hold after any account mode `switch_mode()` call
 
 **Debug checklist:**
+
 - [ ] Read `data/risk_state.json` — check `_daily_halted`, `_weekly_halted`, `_paused_modes` (keyed by trade mode name)
 - [ ] Check `_consecutive_losses` per trade mode against `max_consecutive_losses` in `config/risk.json`
 - [ ] If a specific trade mode is paused: check `_paused_modes["scalping"|"day_trading"|"swing"]` for expiry timestamp
@@ -113,6 +120,7 @@ The risk manager tracks circuit breakers **per trade mode** (scalping / day_trad
 - [ ] 1-second hold blocking new orders right after account mode switch: wait or re-run after 2 seconds
 
 **Manual reset (use with caution — paper account mode only):**
+
 ```python
 from engine.risk_manager import RiskManager
 rm = RiskManager()
@@ -126,9 +134,11 @@ rm.reset_for_mode_switch()     # clears all circuit breakers + per-trade-mode pa
 File: [engine/paper_trade.py](../../../engine/paper_trade.py) — `_verify_paper_mode()`
 
 Hard guard at top of both `scan_and_signal()` and `place_paper_order()`:
+
 ```python
 return self.client.trading_mode == "paper"
 ```
+
 Returns `[]` / `None` immediately if account mode is not `"paper"`.
 
 **Symptom:** paper orders silently ignored.
@@ -136,6 +146,7 @@ Returns `[]` / `None` immediately if account mode is not `"paper"`.
 **Fix:** Confirm account mode is `"paper"` (see § Step 2).
 
 **Paper positions ledger** (`_positions: dict[int, PaperPosition]`) is **in-memory only**.
+
 - After process restart, it is rebuilt from `sync_positions()` reconciling with real MT5 demo account
 - If positions appear open in MT5 demo but not in bot: trigger `paper_engine.sync_positions()` manually or restart the API
 
@@ -149,6 +160,7 @@ File: [api/routes/account.py](../../../api/routes/account.py)
 This switches the **account mode** between `paper` and `live`. It does NOT change which trade modes (scalping / day_trading / swing) are active.
 
 **Full sequence:**
+
 ```
 1. Validate account mode ∈ {"paper", "live"}
 2. No-op if already that account mode
@@ -184,11 +196,13 @@ This switches the **account mode** between `paper` and `live`. It does NOT chang
 Files: [engine/ea_bridge.py](../../../engine/ea_bridge.py), [api/signal_bus.py](../../../api/signal_bus.py)
 
 EA fast-path activates **only when all three conditions are true:**
+
 1. `app.json["ea_enabled"] == true`
 2. `ea_bridge.is_active()` returns `True` (socket open, EA process responding)
 3. `trading_mode == "scalping"`
 
 **Debug checklist:**
+
 - [ ] Verify `config/app.json` → `"ea_enabled": true`
 - [ ] Check EA is connected: `ea_bridge.is_active()` / look for connection log line
 - [ ] If EA inactive: bot falls back to Python `OrderManager` path automatically (no error)
@@ -212,6 +226,7 @@ Q-tables are scoped by **both** trade mode (scalping / day_trading / swing) and 
 | live | `rl_qtable_scalping_live.json`, `rl_qtable_day_trading_live.json`, `rl_qtable_swing_live.json` |
 
 **Debug checklist:**
+
 - [ ] If file missing: that trade mode's agent starts with empty Q-table (no error — learns from scratch)
 - [ ] After account mode switch: `rl_manager.switch_mode(account_mode)` must be called — rebuilds all 3 trade mode agents for the new account mode
 - [ ] If RL `risk_factor` seems wrong for a specific trade mode (lot sizes too small/large): dump that Q-table and inspect state-action values
@@ -240,6 +255,7 @@ Guard: `if _lot <= 0: drop signal`
 **Root cause:** SL distance is 0 (entry price == SL price) → lot calculation divides by zero or returns 0.
 
 **Debug checklist:**
+
 - [ ] Check strategy SL logic for the affected symbol
 - [ ] Confirm symbol `tick_value` / `tick_size` are returned from MT5 (can fail if symbol not in Market Watch)
 - [ ] Add symbol to MT5 Market Watch if tick info is `None`

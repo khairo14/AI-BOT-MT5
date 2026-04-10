@@ -775,11 +775,11 @@ export default function MLPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-3 text-sm text-gray-400">
           <div className="flex gap-3">
             <span className="text-blue-400 font-semibold w-48 shrink-0">LSTM retrain</span>
-            <span>Every 20th closed trade per symbol × mode. Also triggers on: model age &gt; 7 days (if ≥ 10 trades exist) or 5 consecutive losses (regime change indicator).</span>
+            <span>Every 20th closed trade per symbol × mode. Also triggers on: model age &gt; 7 days (if ≥ 10 trades exist) or 8 consecutive losses (regime change indicator).</span>
           </div>
           <div className="flex gap-3">
             <span className="text-purple-400 font-semibold w-48 shrink-0">Param optimizer</span>
-            <span>Triggered when live win-rate drops below 45 % — with a 24 h cooldown per strategy × symbol. Walk-forward backtest tests up to 64 parameter combos.</span>
+            <span>Triggered when live win-rate drops below 45 % with ≥ 30 new trades since last optimization — 24 h cooldown per strategy × symbol. Walk-forward backtest tests up to 64 parameter combos.</span>
           </div>
           <div className="flex gap-3">
             <span className="text-amber-400 font-semibold w-48 shrink-0">RL agent</span>

@@ -7,15 +7,18 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from api.dependencies import get_client
 from engine.mt5_client import MT5Client
 from engine.market_scanner import MarketScanner, ScanSummary, summary_to_dict
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 # Global scanner instance (initialized on first use)
 _scanner: Optional[MarketScanner] = None
@@ -52,7 +55,9 @@ class AddSymbolRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/")
+@limiter.limit("60/minute")  # Task #7: Rate limiting
 async def get_scan_results(
+    request: Request,
     scanner: MarketScanner = Depends(get_scanner),
     force_refresh: bool = Query(False, description="Force rescan instead of using cache")
 ):
@@ -78,7 +83,9 @@ async def get_scan_results(
 
 
 @router.get("/type/{trading_type}")
+@limiter.limit("60/minute")  # Task #7: Rate limiting
 async def get_scan_by_type(
+    request: Request,
     trading_type: str,
     scanner: MarketScanner = Depends(get_scanner),
     force_refresh: bool = Query(False, description="Force rescan instead of using cache")
@@ -132,7 +139,9 @@ async def get_scan_by_type(
 
 
 @router.post("/scan")
+@limiter.limit("30/minute")  # Task #7: Rate limiting (compute-intensive)
 async def trigger_scan(
+    request: Request,
     body: ScanRequest,
     scanner: MarketScanner = Depends(get_scanner)
 ):
@@ -200,7 +209,8 @@ async def trigger_scan(
 
 
 @router.get("/cache")
-async def get_cache_status(scanner: MarketScanner = Depends(get_scanner)):
+@limiter.limit("100/minute")  # Task #7: Rate limiting
+async def get_cache_status(request: Request, scanner: MarketScanner = Depends(get_scanner)):
     """
     Get scanner cache status.
     Returns cached data timestamp and validity.
@@ -233,7 +243,8 @@ async def get_cache_status(scanner: MarketScanner = Depends(get_scanner)):
 
 
 @router.post("/cache/invalidate")
-async def invalidate_cache(scanner: MarketScanner = Depends(get_scanner)):
+@limiter.limit("30/minute")  # Task #7: Rate limiting (cache operation)
+async def invalidate_cache(request: Request, scanner: MarketScanner = Depends(get_scanner)):
     """
     Manually invalidate the scanner cache.
     Next scan request will trigger a fresh scan.
@@ -246,7 +257,8 @@ async def invalidate_cache(scanner: MarketScanner = Depends(get_scanner)):
 
 
 @router.post("/add-symbol")
-async def add_symbol_to_config(body: AddSymbolRequest):
+@limiter.limit("60/minute")  # Task #7: Rate limiting (write operation)
+async def add_symbol_to_config(request: Request, body: AddSymbolRequest):
     """
     Add a scanned symbol to the strategy scanner (active trading symbols).
     Updates config/scanner.json (used by strategy scanner on trading pages).
@@ -314,8 +326,116 @@ async def add_symbol_to_config(body: AddSymbolRequest):
         raise HTTPException(status_code=500, detail=f"Failed to add symbol: {str(e)}")
 
 
+@router.get("/performance")
+@limiter.limit("60/minute")  # Task #7: Rate limiting
+async def get_scanner_performance(request: Request):
+    """
+    Get live scanner performance metrics:
+    - Active pairs by trading type (from scanner.json)
+    - Signal & trade stats per pair from trade journal
+    - Pair rotation history
+    Returns active vs inactive pair breakdown.
+    """
+    import json
+    import os
+    from collections import defaultdict
+    from pathlib import Path
+    
+    try:
+        # Load scanner config (active pairs)
+        scanner_path = "config/scanner.json"
+        if not os.path.exists(scanner_path):
+            raise HTTPException(status_code=500, detail="scanner.json not found")
+        
+        with open(scanner_path, "r") as f:
+            scanner_cfg = json.load(f)
+        
+        # Load trade journal for stats
+        journal_path = "data/trade_journal.jsonl"
+        pair_stats = defaultdict(lambda: {
+            "signals": 0, "trades": 0, "wins": 0, 
+            "losses": 0, "total_profit": 0.0, "last_signal": None
+        })
+        
+        if os.path.exists(journal_path):
+            with open(journal_path, "r") as f:
+                for line in f:
+                    try:
+                        trade = json.loads(line)
+                        symbol = trade.get("symbol")
+                        if not symbol:
+                            continue
+                        
+                        event = trade.get("event")
+                        profit = trade.get("profit", 0.0) or 0.0
+                        
+                        if event == "close":
+                            pair_stats[symbol]["trades"] += 1
+                            if profit > 0:
+                                pair_stats[symbol]["wins"] += 1
+                            elif profit < 0:
+                                pair_stats[symbol]["losses"] += 1
+                            pair_stats[symbol]["total_profit"] += profit
+                            pair_stats[symbol]["last_signal"] = trade.get("close_time")
+                    except:
+                        continue
+        
+        # Build active/inactive breakdown by trading type
+        result = {}
+        
+        for trading_type in ["scalping", "day_trading", "swing"]:
+            type_cfg = scanner_cfg.get(trading_type, {})
+            enabled = type_cfg.get("enabled", False)
+            symbols = type_cfg.get("symbols", [])
+            
+            active_pairs = []
+            for sym in symbols:
+                stats = pair_stats[sym]
+                win_rate = (
+                    (stats["wins"] / stats["trades"] * 100) 
+                    if stats["trades"] > 0 else 0.0
+                )
+                
+                active_pairs.append({
+                    "symbol": sym,
+                    "signals": stats["signals"],
+                    "trades": stats["trades"],
+                    "wins": stats["wins"],
+                    "losses": stats["losses"],
+                    "win_rate": round(win_rate, 1),
+                    "total_profit": round(stats["total_profit"], 2),
+                    "last_signal": stats["last_signal"],
+                    "status": "active" if enabled else "paused"
+                })
+            
+            result[trading_type] = {
+                "enabled": enabled,
+                "total_active": len(symbols),
+                "active_pairs": active_pairs,
+                "total_signals": sum(p["signals"] for p in active_pairs),
+                "total_trades": sum(p["trades"] for p in active_pairs),
+                "total_profit": round(sum(p["total_profit"] for p in active_pairs), 2),
+                "avg_win_rate": round(
+                    sum(p["win_rate"] for p in active_pairs) / len(active_pairs)
+                    if active_pairs else 0.0,
+                    1
+                )
+            }
+        
+        return {
+            "status": "success",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "trading_types": result
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to get scanner performance: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get performance: {str(e)}")
+
+
 @router.get("/config")
-async def get_scanner_system_config():
+@limiter.limit("100/minute")  # Task #7: Rate limiting
+async def get_scanner_system_config(request: Request):
     """
     Get current market scanner configuration (criteria, weights, filters).
     This is separate from the strategy scanner (active symbols).
@@ -346,7 +466,8 @@ async def get_scanner_system_config():
 
 
 @router.get("/health")
-async def scanner_health(scanner: MarketScanner = Depends(get_scanner)):
+@limiter.limit("60/minute")  # Task #7: Rate limiting
+async def scanner_health(request: Request, scanner: MarketScanner = Depends(get_scanner)):
     """
     Health check for scanner system.
     Returns operational status and last scan info.

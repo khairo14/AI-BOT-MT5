@@ -2,58 +2,40 @@
   "scalping": {
     "enabled": true,
     "symbols": [
-      "EURUSD",
-      "USDJPY",
-      "GBPUSD",
-      "USDCHF",
-      "EURJPY",
-      "US100Cash",
-      "US30Cash"
+      "GBPCHF",
+      "AUDCHF",
+      "GBPAUD",
+      "OILCash",
+      "OILMn-MAY26",
+      "EURCHF"
     ],
     "timeframe": "M1/M5"
   },
   "day_trading": {
     "enabled": true,
     "symbols": [
-      "EURUSD",
-      "GBPUSD",
+      "AUDJPY",
+      "EURJPY",
+      "EURAUD",
       "USDJPY",
-      "AUDUSD",
-      "GBPJPY",
-      "GOLD",
-      "OILCash",
-      "BTCUSD",
-      "ETHUSD",
-      "US100Cash",
-      "US30Cash",
-      "US500Cash",
-      "Tesla",
-      "Nvidia",
-      "UK100Cash"
+      "GBPJPY"
     ],
     "timeframe": "M15/H1"
   },
   "swing": {
     "enabled": true,
     "symbols": [
-      "BTCUSD",
-      "ETHUSD",
-      "XRPUSD",
-      "SOLUSD",
-      "EURUSD",
+      "NZDCAD",
       "GBPUSD",
-      "USDJPY",
-      "AUDUSD",
-      "USDCAD",
-      "NZDUSD",
-      "GOLD",
-      "SILVER",
-      "OILCash",
+      "GBPCAD",
       "BRENTCash",
-      "US100Cash",
-      "Nvidia",
-      "Facebook",
-      "AdvMicroDev"
+      "AUDCAD",
+      "NZDUSD",
+      "BRENT-JUN26",
+      "AUDUSD",
+      "EURUSD",
+      "EU50Cash",
+      "EU50-JUN26"
     ],
     "timeframe": "H4/D1"
   }

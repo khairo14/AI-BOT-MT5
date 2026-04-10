@@ -8,7 +8,7 @@
 
 The AI/ML system has three learning loops that work together, fed by both live trade outcomes and the user-facing backtest engine.
 
-```
+```text
 MT5 Historical Bars
         │
         ├──────────────────────────────────────┐
@@ -52,7 +52,7 @@ MT5 Historical Bars
 
 Running the AI/ML pipeline for the first time (or after a full data reset) follows this sequence:
 
-```
+```text
 Step 1 — Run in parallel (fully independent, no shared resources):
     Terminal 1:  python ai/run_retrain.py             # day_trading + swing LSTMs
                  python ai/run_retrain_scalping.py    # scalping LSTMs (after run_retrain.py)
@@ -63,6 +63,7 @@ Step 2 — Only after BOTH complete:
 ```
 
 **Why retrain must complete before bootstrap:**
+
 - `run_rl_bootstrap.py` runs backtests with `use_ai_filters=True`
 - This calls `predictor.predict()` at every signal bar
 - Without trained models, every `conf_score = 0.0` → bootstrap fallback uses uniform `0.55` for all trades
@@ -70,12 +71,14 @@ Step 2 — Only after BOTH complete:
 - The resulting `conf_thresh` converges to an arbitrary value, not a meaningful one
 
 **Why optimizer should complete before bootstrap (soft dependency):**
+
 - The backtester calls `optimizer.get_params(strategy, symbol)` at the start of each run
 - Without optimized params, strategies use code defaults and may fire different signal patterns than they will live
 - RL calibrates to the wrong signal frequency and win rate
 - Acceptable if optimizer partially complete; best if fully complete
 
 **Why retrain and optimizer can run simultaneously:**
+
 - Optimizer: reads OHLCV from MT5, writes `config/optimized_params.json`. Uses zero LSTM.
 - Retrain: reads OHLCV from MT5, writes `ai/models/`. Uses zero optimizer.
 - No shared write targets, no race conditions.
@@ -87,6 +90,7 @@ Step 2 — Only after BOTH complete:
 See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 1 for full detail.
 
 **Summary of retraining behaviour:**
+
 - Manual: "Retrain" or "Retrain All" on the AI/ML Brain page
 - Auto trigger 1: every 20th closed live/paper trade per symbol×mode
 - Auto trigger 2: model stale > 7 days AND ≥ 10 trades
@@ -100,6 +104,7 @@ See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 1 for full deta
 See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 4 for full detail.
 
 **Bootstrap dependency summary:**
+
 - Hard dependency on LSTM models (conf_score is meaningless without them)
 - Soft dependency on optimizer (win rate more representative with optimized params)
 - Always wait for both before running bootstrap
@@ -111,6 +116,7 @@ See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 4 for full deta
 See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 6 for full detail.
 
 **Summary of how it reads/writes:**
+
 - Reads: `symbols.json`, `strategies.json`, OHLCV from MT5
 - Writes: `config/optimized_params.json` (atomic write, 5-version archive)
 - The backtester reads `optimized_params.json` automatically at the start of each run via `optimizer.get_params()`
@@ -124,7 +130,7 @@ See [07-ai-capabilities.md](./07-ai-capabilities.md) — Section 7 for full deta
 **Sources:**
 
 | Source | Written by | Mode tag |
-|---|---|---|
+| --- | --- | --- |
 | Live trades | `signal_bus._poll_outcome()` | `"live"` |
 | Paper trades | `signal_bus._poll_outcome()` or paper ledger sync | `"paper"` |
 | Backtest simulations | `api/routes/backtest.py` | `"backtest"` |
@@ -139,7 +145,7 @@ A walk-forward strategy simulation on real MT5 historical OHLCV bars. Validates 
 
 ### How a backtest run flows
 
-```
+```text
 User selects: symbol + strategy + mode + bars + balance + risk % + use_ai_filters
         │
         ▼
@@ -171,7 +177,7 @@ POST /backtest/run
 ### Backtest timeframe mapping
 
 | Strategy | Primary TF | Secondary TF |
-|---|---|---|
+| --- | --- | --- |
 | `ema_scalp` | M1 | M5 (bias) |
 | `bb_squeeze` | M5 | — |
 | `vwap_reversion` | M5 | — |
@@ -187,7 +193,7 @@ Secondary dataframes are time-sliced at bar `i` during walk-forward simulation �
 ### Result metrics
 
 | Metric | Description |
-|---|---|
+| --- | --- |
 | `win_rate` | Fraction of trades that were profitable |
 | `profit_factor` | Gross wins / gross losses |
 | `max_drawdown_pct` | Peak-to-trough on equity curve (%) |
@@ -210,7 +216,7 @@ Secondary dataframes are time-sliced at bar `i` during walk-forward simulation �
 ### API endpoints
 
 | Method | Path | Description |
-|---|---|---|
+| --- | --- | --- |
 | `POST` | `/backtest/run` | Run simulation, save result, trigger optimizer |
 | `GET` | `/backtest/strategies` | List available strategies per mode |
 | `GET` | `/backtest/history` | Paginated run list (filters: symbol, strategy, mode) |
@@ -227,7 +233,7 @@ Secondary dataframes are time-sliced at bar `i` during walk-forward simulation �
 Returns comprehensive performance data from `data/trade_journal.jsonl`:
 
 | Metric Group | Fields |
-|---|---|
+| --- | --- |
 | Counts | total_trades, wins, losses, win_rate |
 | P&L | total_profit, avg_profit, avg_win, avg_loss, avg_rr |
 | Risk-adjusted | sharpe_ratio, sortino_ratio, max_drawdown_pct |
@@ -253,7 +259,7 @@ Returns comprehensive performance data from `data/trade_journal.jsonl`:
 
 ## 7. The Feedback Loop (Summary)
 
-```
+```text
 Phase 1 — Setup (offline, one-time):
   run_retrain.py + run_retrain_scalping.py  [parallel with optimizer]
   run_optimizer.py                          [parallel with retrain]

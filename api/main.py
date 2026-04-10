@@ -4,17 +4,22 @@ Mounts all REST routes and the WebSocket live feed.
 """
 
 import asyncio
+import json
 import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
-from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes
+from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes, profitability as profitability_routes
 from api.websocket.feed import router as ws_router
 from api.signal_bus import bus, _set_event_loop
 from api.runner_loop import start_runner_loop
@@ -24,15 +29,73 @@ from engine.order_manager import OrderManager
 from engine.risk_manager import RiskManager
 
 # ---------------------------------------------------------------------------
-# Logging setup — write to file so dashboard can tail it
+# Logging setup (Task #11: Logging Improvements)
 # ---------------------------------------------------------------------------
-_LOG_FILE = Path("logs/api.log")
-_LOG_FILE.parent.mkdir(exist_ok=True)
+_LOG_DIR = Path("logs")
+_LOG_DIR.mkdir(exist_ok=True)
+
+# Environment settings
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG" if ENVIRONMENT == "development" else "INFO")
+
 logger.remove()  # drop default stderr sink
-logger.add(sys.stderr, level="INFO", colorize=True,
-           format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> | <level>{message}</level>")
-logger.add(str(_LOG_FILE), level="DEBUG", rotation="10 MB", retention=3, encoding="utf-8",
-           format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}")
+
+# 1. Console logging (human-readable, colored)
+logger.add(
+    sys.stderr,
+    level=LOG_LEVEL,
+    colorize=True,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> | <level>{message}</level>",
+    backtrace=True,
+    diagnose=True,
+)
+
+# 2. File logging (detailed, daily rotation)
+logger.add(
+    str(_LOG_DIR / "api_{time:YYYY-MM-DD}.log"),
+    level="DEBUG",
+    rotation="00:00",  # Daily rotation at midnight
+    retention="7 days",  # Keep 7 days
+    compression="zip",  # Compress old logs
+    encoding="utf-8",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
+    backtrace=True,
+    diagnose=True,
+)
+
+# 3. JSON logging (production only, for log aggregation)
+if ENVIRONMENT == "production":
+    logger.add(
+        str(_LOG_DIR / "api_{time:YYYY-MM-DD}.json"),
+        level="INFO",
+        rotation="00:00",
+        retention="30 days",  # Keep JSON logs longer
+        compression="zip",
+        encoding="utf-8",
+        serialize=True,  # Built-in JSON serialization
+    )
+    logger.info("JSON logging enabled for production environment")
+
+# 4. Error-only log (critical issues)
+logger.add(
+    str(_LOG_DIR / "errors_{time:YYYY-MM-DD}.log"),
+    level="ERROR",
+    rotation="00:00",
+    retention="30 days",  # Keep errors longer
+    compression="zip",
+    encoding="utf-8",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
+    backtrace=True,
+    diagnose=True,
+)
+
+logger.info(f"Logging initialized | Environment: {ENVIRONMENT} | Level: {LOG_LEVEL}")
+
+
+def _get_latest_api_log_file() -> Path | None:
+    """Return the most recent daily API log file for dashboard log tailing."""
+    candidates = sorted(_LOG_DIR.glob("api_*.log"), key=lambda path: path.stat().st_mtime, reverse=True)
+    return candidates[0] if candidates else None
 
 # ---------------------------------------------------------------------------
 # Shared MT5 client — created once at startup, closed at shutdown
@@ -222,6 +285,11 @@ async def lifespan(app: FastAPI):
 
 
 # ---------------------------------------------------------------------------
+# Rate Limiting (Task #7)
+# ---------------------------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = FastAPI(
@@ -244,6 +312,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting state and error handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def add_correlation_id(request: Request, call_next):
+    """Attach a correlation ID to every request for log tracing."""
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    request.state.correlation_id = correlation_id
+    with logger.contextualize(correlation_id=correlation_id):
+        response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -252,25 +335,127 @@ app.include_router(trades.router,      prefix="/trades",   tags=["Trades"])
 app.include_router(signals.router,     prefix="/signals",  tags=["Signals"])
 app.include_router(config.router,      prefix="/config",   tags=["Config"])
 app.include_router(ai_routes.router,   prefix="/ai",       tags=["AI"])
-app.include_router(risk_routes.router,     prefix="/risk",      tags=["Risk"])
-app.include_router(backtest_routes.router, prefix="/backtest",  tags=["Backtest"])
+app.include_router(risk_routes.router, prefix="/risk", tags=["Risk"])
+app.include_router(backtest_routes.router, prefix="/backtest", tags=["Backtest"])
 app.include_router(analytics_routes.router, prefix="/analytics", tags=["Analytics"])
-app.include_router(scanner_routes.router,   prefix="/scanner",   tags=["Scanner"])
-app.include_router(ws_router,              prefix="/ws",        tags=["WebSocket"])
+app.include_router(scanner_routes.router, prefix="/scanner", tags=["Scanner"])
+app.include_router(profitability_routes.router, prefix="/profitability", tags=["Profitability"])
+app.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
 
 
 @app.get("/health", tags=["Health"])
-def health():
-    """Quick liveness check."""
-    connected = mt5_client.is_connected() if mt5_client else False
-    return {"status": "ok", "mt5_connected": connected}
+@limiter.limit("60/minute")
+def health(request: Request):
+    """Enhanced health check endpoint for uptime monitoring."""
+    import platform
+    import psutil
+    from fastapi import status
+
+    mt5_connected = False
+    mt5_status = "disconnected"
+    try:
+        if mt5_client:
+            mt5_connected = mt5_client.is_connected()
+            mt5_status = "ok" if mt5_connected else "disconnected"
+    except Exception as exc:
+        mt5_status = f"error: {exc}"
+
+    disk_status = "ok"
+    disk_free_gb = 0.0
+    disk_usage_pct = 0.0
+    try:
+        disk_root = "d:\\" if platform.system() == "Windows" else "/"
+        disk = psutil.disk_usage(disk_root)
+        disk_free_gb = disk.free / (1024 ** 3)
+        disk_usage_pct = disk.percent
+        if disk_free_gb < 5.0 or disk_usage_pct > 90:
+            disk_status = "warning"
+    except Exception as exc:
+        disk_status = f"error: {exc}"
+
+    memory_status = "ok"
+    memory_usage_pct = 0.0
+    memory_available_gb = 0.0
+    try:
+        mem = psutil.virtual_memory()
+        memory_usage_pct = mem.percent
+        memory_available_gb = mem.available / (1024 ** 3)
+        if memory_usage_pct > 90 or memory_available_gb < 1.0:
+            memory_status = "warning"
+    except Exception as exc:
+        memory_status = f"error: {exc}"
+
+    risk_status = "ok" if _risk_manager else "not_initialized"
+    circuit_breaker_active = False
+    if _risk_manager is not None:
+        try:
+            circuit_breaker_active = (
+                _risk_manager._daily_breaker_active
+                or _risk_manager._weekly_breaker_active
+                or _risk_manager._monthly_breaker_active
+            )
+            if circuit_breaker_active:
+                risk_status = "circuit_breaker_active"
+        except Exception:
+            risk_status = "ok"
+
+    checks = {
+        "mt5_connection": mt5_status,
+        "disk_space": disk_status,
+        "memory": memory_status,
+        "risk_manager": risk_status,
+    }
+    critical_issues = [
+        key for key, value in checks.items()
+        if value not in ("ok", "warning", "circuit_breaker_active", "not_initialized")
+    ]
+    is_healthy = len(critical_issues) == 0 and mt5_connected
+    payload = {
+        "status": "healthy" if is_healthy else "degraded",
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "version": "1.0.0",
+        "checks": checks,
+        "metrics": {
+            "disk_free_gb": round(disk_free_gb, 2),
+            "disk_usage_pct": round(disk_usage_pct, 1),
+            "memory_usage_pct": round(memory_usage_pct, 1),
+            "memory_available_gb": round(memory_available_gb, 2),
+            "circuit_breaker_active": circuit_breaker_active,
+        },
+        "trading_mode": mt5_client.trading_mode if mt5_client else "unknown",
+        "correlation_id": getattr(request.state, "correlation_id", None),
+    }
+    status_code = status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    return Response(content=json.dumps(payload), status_code=status_code, media_type="application/json")
 
 
 @app.get("/logs/tail", tags=["Logs"])
-def log_tail(n: int = 200):
-    """Return the last N lines from the API log file for the dashboard log console."""
-    if not _LOG_FILE.exists():
+@limiter.limit("30/minute")
+def log_tail(request: Request, n: int = 200):
+    """Return the last N lines from the most recent API log file."""
+    log_file = _get_latest_api_log_file()
+    if log_file is None or not log_file.exists():
         return {"lines": []}
-    text = _LOG_FILE.read_text(encoding="utf-8", errors="ignore")
+    text = log_file.read_text(encoding="utf-8", errors="ignore")
     lines = [ln for ln in text.splitlines() if ln.strip()]
     return {"lines": lines[-n:]}
+
+
+@app.get("/rate-limit-status", tags=["Health"])
+def rate_limit_status(request: Request):
+    """Return rate limiting configuration and status."""
+    return {
+        "rate_limiting_enabled": True,
+        "global_limit": "200 requests/minute",
+        "limits": {
+            "signals": "100/minute",
+            "scanner": "30/minute (full scan), 60/minute (results)",
+            "ai_predictions": "60/minute",
+            "trades": "100/minute",
+            "health": "60/minute",
+            "logs": "30/minute"
+        },
+        "client_ip": get_remote_address(request),
+        "task": "Task #7: Rate Limiting",
+        "correlation_id": getattr(request.state, "correlation_id", None),
+    }

@@ -13,7 +13,7 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 ## Broker & Account Setup
 
 | Item | Detail |
-|---|---|
+| --- | --- |
 | Broker | XM |
 | Platform | MetaTrader 5 (MT5) |
 | Paper Trading Account | XM Demo MT5 account |
@@ -115,7 +115,7 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 ## Tech Stack
 
 | Component | Technology |
-|---|---|
+| --- | --- |
 | MT5 Connection | `MetaTrader5` Python library (Windows only) |
 | Scalping Order Execution | MQL5 Expert Advisor + Python EA bridge fallback |
 | Data & Indicators | `pandas`, `numpy` |
@@ -138,7 +138,7 @@ A full-stack AI-powered trading bot connected to XM via MetaTrader 5. It support
 
 ## Project Directory Structure
 
-```
+```text
 EVOTRADE-AI/
 ├── engine/
 │   ├── mt5_client.py             # MT5 connection, account, OHLCV, positions
@@ -215,7 +215,7 @@ EVOTRADE-AI/
 ## Build Phases
 
 | Phase | Deliverable | Status |
-|---|---|---|
+| --- | --- | --- |
 | 1 | MT5 connection, account info, OHLCV fetch, place/close orders | ✅ Done |
 | 2 | Strategy engine + 9 strategies (3 per type) + paper trading | ✅ Done |
 | 3 | FastAPI backend + WebSocket live price feed | ✅ Done |

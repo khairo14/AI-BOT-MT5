@@ -7,7 +7,7 @@
 ## Component Overview
 
 | Component | Purpose | Runs when | Updates when |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **LSTM Predictor** | Directional probability (0–1) per symbol×mode | Every signal check | Every 20th live trade, model stale >7 days, 8 consecutive losses, or manual retrain |
 | **Signal Scorer** | Blend LSTM + R:R + Trend + Volume → confidence | Every signal check | Weights hot-reload from `app.json` every 5 s |
 | **Regime Classifier** | 6-label market condition label | Every signal check | Per bar — 3-bar hysteresis before label promoted |
@@ -22,6 +22,7 @@
 **What it predicts:** Whether the cumulative return over the next N bars will be positive or negative. Returns a probability between 0 and 1 — `0.5 = neutral`, `>0.65 = strong directional signal`.
 
 **Multi-bar lookahead label** (not single next-bar):
+
 - Scalping (M5): 5 bars ahead = 25-minute horizon
 - Day Trading (H1): 5 bars ahead = 5-hour horizon
 - Swing (H4): 3 bars ahead = 12-hour horizon
@@ -29,12 +30,13 @@
 Single next-bar direction at M5/H1/H4 is near-pure noise. Aggregating N bars reduces label noise while keeping the prediction horizon relevant to the trading type.
 
 **Architecture:**
+
 - 2-layer LSTM, hidden size 64, dropout 0.2
 - Sequence length: 60 bars (sees 60 bars before making a prediction)
 - Input features per bar — **7 total**:
 
 | Feature | Formula | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `close_return` | (close[i] − close[i−1]) / close[i−1] | Price momentum |
 | `hl_range` | (high − low) / close | Bar range / volatility |
 | `oc_body` | (close − open) / open | Candle direction + strength |
@@ -49,11 +51,13 @@ Single next-bar direction at M5/H1/H4 is near-pure noise. Aggregating N bars red
 - Train/val split: 80/20 on the feature array with scaler fitted on training rows only (no val leakage)
 
 **Accuracy gate:**
+
 - If a model already exists on disk: new model must exceed **58%** validation accuracy or it is discarded (existing model retained)
 - First-time training (bootstrap): accepts any accuracy > 50% and logs a bootstrap notice
 - 58% threshold: chosen because below this, expected value after spread and slippage is negative
 
 **Model versioning:**
+
 - **Live model:** `ai/models/{key}_lstm.pt` + `{key}_scaler.pkl` + `{key}_meta.json`
 - **Anchor model:** `ai/models/{key}_anchor.pt` — frozen at first production-quality training, never auto-overwritten. Used for baseline comparison alerts.
 - **Version archive:** `ai/models/versions/{key}/` — last 3 versions kept. API rollback endpoint: `POST /ai/models/rollback/{symbol}/{trading_type}`
@@ -64,12 +68,13 @@ After 30+ live trades per symbol×mode, `POST /ai/models/calibrate/{symbol}/{tra
 **One model per symbol × trading type.** Training timeframes:
 
 | Mode | Training TF | Lookahead |
-|---|---|---|
+| --- | --- | --- |
 | Scalping | M5 | 5 bars (25 min) |
 | Day Trading | H1 | 5 bars (5 hours) |
 | Swing | H4 | 3 bars (12 hours) |
 
 **Auto-retrain triggers (whichever fires first):**
+
 1. Every 20th closed live/paper trade per symbol×mode
 2. Model age > 7 days AND ≥ 10 trades exist for the symbol×mode
 3. 8 consecutive losses for the symbol×mode (regime-change indicator)
@@ -89,7 +94,7 @@ The performance monitor checks every 5 minutes and broadcasts a WebSocket alert 
 **Global default (day_trading):**
 
 | Component | Weight | Source |
-|---|---|---|
+| --- | --- | --- |
 | LSTM direction probability | 30% | `predictor.predict()` |
 | Risk:Reward ratio quality | 35% | From entry / SL / TP |
 | Trend alignment (EMA50 vs EMA200) | 20% | Computed from OHLCV |
@@ -98,7 +103,7 @@ The performance monitor checks every 5 minutes and broadcasts a WebSocket alert 
 **Scalping-specific weights** (`app.json → ai.scalping_scorer_weights`):
 
 | Component | Weight | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | LSTM | 15% | M5 LSTM less reliable than H1/H4 |
 | R:R | 25% | Structure quality gate |
 | Trend | 40% | Primary scalping edge |
@@ -107,7 +112,7 @@ The performance monitor checks every 5 minutes and broadcasts a WebSocket alert 
 **Swing-specific weights** (`app.json → ai.swing_scorer_weights`):
 
 | Component | Weight | Rationale |
-|---|---|---|
+| --- | --- | --- |
 | LSTM | 40% | H4 LSTM is most reliable |
 | R:R | 30% | Multi-day commitment requires strong setup |
 | Trend | 25% | Weekly trend alignment |
@@ -118,7 +123,7 @@ The performance monitor checks every 5 minutes and broadcasts a WebSocket alert 
 When the regime classifier provides a label, the scorer uses a per-regime profile from `app.json → ai.regime_weights`. Resolution priority: per-regime → global default → class defaults.
 
 | Regime | LSTM | RR | Trend | Volume | Logic |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | `trending_bull` | 0.35 | 0.25 | **0.30** | 0.10 | Lean on trend + LSTM for timing |
 | `trending_bear` | 0.35 | 0.25 | **0.30** | 0.10 | Mirror of trending_bull |
 | `ranging_low_vol` | 0.25 | **0.40** | 0.10 | 0.25 | RR structure + volume carry weight |
@@ -129,26 +134,31 @@ When the regime classifier provides a label, the scorer uses a per-regime profil
 ### Component Details
 
 **Trend score — graduated (not binary):**
+
 - `gap_pct = (EMA50 − EMA200) / |EMA200|`
 - `trend_strength = clip(gap_pct / 0.05, −1, +1)` — normalised: ±5% gap = ±1
 - `raw_score = 0.5 + 0.4 × trend_strength` — range **[0.1, 0.9]**
 - BUY uses `raw_score`; SELL uses `1 − raw_score`
 
 **R:R score:**
+
 - `clip((reward / risk) / 4.0, 0.0, 1.0)`
 - 1:1 → 0.25 | 2:1 → 0.50 | 3:1 → 0.75 | ≥4:1 → 1.0
 
 **Volume score:**
+
 - `clip(last_bar_volume / (20_bar_avg × 2), 0.0, 1.0)`
 - At average → 0.50 | 2× above average → 1.0
 
 **Multi-timeframe penalty:**
 After scoring, if a higher-TF dataframe is available, the score is penalised when the HTF trend conflicts with the signal direction:
+
 - Aligned (HTF trend score ≥ 0.55): no penalty
 - Neutral (0.45–0.55): score × 0.95
 - Conflicted (< 0.45): score × 0.85
 
 **Score thresholds (for badge colours in UI):**
+
 - `≥ 0.75` → High confidence (green)
 - `0.50–0.74` → Medium (yellow)
 - `< 0.50` → Low (gray)
@@ -184,6 +194,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Algorithm:** Tabular Q-learning — fast, interpretable, no GPU required.
 
 **What it controls:**
+
 1. `confidence_threshold` — minimum signal confidence to allow entry
 2. `risk_factor` — multiplier on the base risk% from `risk.json`
 
@@ -191,7 +202,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 `{win_rate_bucket}_{conf_bucket}_{session_bucket}_{drawdown_bucket}_{vol_bucket}`
 
 | Dimension | Buckets | Values |
-|---|---|---|
+| --- | --- | --- |
 | Win rate | 3 | low (<40%), med (40–60%), high (>60%) |
 | Avg confidence | 3 | low (<0.55), med (0.55–0.70), high (>0.70) |
 | Session | 3 | overlap (12–17 UTC), active (07–22 UTC), quiet |
@@ -201,6 +212,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Actions:** 9 joint actions combining ±CONF_STEP (0.02) and ±RISK_STEP (0.05) or hold.
 
 **Per-mode learning rates:**
+
 - Scalping: α = 0.15 (fast intraday adaptation)
 - Day Trading: α = 0.10 (balanced)
 - Swing: α = 0.05 (slow — multi-day confirmation needed)
@@ -208,12 +220,13 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Per-mode parameter bounds:**
 
 | Mode | conf_thresh range | conf_ceil | risk_factor range |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Scalping | 0.52–0.72 | 0.72 | 0.60–1.50 |
 | Day Trading | 0.52–0.78 | 0.78 | 0.60–1.50 |
 | Swing | 0.50–0.78 | 0.78 | 0.60–1.50 |
 
 **Reward shaping:**
+
 - Asymmetric clipping: max(−0.05, min(+0.15, profit_pct/100))
 - Win-rate penalty: −0.02 reward when win_rate < 40%; −0.01 when < 45%
 - Prevents gambler's-fallacy learning ("take everything to recover losses")
@@ -235,7 +248,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Labels:** 6 mutually exclusive market condition labels
 
 | Label | Condition |
-|---|---|
+| --- | --- |
 | `trending_bull` | ADX ≥ threshold, EMA50 > EMA200 |
 | `trending_bear` | ADX ≥ threshold, EMA50 < EMA200 |
 | `ranging_low_vol` | ADX < threshold, ATR% < 0.80% |
@@ -246,7 +259,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Per-asset-class ADX thresholds:**
 
 | Asset Class | Trending | Breakout |
-|---|---|---|
+| --- | --- | --- |
 | Forex | 22 | 30 |
 | Commodities (Gold, Oil) | 25 | 32 |
 | Indices (US30, GER40) | 28 | 35 |
@@ -257,6 +270,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **State persistence:** Confirmed labels and pending counters are saved to `data/regime_state.json` and restored on restart. A cold-start doesn't reset weeks of accumulated regime context.
 
 **Wiring into the pipeline:**
+
 1. Regime classified from `primary_df` early in `strategy_runner._run_strategy()`
 2. Regime label passed to `optimizer.get_params(strat, symbol, regime=regime)` for regime-specific params
 3. Regime label passed to `scorer.score(..., regime=regime)` for regime-specific weights
@@ -265,13 +279,14 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Regime gating (strategy whitelist):** Strategies structurally mismatched with the current regime are blocked before any signal logic runs:
 
 | Regime | Allowed strategies |
-|---|---|
+| --- | --- |
 | `trending_bull/bear` | macd_ema_trend, ema_trend_rider, sr_breakout, ema_scalp, bb_squeeze |
 | `ranging_low/high_vol` | vwap_reversion, bb_squeeze, fibonacci_rsi, rsi_divergence |
 | `volatile_breakout` | sr_breakout, weekly_breakout, bb_squeeze |
 | `quiet` | None (no trades in stationary markets) |
 
 **Regime-aware lot sizing:** In addition to regime gating, approved trades in suboptimal regimes have their lot size reduced:
+
 - `volatile_breakout`: ×0.75
 - `ranging_high_vol`: ×0.85
 - `ranging_low_vol`: ×0.90
@@ -288,7 +303,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Spread cost deduction (per trade, from R-multiple):**
 
 | Instrument | Cost |
-|---|---|
+| --- | --- |
 | Scalping (generic) | 0.20R |
 | Day Trading | 0.08R |
 | Swing | 0.03R |
@@ -327,19 +342,20 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Sources:**
 
 | Source | When written | Mode tag |
-|---|---|---|
+| --- | --- | --- |
 | Live trades | After MT5 position closes via `_poll_outcome` | `"live"` |
 | Paper trades | After MT5 position closes or paper ledger sync | `"paper"` |
 | Backtest simulations | After each backtest run | `"backtest"` |
 
 **Storage:**
+
 - Disk: `ai/data/trade_memory.jsonl` — append-only, unlimited size
 - RAM: rolling buffer of last **10,000** entries for fast reads
 
 **Key fields per entry:**
 
 | Field | Description |
-|---|---|
+| --- | --- |
 | `ticket` | MT5 ticket (0 for backtest entries) |
 | `symbol`, `strategy`, `trading_type`, `direction` | Trade identification |
 | `confidence` | Signal scorer score at entry time |
@@ -355,7 +371,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Analytics methods:**
 
 | Method | Description |
-|---|---|
+| --- | --- |
 | `stats()` | Win rate, avg P&L, TP/SL counts, slippage tracking |
 | `lstm_accuracy()` | Live LSTM prediction accuracy vs actual outcomes; flags degraded symbols |
 | `stats_by_regime()` | Win rate and avg P&L per regime per strategy |
@@ -371,7 +387,7 @@ Controlled by `config/app.json → ai.rl_agent_enabled`.
 **Asset groups covered:**
 
 | Group | Members (examples) |
-|---|---|
+| --- | --- |
 | USD Short (BUY = USD weakens) | EURUSD, GBPUSD, AUDUSD, NZDUSD, XAUUSD |
 | USD Long (BUY = USD strengthens) | USDJPY, USDCAD, USDCHF |
 | Crypto Long/Short | BTCUSD, ETHUSD, XRPUSD, SOLUSD |
@@ -455,7 +471,7 @@ Auto-optimizer check (win rate < 45% with ≥ 30 new trades)
 All AI flags in `config/app.json` under `"ai"`:
 
 | Key | Default | Effect |
-|---|---|---|
+| --- | --- | --- |
 | `price_prediction_enabled` | `true` | LSTM contributes to signal score; `false` → LSTM returns 0.5 neutral |
 | `confidence_filter_enabled` | `false` | Gate 1 static threshold enabled/disabled |
 | `confidence_threshold` | `60` | Gate 1 threshold in percent (60 = block below 0.60) |
@@ -471,7 +487,7 @@ All AI flags in `config/app.json` under `"ai"`:
 ## 11. Constraints & Limits
 
 | Parameter | Value |
-|---|---|
+| --- | --- |
 | LSTM sequence length | 60 bars |
 | LSTM input features | 7 |
 | LSTM training epochs | 50 |

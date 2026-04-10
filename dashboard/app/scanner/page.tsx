@@ -8,9 +8,20 @@ import {
   addSymbolToConfig,
   invalidateScannerCache,
   fetchScannerHealth,
+  fetchScannerConfig,
+  patchScannerConfig,
   type ScanResult,
   type ScanSummary,
 } from "@/lib/api";
+import { useBotStore } from "@/lib/store";
+import ScannerMonitor from "@/components/dashboard/ScannerMonitor";
+
+// Mode capacity limits
+const MODE_LIMITS: Record<string, number> = {
+  scalping: 7,
+  day_trading: 15,
+  swing: 18,
+};
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function relTime(iso: string | undefined): string {
@@ -48,6 +59,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 // ── component ──────────────────────────────────────────────────────────────
 export default function ScannerPage() {
+  const { pushNotification } = useBotStore();
   const [activeTab, setActiveTab] = useState<"scalping" | "day_trading" | "swing">("scalping");
   const [scanData, setScanData] = useState<ScanSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,6 +69,25 @@ export default function ScannerPage() {
   const [sortKey, setSortKey] = useState<keyof ScanResult>("composite_score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [health, setHealth] = useState<any>(null);
+  const [activeSymbols, setActiveSymbols] = useState<Record<string, string[]>>({
+    scalping: [],
+    day_trading: [],
+    swing: [],
+  });
+
+  // Load scanner config (active symbols per mode)
+  const loadActiveSymbols = useCallback(async () => {
+    try {
+      const cfg = await fetchScannerConfig();
+      setActiveSymbols({
+        scalping: cfg.scalping?.symbols || [],
+        day_trading: cfg.day_trading?.symbols || [],
+        swing: cfg.swing?.symbols || [],
+      });
+    } catch (err) {
+      console.error("Failed to load scanner config:", err);
+    }
+  }, []);
 
   // Load initial data
   const loadData = useCallback(async (forceRefresh = false) => {
@@ -83,12 +114,14 @@ export default function ScannerPage() {
   useEffect(() => {
     loadData();
     loadHealth();
+    loadActiveSymbols();
     const interval = setInterval(() => {
       loadData(); // Auto-refresh every 5 minutes
       loadHealth();
+      loadActiveSymbols();
     }, 300_000);
     return () => clearInterval(interval);
-  }, [loadData, loadHealth]);
+  }, [loadData, loadHealth, loadActiveSymbols]);
 
   // Manual scan trigger
   const handleScan = async (tradingType?: string) => {
@@ -105,13 +138,68 @@ export default function ScannerPage() {
 
   // Add symbol to config
   const handleAddSymbol = async (symbol: string, tradingType: string) => {
+    // Check if already at capacity
+    const currentSymbols = activeSymbols[tradingType] || [];
+    const limit = MODE_LIMITS[tradingType];
+    
+    if (currentSymbols.length >= limit) {
+      pushNotification({
+        type: "warning",
+        title: "Capacity Reached",
+        message: `${TYPE_LABELS[tradingType]} scanner is full (${limit}/${limit} symbols). Remove a symbol first.`,
+      });
+      return;
+    }
+
     setAddingSymbol(symbol);
     try {
       await addSymbolToConfig(symbol, tradingType, true);
-      alert(`✅ ${symbol} added to ${TYPE_LABELS[tradingType]} symbols!`);
+      await loadActiveSymbols(); // Reload active symbols
+      pushNotification({
+        type: "success",
+        title: "Symbol Added",
+        message: `${symbol} added to ${TYPE_LABELS[tradingType]} (${currentSymbols.length + 1}/${limit})`,
+      });
     } catch (err) {
       console.error("Failed to add symbol:", err);
-      alert(`❌ Failed to add ${symbol}`);
+      pushNotification({
+        type: "error",
+        title: "Failed to Add Symbol",
+        message: `Could not add ${symbol} to ${TYPE_LABELS[tradingType]}`,
+      });
+    } finally {
+      setAddingSymbol(null);
+    }
+  };
+
+  // Remove symbol from config
+  const handleRemoveSymbol = async (symbol: string, tradingType: string) => {
+    setAddingSymbol(symbol); // Reuse same loading state
+    try {
+      const cfg = await fetchScannerConfig();
+      const modeConfig = cfg[tradingType] || { enabled: true, symbols: [], timeframe: "M5" };
+      const updatedSymbols = modeConfig.symbols.filter((s: string) => s !== symbol);
+      
+      await patchScannerConfig({
+        [tradingType]: {
+          ...modeConfig,
+          symbols: updatedSymbols,
+        },
+      });
+      
+      await loadActiveSymbols(); // Reload active symbols
+      pushNotification({
+        type: "success",
+        title: "Symbol Removed",
+        message: `${symbol} removed from ${TYPE_LABELS[tradingType]} (${updatedSymbols.length}/${MODE_LIMITS[tradingType]})`,
+      });
+    } catch (err) {
+      console.error("Failed to remove symbol:", err);
+      pushNotification({
+        type: "error",
+        title: "Failed to Remove Symbol",
+        message: `Could not remove ${symbol} from ${TYPE_LABELS[tradingType]}`,
+      });
     } finally {
       setAddingSymbol(null);
     }
@@ -181,6 +269,11 @@ export default function ScannerPage() {
         <p className="text-gray-400 text-sm">
           Discover the best trading opportunities from 150+ symbols across all markets
         </p>
+      </div>
+
+      {/* Scanner Monitor - Active Pairs Performance */}
+      <div className="mb-6">
+        <ScannerMonitor />
       </div>
 
       {/* Stats */}
@@ -314,13 +407,45 @@ export default function ScannerPage() {
                       )}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => handleAddSymbol(result.symbol, activeTab)}
-                        disabled={addingSymbol === result.symbol}
-                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded text-xs font-medium transition-colors"
-                      >
-                        {addingSymbol === result.symbol ? "Adding..." : "+ Add"}
-                      </button>
+                      {(() => {
+                        const isAdded = activeSymbols[activeTab]?.includes(result.symbol);
+                        const currentCount = activeSymbols[activeTab]?.length || 0;
+                        const limit = MODE_LIMITS[activeTab];
+                        const atCapacity = currentCount >= limit;
+                        const isProcessing = addingSymbol === result.symbol;
+
+                        if (isAdded) {
+                          return (
+                            <button
+                              onClick={() => handleRemoveSymbol(result.symbol, activeTab)}
+                              disabled={isProcessing}
+                              className="px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded text-xs font-medium transition-colors"
+                            >
+                              {isProcessing ? "Removing..." : "Remove"}
+                            </button>
+                          );
+                        } else if (atCapacity) {
+                          return (
+                            <button
+                              disabled
+                              className="px-3 py-1 bg-gray-700 cursor-not-allowed rounded text-xs font-medium text-gray-500"
+                              title={`${TYPE_LABELS[activeTab]} scanner is full (${limit}/${limit})`}
+                            >
+                              Full ({currentCount}/{limit})
+                            </button>
+                          );
+                        } else {
+                          return (
+                            <button
+                              onClick={() => handleAddSymbol(result.symbol, activeTab)}
+                              disabled={isProcessing}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded text-xs font-medium transition-colors"
+                            >
+                              {isProcessing ? "Adding..." : `+ Add (${currentCount}/${limit})`}
+                            </button>
+                          );
+                        }
+                      })()}
                     </td>
                   </tr>
                 ))}

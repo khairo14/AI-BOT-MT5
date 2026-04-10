@@ -18,7 +18,7 @@ The regime classifier and analytics system provide two complementary capabilitie
 ### Labels
 
 | Label | Condition |
-|---|---|
+| --- | --- |
 | `trending_bull` | ADX ≥ threshold, EMA50 > EMA200 |
 | `trending_bear` | ADX ≥ threshold, EMA50 < EMA200 |
 | `ranging_low_vol` | ADX < threshold, ATR% < 0.80% |
@@ -29,7 +29,7 @@ The regime classifier and analytics system provide two complementary capabilitie
 ### Per-Asset-Class ADX Thresholds
 
 | Asset Class | Examples | ADX Trending | ADX Breakout |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Forex | EURUSD, GBPUSD, USDJPY | 22 | 30 |
 | Commodities | GOLD, SILVER, USOIL | 25 | 32 |
 | Indices | US30Cash, GER40Cash | 28 | 35 |
@@ -41,7 +41,7 @@ Asset class is determined from `config/symbols.json` via a cache built at startu
 
 A raw classification must hold for **3 consecutive bars** before replacing the confirmed label. This prevents oscillation when the market sits near a regime boundary.
 
-```
+```text
 bar N:   raw = "trending_bull"   pending=1/3  confirmed="ranging_low_vol"
 bar N+1: raw = "trending_bull"   pending=2/3  confirmed="ranging_low_vol"
 bar N+2: raw = "trending_bull"   pending=3/3  confirmed → "trending_bull"  ✓
@@ -73,7 +73,7 @@ all   = regime_classifier.all_labels()             # → {"EURUSD": "ranging_low
 
 The execution order in `strategy_runner._run_strategy()`:
 
-```
+```text
 1. Fetch all required TF dataframes (TIMEFRAME_BARS)
 2. Classify regime from primary_df  ← regime known here
 3. _strategy_params(strat, symbol, regime=regime)  ← regime-aware params
@@ -89,7 +89,7 @@ The execution order in `strategy_runner._run_strategy()`:
 Strategies structurally mismatched with the current regime are blocked before any computation:
 
 | Regime | Allowed Strategies |
-|---|---|
+| --- | --- |
 | `trending_bull` / `trending_bear` | macd_ema_trend, ema_trend_rider, sr_breakout, ema_scalp, bb_squeeze |
 | `ranging_low_vol` / `ranging_high_vol` | vwap_reversion, bb_squeeze, fibonacci_rsi, rsi_divergence |
 | `volatile_breakout` | sr_breakout, weekly_breakout, bb_squeeze |
@@ -98,6 +98,7 @@ Strategies structurally mismatched with the current regime are blocked before an
 ### Regime-Aware Scorer Weights
 
 When a regime label is available, `SignalScorer._weights()` resolves in priority order:
+
 1. `app.json → ai.regime_weights[regime]` — per-regime profile
 2. `app.json → ai.scalping_scorer_weights` (if scalping)
 3. `app.json → ai.swing_scorer_weights` (if swing)
@@ -131,7 +132,7 @@ At signal time, `optimizer.get_params(strat, symbol, regime=regime)` resolves in
 After standard lot calculation, approved signals receive an additional regime multiplier:
 
 | Regime | Lot Factor | Reason |
-|---|---|---|
+| --- | --- | --- |
 | `trending_bull` / `trending_bear` | ×1.00 | Familiar, well-modelled — full size |
 | `ranging_low_vol` | ×0.90 | Slightly reduced — strategies less optimal |
 | `ranging_high_vol` | ×0.85 | Wider spreads, slippage risk |
@@ -149,11 +150,13 @@ Beyond basic win/loss stats, `trade_memory.py` provides:
 Monitors whether the rolling win rate is drifting downward (regime shift or model decay). The Page-Hinkley algorithm tracks a cumulative sum and raises an alarm when it exceeds a threshold.
 
 Parameters:
+
 - `window`: baseline window size (default 30 trades)
 - `delta`: minimum acceptable mean change (0.005 = 0.5%)
 - `lambda_threshold`: sensitivity (default 10.0 — lower = more sensitive)
 
 Returns:
+
 - `drift_detected`: bool
 - `drift_direction`: `"down"` (degrading) or `"up"` (improving)
 - `baseline_win_rate`, `recent_win_rate`, `win_rate_delta`
@@ -164,6 +167,7 @@ Returns:
 Tracks expected value across rolling windows (50% overlap) to detect whether performance is improving, stable, or degrading before it reaches the hard 40% alert threshold.
 
 Returns:
+
 - `ev_slope`: linear regression slope over recent windows
 - `trend`: `"improving"`, `"stable"`, or `"degrading"`
 - `recent_avg_wr`, `recent_avg_ev`
@@ -185,7 +189,7 @@ Win rate and avg P&L per regime per strategy. Validates that regime gating is im
 Query parameters:
 
 | Parameter | Values | Default |
-|---|---|---|
+| --- | --- | --- |
 | `account` | `paper`, `live`, `all` | `all` |
 | `trading_type` | `scalping`, `day_trading`, `swing`, `all` | `all` |
 | `limit` | integer (1–50,000) | `5000` |
@@ -193,7 +197,7 @@ Query parameters:
 Returns comprehensive performance data from `data/trade_journal.jsonl`:
 
 | Field | Description |
-|---|---|
+| --- | --- |
 | `total_trades`, `wins`, `losses`, `win_rate` | Basic counts |
 | `total_profit`, `avg_profit`, `avg_win`, `avg_loss` | P&L stats |
 | `avg_rr` | Average realised risk:reward |
@@ -217,7 +221,7 @@ Returns `{regimes: {symbol: label}}` — snapshot of all confirmed regime labels
 ### Trade Memory API Endpoints (under `/ai/memory/`)
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `GET /ai/memory/stats` | Aggregate win rate, avg P&L, TP/SL counts, slippage |
 | `GET /ai/memory/recent` | Last N trade outcomes |
 | `GET /ai/memory/drift` | Page-Hinkley drift detection result |
@@ -233,7 +237,7 @@ Returns `{regimes: {symbol: label}}` — snapshot of all confirmed regime labels
 
 ### Layout
 
-```
+```text
 ┌─ Account Tabs ─────────────────────────────────────┐
 │  Paper  |  Live  |  All                            │
 ├─ Mode Tabs ──────────────────────────────────────────┤
@@ -276,7 +280,7 @@ Returns `{regimes: {symbol: label}}` — snapshot of all confirmed regime labels
 A background task (`_performance_monitor` in `api/websocket/feed.py`) checks every 5 minutes and broadcasts alerts to all connected dashboard clients:
 
 | Alert | Condition | Cooldown |
-|---|---|---|
+| --- | --- | --- |
 | Low win rate | Win rate < 40% for ≥ 10 trades in a mode | 1 hour |
 | RL low risk factor | `risk_factor < 0.60` (agent reducing sizes) | 1 hour |
 | LSTM degraded symbols | Live accuracy < 45% for any symbol | 1 hour |

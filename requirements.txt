@@ -16,6 +16,7 @@ fastapi==0.111.0
 uvicorn[standard]==0.29.0
 websockets==12.0
 python-multipart==0.0.9
+slowapi==0.1.9  # Rate limiting middleware (Task #7)
 
 # --- Authentication ---
 python-jose[cryptography]==3.3.0
@@ -38,6 +39,9 @@ apscheduler==3.10.4
 
 # --- Logging ---
 loguru==0.7.2
+
+# --- System Monitoring (Task #8: Health Check) ---
+psutil==7.0.0
 
 # --- AI / ML (Phase 6+) ---
 # Install separately with: pip install -r requirements-ml.txt
