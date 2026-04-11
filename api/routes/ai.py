@@ -1107,6 +1107,7 @@ async def run_optimizer(
     Runs in background — poll GET /ai/optimizer/status to track progress.
     """
     from api.main import get_mt5_client
+    from datetime import datetime, timezone, timedelta
 
     if strategy_name not in PARAM_GRIDS:
         raise HTTPException(status_code=400, detail=f"Unknown strategy: {strategy_name}")
@@ -1117,7 +1118,13 @@ async def run_optimizer(
 
     tf_str  = TRADING_TYPE_TF.get(req.trading_type, "H1")
     n_bars  = req.bars or _OPT_BARS.get(req.trading_type, 17_000)
-    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
+    # Scalping: use date-range fetch to get full 2-year M5 dataset
+    if req.trading_type == "scalping" and req.bars == 0:
+        _date_to   = datetime.now(tz=timezone.utc)
+        _date_from = _date_to - timedelta(days=694)
+        df = await asyncio.to_thread(client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to)
+    else:
+        df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol}/{tf_str}")
 
@@ -1147,6 +1154,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                 sleep 1 s      ← strategy boundary rest
     """
     from api.main import get_mt5_client
+    from datetime import datetime, timezone, timedelta
     import json
 
     client = get_mt5_client()
@@ -1159,6 +1167,10 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
         strategies_cfg = json.loads((CONFIG_PATH / "strategies.json").read_text(encoding="utf-8-sig"))
     except Exception:
         raise HTTPException(status_code=500, detail="Cannot read config files")
+    try:
+        scanner_cfg = json.loads((CONFIG_PATH / "scanner.json").read_text(encoding="utf-8-sig"))
+    except Exception:
+        scanner_cfg = {}
 
     async def _bg_task() -> None:
         ohlcv_cache: dict[tuple[str, str], object] = {}
@@ -1167,11 +1179,22 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
             active   = strategies_cfg.get(trading_type, {}).get("active_strategies", [])
             tf_str   = TRADING_TYPE_TF.get(trading_type, "H1")
             sym_list = symbols_cfg.get(trading_type, [])
-            symbols  = [
+            base_syms = [
                 (e.get("symbol") if isinstance(e, dict) else e)
                 for e in sym_list
                 if (e.get("enabled", False) if isinstance(e, dict) else True)
             ]
+            # Include symbols discovered by the market scanner
+            scanner_syms = [
+                s for s in scanner_cfg.get("symbols", [])
+                if isinstance(s, str) and s
+            ]
+            seen: set[str] = set()
+            symbols: list[str] = []
+            for s in base_syms + scanner_syms:
+                if s and s not in seen:
+                    seen.add(s)
+                    symbols.append(s)
 
             # ── Phase 1: fetch each (symbol, tf) once, 300 ms between pairs ──
             n_bars = req.bars or _OPT_BARS.get(trading_type, 17_000)
@@ -1180,7 +1203,15 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                     continue
                 cache_key = (symbol, tf_str)
                 if cache_key not in ohlcv_cache:
-                    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
+                    # Scalping: use date-range fetch to get full 2-year M5 dataset
+                    if trading_type == "scalping" and req.bars == 0:
+                        _date_to   = datetime.now(tz=timezone.utc)
+                        _date_from = _date_to - timedelta(days=694)
+                        df = await asyncio.to_thread(
+                            client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to
+                        )
+                    else:
+                        df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
                     ohlcv_cache[cache_key] = df
                 await asyncio.sleep(0.3)  # rest between pairs — gives live bot MT5 lock
 
