@@ -167,7 +167,17 @@ async def train_symbol(symbol: str, req: TrainRequest = TrainRequest()):
 
     tf_str = TRADING_TYPE_TF.get(req.trading_type, "H1")
     bars   = req.bars if req.bars > 0 else _TRAIN_BARS.get(req.trading_type, 5_000)
-    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, bars)
+
+    # Scalping: use date-range fetch to get the full 2-year M5 dataset.
+    # get_ohlcv(bars) hits MT5's ~99k bar cap and only returns ~1 year.
+    if req.trading_type == "scalping":
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        _date_to = _dt.now(tz=_tz.utc)
+        _date_from = _date_to - _td(days=694)
+        df = await asyncio.to_thread(client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to)
+    else:
+        df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, bars)
+
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol} ({tf_str})")
 
