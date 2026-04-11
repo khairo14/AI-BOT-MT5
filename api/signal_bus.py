@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import tempfile
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -740,7 +742,18 @@ class SignalBus:
                 if sig.get("auto_execute_at") and sig.get("status") == "pending"
             ]
             _PENDING_SIGNALS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            _PENDING_SIGNALS_FILE.write_text(json.dumps(pending, indent=2), encoding="utf-8")
+            _serialised = json.dumps(pending, indent=2)
+            _fd, _tmp = tempfile.mkstemp(dir=str(_PENDING_SIGNALS_FILE.parent), suffix=".tmp")
+            try:
+                with os.fdopen(_fd, "w", encoding="utf-8") as _f:
+                    _f.write(_serialised)
+                os.replace(_tmp, _PENDING_SIGNALS_FILE)
+            except Exception:
+                try:
+                    os.unlink(_tmp)
+                except OSError:
+                    pass
+                raise
         except Exception as exc:
             logger.debug(f"SignalBus: could not save pending swing signals: {exc}")
 
@@ -1613,7 +1626,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 from pathlib import Path as _Path
                 _models_dir = _Path(__file__).parent.parent / "ai" / "models"
                 _model_file = _models_dir / f"{_key}_lstm_0.pt"
-                _no_model = not _model_file.exists() and not predictor.is_training(_sym, _type)
+                _model_file_legacy = _models_dir / f"{_key}_lstm.pt"
+                _no_model = not _model_file.exists() and not _model_file_legacy.exists() and not predictor.is_training(_sym, _type)
                 if _no_model:
                     _retrain = True
                     _retrain_reason = "no model — bootstrap"

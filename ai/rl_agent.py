@@ -30,7 +30,9 @@ Q-table persisted to: ai/data/rl_qtable_{trading_type}.json
 from __future__ import annotations
 
 import json
+import os
 import random
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -288,8 +290,18 @@ class RLAgent:
         _save_every = 1 if self._n_updates < 50 else 5
         if self._n_updates % _save_every == 0:
             try:
-                with open(_save_path, "w", encoding="utf-8") as f:
-                    json.dump(_save_payload, f)
+                _serialised = json.dumps(_save_payload)
+                _fd, _tmp = tempfile.mkstemp(dir=str(_save_path.parent), suffix=".tmp")
+                try:
+                    with os.fdopen(_fd, "w", encoding="utf-8") as _f:
+                        _f.write(_serialised)
+                    os.replace(_tmp, _save_path)
+                except Exception:
+                    try:
+                        os.unlink(_tmp)
+                    except OSError:
+                        pass
+                    raise
                 # Append history snapshot for time-series tracking
                 _history_path = DATA_DIR / f"rl_history_{self.trading_type}_{self._mode}.jsonl"
                 _history_entry = {
@@ -348,8 +360,18 @@ class RLAgent:
             }
         _path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
         try:
-            with open(_path, "w", encoding="utf-8") as f:
-                json.dump(_payload, f)
+            _serialised = json.dumps(_payload)
+            _fd, _tmp = tempfile.mkstemp(dir=str(_path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(_fd, "w", encoding="utf-8") as _f:
+                    _f.write(_serialised)
+                os.replace(_tmp, _path)
+            except Exception:
+                try:
+                    os.unlink(_tmp)
+                except OSError:
+                    pass
+                raise
         except Exception as exc:
             logger.warning(f"RL force-save failed [{self.trading_type}/{self._mode}]: {exc}")
 

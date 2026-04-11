@@ -381,34 +381,40 @@ class PricePredictor:
         # Ensemble average accuracy
         avg_accuracy = sum(ensemble_accuracies) / len(ensemble_accuracies)
 
-        # Accuracy gate: refuse to swap in a coin-flip model that would *degrade*
-        # an already trained model.  If no model exists on disk yet, accept anything
-        # above 50% as a bootstrap — learned market patterns beat a hard-coded 0.5.
-        # PERF-1: Lowered from 58% to 55% — models struggle to exceed 55% in current market.
-        _MIN_ACCURACY      = 0.55
-        _BOOTSTRAP_MIN     = 0.50   # floor when no prior model exists
+        # Accuracy gate: refuse to swap in a model that would DEGRADE the current one.
+        # Rules:
+        #   1. Absolute floor: never accept below 50% (coin-flip = useless signal).
+        #   2. If a prior model exists, only accept if new model beats it by ≥0.1%
+        #      (marginal improvement is fine — 3-member ensemble often averages lower
+        #       than the best single lucky run, so a tiny improvement is still progress).
+        #   3. If no prior model exists (true bootstrap), accept anything ≥50%.
+        _ABSOLUTE_FLOOR    = 0.50   # never save a coin-flip model
+        _IMPROVEMENT_MARGIN = 0.001  # new must beat old by at least 0.1 pp
         # Check both new ensemble format (_lstm_0.pt) and old legacy format (_lstm.pt)
         _model_exists      = (
             (MODELS_DIR / f"{key}_lstm_0.pt").exists() or
             (MODELS_DIR / f"{key}_lstm.pt").exists()
         )
-        _effective_min     = _MIN_ACCURACY if _model_exists else _BOOTSTRAP_MIN
+        _prior_accuracy    = self._metadata.get(key, {}).get("accuracy", 0.0) if _model_exists else 0.0
+        # Effective minimum: the higher of absolute floor OR prior model score + margin
+        _effective_min     = max(_ABSOLUTE_FLOOR, _prior_accuracy + _IMPROVEMENT_MARGIN) if _model_exists else _ABSOLUTE_FLOOR
+        _gate_label        = f"protection (prior {_prior_accuracy:.2%})" if _model_exists else "bootstrap"
         if avg_accuracy < _effective_min:
             logger.warning(
-                f"LSTM {key}: ensemble avg accuracy {avg_accuracy:.2%} < {_effective_min:.0%} threshold "
-                f"({'protection' if _model_exists else 'bootstrap'} gate) — "
+                f"LSTM {key}: ensemble avg accuracy {avg_accuracy:.2%} < {_effective_min:.2%} threshold "
+                f"({_gate_label}) — "
                 f"not saved (members: {[f'{a:.2%}' for a in ensemble_accuracies]})"
             )
             # Record rejection in metadata so status() shows what happened
             with self._lock:
                 existing_meta = self._metadata.get(key, {})
                 existing_meta["last_rejection"] = {
-                    "at":               datetime.now(timezone.utc).isoformat(),
-                    "accuracy":         round(avg_accuracy, 4),
+                    "at":                datetime.now(timezone.utc).isoformat(),
+                    "accuracy":          round(avg_accuracy, 4),
                     "member_accuracies": [round(a, 4) for a in ensemble_accuracies],
-                    "threshold":        _effective_min,
-                    "gate":             "protection" if _model_exists else "bootstrap",
-                    "bars_used":        len(df),
+                    "threshold":         round(_effective_min, 4),
+                    "gate":              _gate_label,
+                    "bars_used":         len(df),
                 }
                 self._metadata[key] = existing_meta
             return

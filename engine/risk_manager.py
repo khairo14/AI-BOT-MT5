@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import tempfile
 import threading
 from datetime import datetime, date, timezone
 from pathlib import Path
@@ -106,7 +108,18 @@ class RiskManager:
                 },
             }
             _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _STATE_PATH.write_text(json.dumps(state), encoding="utf-8")
+            _serialised = json.dumps(state)
+            fd, _tmp = tempfile.mkstemp(dir=str(_STATE_PATH.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as _f:
+                    _f.write(_serialised)
+                os.replace(_tmp, _STATE_PATH)
+            except Exception:
+                try:
+                    os.unlink(_tmp)
+                except OSError:
+                    pass
+                raise
         except Exception as exc:
             logger.warning(f"RiskManager: could not save state: {exc}")
 
