@@ -70,7 +70,7 @@ export default function ProfitabilityPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-6 flex items-center justify-center">
+      <div className="p-4 sm:p-6 lg:p-8 flex items-center justify-center w-full">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <p className="text-gray-400">Loading profitability report...</p>
@@ -81,7 +81,7 @@ export default function ProfitabilityPage() {
 
   if (!report) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
+      <div className="p-4 sm:p-6 lg:p-8 w-full">
         <div className="text-center py-20">
           <p className="text-gray-400">No trade data available yet.</p>
           <p className="text-sm text-gray-500 mt-2">Start trading to generate a profitability report.</p>
@@ -93,7 +93,7 @@ export default function ProfitabilityPage() {
   const { overall, success_criteria, task_2_status, by_trading_type, by_symbol } = report;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
+    <div className="p-4 sm:p-6 lg:p-8 w-full">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">

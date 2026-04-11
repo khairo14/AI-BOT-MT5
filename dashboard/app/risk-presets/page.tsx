@@ -92,7 +92,7 @@ export default function RiskPresetsPage() {
 
   if (!presetsData) {
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
+      <div className="p-4 sm:p-6 lg:p-8 w-full">
         <h1 className="text-2xl font-bold mb-4">Risk Presets</h1>
         <p className="text-gray-400">Loading...</p>
       </div>
@@ -105,7 +105,7 @@ export default function RiskPresetsPage() {
     .map(name => ({ name, config: presetsData.presets[name] }));
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
+    <div className="p-4 sm:p-6 lg:p-8 w-full">
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-2">Risk Presets</h1>
         <p className="text-gray-400">

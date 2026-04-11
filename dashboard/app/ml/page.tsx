@@ -276,7 +276,7 @@ export default function MLPage() {
 
   //  render 
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-200 p-6 space-y-10">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-8 w-full">
       <div>
         <h1 className="text-2xl font-bold text-white">AI / ML Brain</h1>
         <p className="text-sm text-gray-500 mt-1">
@@ -1179,6 +1179,6 @@ export default function MLPage() {
           </div>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

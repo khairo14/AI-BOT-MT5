@@ -127,7 +127,7 @@ export default function PortfolioPage() {
   const needsRebalance = allocation?.needs_rebalance ?? false;
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">Portfolio Optimization</h2>

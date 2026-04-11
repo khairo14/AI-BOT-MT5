@@ -236,14 +236,14 @@ export default function SettingsPage() {
 
   if (!risk) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         <p className="text-gray-500 text-sm">Loading settings…</p>
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-3xl space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl w-full space-y-8">
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-white">Settings</h2>

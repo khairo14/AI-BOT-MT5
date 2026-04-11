@@ -262,7 +262,7 @@ export default function BacktestPage() {
     o === "tp_hit" ? "text-emerald-400" : o === "sl_hit" ? "text-red-400" : "text-amber-400";
 
   return (
-    <main className="min-h-screen bg-gray-950 text-gray-200 p-6 space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
       <div>
         <h1 className="text-2xl font-bold text-white">Strategy Backtest</h1>
         <p className="text-sm text-gray-500 mt-1">
@@ -585,6 +585,6 @@ export default function BacktestPage() {
           </>
         )}
       </section>
-    </main>
+    </div>
   );
 }

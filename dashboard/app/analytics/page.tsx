@@ -420,7 +420,7 @@ export default function AnalyticsPage() {
   const equityFinal = data?.equity_curve?.at(-1)?.equity ?? 0;
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

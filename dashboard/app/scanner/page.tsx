@@ -237,7 +237,7 @@ export default function ScannerPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
+    <div className="p-4 sm:p-6 lg:p-8 w-full">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">

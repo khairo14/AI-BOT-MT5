@@ -17,7 +17,7 @@ export default function OverviewPage() {
   const refresh = () => fetchPositions().then(setPositions).catch(() => {});
 
   return (
-    <div className="p-8 space-y-8 max-w-7xl">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
       <div>
         <h2 className="text-2xl font-bold text-white">Overview</h2>
         <p className="text-gray-500 text-sm mt-1">

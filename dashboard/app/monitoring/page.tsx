@@ -157,7 +157,7 @@ export default function MonitoringPage() {
   const diskStatus = getStatus(metrics.system.disk_usage_percent, 80, 90);
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">System Monitoring</h2>
