@@ -1607,13 +1607,24 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     o for o in _mem.recent(n=500, live_only=True)
                     if o.get("symbol") == _sym and o.get("trading_type") == _type
                 ])
-                # Trigger 1: every 20th closed trade (baseline)
-                _prev_total = _total - 1   # this trade just closed
-                _retrain = (
-                    not predictor.is_training(_sym, _type) and
-                    _total > 0 and _total % 20 == 0 and _prev_total % 20 != 0
-                )
-                _retrain_reason = "20-trade window" if _retrain else ""
+
+                # Trigger 0: no model exists yet for this symbol×mode — bootstrap
+                # immediately on the first closed trade so future trades get LSTM scoring.
+                from pathlib import Path as _Path
+                _models_dir = _Path(__file__).parent.parent / "ai" / "models"
+                _model_file = _models_dir / f"{_key}_lstm_0.pt"
+                _no_model = not _model_file.exists() and not predictor.is_training(_sym, _type)
+                if _no_model:
+                    _retrain = True
+                    _retrain_reason = "no model — bootstrap"
+                else:
+                    # Trigger 1: every 20th closed trade (baseline)
+                    _prev_total = _total - 1   # this trade just closed
+                    _retrain = (
+                        not predictor.is_training(_sym, _type) and
+                        _total > 0 and _total % 20 == 0 and _prev_total % 20 != 0
+                    )
+                    _retrain_reason = "20-trade window" if _retrain else ""
 
                 # Trigger 2: model is stale (> 7 days since last training, ≥ 10 trades)
                 if not _retrain and _total >= 10 and not predictor.is_training(_sym, _type):

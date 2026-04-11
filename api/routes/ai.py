@@ -63,7 +63,8 @@ class TrainAllRequest(BaseModel):
 async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
     """
     Queues LSTM retraining for all enabled symbols × trading types and returns
-    immediately.  A background task does fetching + dispatching in batches:
+    immediately.  Covers both symbols.json (static) and scanner.json (dynamic).
+    A background task does fetching + dispatching in batches:
 
         for each mode  (scalping → day_trading → swing)
             for each pair  → fetch OHLCV + sleep 300 ms
@@ -73,6 +74,7 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
     """
     from api.main import get_mt5_client
     import json
+    from datetime import datetime, timezone, timedelta
 
     client = get_mt5_client()
     if client is None or not client.is_connected():
@@ -84,38 +86,62 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
     except Exception:
         raise HTTPException(status_code=500, detail="Cannot read symbols.json")
 
+    # Merge scanner.json symbols so train/all covers every symbol the bot may trade
+    try:
+        scanner_cfg = json.loads((CONFIG_PATH / "scanner.json").read_text(encoding="utf-8-sig"))
+    except Exception:
+        scanner_cfg = {}
+
     async def _bg_task() -> None:
-        for trading_type, sym_list in symbols_cfg.items():
+        for trading_type in ("scalping", "day_trading", "swing"):
+            sym_list = symbols_cfg.get(trading_type, [])
             if not isinstance(sym_list, list):
                 continue
-            tf_str  = TRADING_TYPE_TF.get(trading_type, "H1")
-            entries = [
-                (e.get("symbol") if isinstance(e, dict) else e)
-                for e in sym_list
-                if e and (e.get("enabled", False) if isinstance(e, dict) else True)
-            ]
+            tf_str = TRADING_TYPE_TF.get(trading_type, "H1")
 
-            # ── Phase 1: fetch each symbol, 300 ms between pairs ──────────────
+            # Build deduplicated symbol list: symbols.json + scanner.json
+            seen: set[str] = set()
+            entries: list[str] = []
+            for e in sym_list:
+                sym = e.get("symbol") if isinstance(e, dict) else e
+                enabled = e.get("enabled", False) if isinstance(e, dict) else True
+                if sym and enabled and sym not in seen:
+                    entries.append(sym)
+                    seen.add(sym)
+            for sym in scanner_cfg.get(trading_type, {}).get("symbols", []):
+                if sym and sym not in seen:
+                    entries.append(sym)
+                    seen.add(sym)
+
+            # ── Phase 1: fetch each symbol ────────────────────────────────────
             mode_bars = req.bars if req.bars > 0 else _TRAIN_BARS.get(trading_type, 5_000)
             ohlcv: dict[str, object] = {}
             for symbol in entries:
                 if not symbol or predictor.is_training(symbol, trading_type):
                     continue
-                df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, mode_bars)
+                # Scalping: use date-range fetch to get full 2-year M5 dataset
+                if trading_type == "scalping":
+                    _date_to = datetime.now(tz=timezone.utc)
+                    _date_from = _date_to - timedelta(days=694)
+                    df = await asyncio.to_thread(
+                        client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to
+                    )
+                else:
+                    df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, mode_bars)
                 ohlcv[symbol] = df
                 await asyncio.sleep(0.3)  # rest between pairs
 
             # ── Mode boundary rest ─────────────────────────────────────────────
             await asyncio.sleep(2.0)
 
-            # ── Phase 2: dispatch training threads, 100 ms between dispatches ──
+            # ── Phase 2: dispatch training threads ────────────────────────────
             for symbol, df in ohlcv.items():
                 if df is None or df.empty:
                     continue
                 predictor.train_async(symbol, df, trading_type)
-                await asyncio.sleep(0.1)  # rest between pairs
+                await asyncio.sleep(0.1)  # rest between dispatches
 
-            # ── Mode boundary rest between train dispatches ────────────────────
+            # ── Mode boundary rest ─────────────────────────────────────────────
             await asyncio.sleep(2.0)
 
     asyncio.create_task(_bg_task())

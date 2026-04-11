@@ -56,14 +56,36 @@ _MIN_SUCCESS_FRACTION = 0.50   # at least 50% of models must save successfully
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _build_scalping_jobs(config_dir: Path) -> list[str]:
-    """Return list of enabled scalping symbols from config/symbols.json."""
+    """Return deduplicated list of scalping symbols from:
+    1. config/symbols.json  — static baseline symbols
+    2. config/scanner.json  — scanner-discovered symbols currently active for scalping
+    Union ensures LSTM models exist for every symbol the bot may actually trade.
+    """
     symbols_cfg = json.loads(
         (config_dir / "symbols.json").read_text(encoding="utf-8")
     )
     jobs: list[str] = []
+    seen: set[str] = set()
+
     for entry in symbols_cfg.get("scalping", []):
         if entry.get("enabled", True):
-            jobs.append(entry["symbol"])
+            sym = entry["symbol"]
+            if sym not in seen:
+                jobs.append(sym)
+                seen.add(sym)
+
+    # Also include any symbols pushed to scanner.json for scalping
+    scanner_path = config_dir / "scanner.json"
+    if scanner_path.exists():
+        try:
+            scanner_cfg = json.loads(scanner_path.read_text(encoding="utf-8"))
+            for sym in scanner_cfg.get("scalping", {}).get("symbols", []):
+                if sym and sym not in seen:
+                    jobs.append(sym)
+                    seen.add(sym)
+        except Exception as exc:
+            logger.warning(f"Could not read scanner.json for symbol list: {exc}")
+
     return jobs
 
 

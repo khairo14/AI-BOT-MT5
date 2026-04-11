@@ -73,16 +73,43 @@ _MIN_FRACTION_ABOVE          = 0.60   # 60% of models must pass
 # ---------------------------------------------------------------------------
 
 def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
-    """Return (symbol, trading_type) pairs from enabled symbols config."""
+    """Return (symbol, trading_type) pairs from:
+    1. config/symbols.json  — static baseline symbols
+    2. config/scanner.json  — scanner-discovered symbols currently active per mode
+    Union ensures LSTM models exist for every symbol the bot may actually trade.
+    """
     symbols_cfg = json.loads((config_dir / "symbols.json").read_text(encoding="utf-8"))
     jobs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
     for trading_type in ("scalping", "day_trading", "swing"):
         if _SKIP_SCALPING and trading_type == "scalping":
             logger.info("Skipping scalping — run_retrain_scalping.py handles these")
             continue
         for entry in symbols_cfg.get(trading_type, []):
             if entry.get("enabled", True):
-                jobs.append((entry["symbol"], trading_type))
+                key = (entry["symbol"], trading_type)
+                if key not in seen:
+                    jobs.append(key)
+                    seen.add(key)
+
+    # Also include scanner-discovered symbols so models exist for them too
+    scanner_path = config_dir / "scanner.json"
+    if scanner_path.exists():
+        try:
+            scanner_cfg = json.loads(scanner_path.read_text(encoding="utf-8"))
+            for trading_type in ("scalping", "day_trading", "swing"):
+                if _SKIP_SCALPING and trading_type == "scalping":
+                    continue
+                for sym in scanner_cfg.get(trading_type, {}).get("symbols", []):
+                    if sym:
+                        key = (sym, trading_type)
+                        if key not in seen:
+                            jobs.append(key)
+                            seen.add(key)
+        except Exception as exc:
+            logger.warning(f"Could not read scanner.json for symbol list: {exc}")
+
     return jobs
 
 
