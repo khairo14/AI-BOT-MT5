@@ -617,21 +617,42 @@ class RiskManager:
         self._config["max_concurrent_trades"] = preset.get("max_concurrent_trades", {})
         self._config["drawdown"] = preset.get("drawdown", {})
         
-        # Write to risk.json on disk
+        # Write to risk.json on disk — atomic temp+replace so a mid-write crash
+        # cannot corrupt the config (same pattern as risk_state.json save).
         try:
-            with open(CONFIG_PATH, "w") as f:
-                json.dump(self._config, f, indent=2)
+            _serialised = json.dumps(self._config, indent=2)
+            _fd, _tmp = tempfile.mkstemp(dir=str(CONFIG_PATH.parent), suffix=".tmp")
+            try:
+                with os.fdopen(_fd, "w", encoding="utf-8") as _tf:
+                    _tf.write(_serialised)
+                os.replace(_tmp, CONFIG_PATH)
+            except Exception:
+                try:
+                    os.unlink(_tmp)
+                except OSError:
+                    pass
+                raise
             logger.info(f"Risk config updated from '{preset_name}' preset")
         except Exception as exc:
             logger.error(f"Failed to write risk.json: {exc}")
             return False, f"Failed to save risk config: {exc}"
-        
-        # Update preset selection tracker
+
+        # Update preset selection tracker — also atomic
         self._current_preset = preset_name
         self._presets_data["current_preset"] = preset_name
         try:
-            with open(_PRESETS_PATH, "w") as f:
-                json.dump(self._presets_data, f, indent=2)
+            _ps = json.dumps(self._presets_data, indent=2)
+            _fd2, _tmp2 = tempfile.mkstemp(dir=str(_PRESETS_PATH.parent), suffix=".tmp")
+            try:
+                with os.fdopen(_fd2, "w", encoding="utf-8") as _tf2:
+                    _tf2.write(_ps)
+                os.replace(_tmp2, _PRESETS_PATH)
+            except Exception:
+                try:
+                    os.unlink(_tmp2)
+                except OSError:
+                    pass
+                raise
             logger.info(f"Risk preset changed to '{preset_name}'")
             return True, f"Risk preset '{preset_name}' applied successfully"
         except Exception as exc:

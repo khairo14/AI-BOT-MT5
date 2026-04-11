@@ -1027,7 +1027,12 @@ async def recover_unclosed_trades(client) -> None:
                 _rec2_bal = 0.0
             _rec2_pct = (profit / _rec2_bal * 100.0) if _rec2_bal > 0 else (profit / 10000.0 * 100.0)
 
-            _stats = memory.stats(trading_type=trading_type, live_only=True)
+            try:
+                from engine.account_store import current_mode as _rec_cm
+                _rec_acct_mode = _rec_cm()
+            except Exception:
+                _rec_acct_mode = entry.get("account_mode", "live")
+            _stats = memory.stats(trading_type=trading_type, live_only=True, mode=_rec_acct_mode)
             _rec_rl_state: str | None = None
             try:
                 _rec_rl_state = rl_manager.get_state(
@@ -1463,7 +1468,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             _rl_state_str = None
             try:
                 trading_type = signal.get("trading_mode", "day_trading")
-                stats = memory.stats(trading_type=trading_type, live_only=True, exclude_manual=True)
+                stats = memory.stats(trading_type=trading_type, live_only=True, mode=_poll_mode, exclude_manual=True)
                 # Calculate drawdown and volatility for RL state
                 _drawdown_pct = 0.0
                 _vol_pct = abs(entry_px - sl) / max(abs(entry_px), 1e-8) * 100 if entry_px and sl else 0.0
@@ -1542,7 +1547,12 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 logger.warning(f"Journal write failed for #{ticket}: {_je}")
 
             trading_type = signal.get("trading_mode", "day_trading")
-            stats = memory.stats(trading_type=trading_type, live_only=True, exclude_manual=True)
+            try:
+                from engine.account_store import current_mode as _get_mode_stats
+                _stats_mode = _get_mode_stats()
+            except Exception:
+                _stats_mode = signal.get("account_mode", "live")
+            stats = memory.stats(trading_type=trading_type, live_only=True, mode=_stats_mode, exclude_manual=True)
 
             # Update consecutive win/loss counter in the risk manager.
             # M-6 fix: only update when the current account mode matches the trade's mode

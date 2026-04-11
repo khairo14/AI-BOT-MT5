@@ -41,27 +41,68 @@ _FF_URL_THIS = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
 # Map MT5 symbol prefixes → currency codes
 _SYMBOL_CURRENCIES: dict[str, list[str]] = {
-    # Forex majors
+    # ── Forex majors ─────────────────────────────────────────────────────────
     "EURUSD": ["EUR", "USD"], "GBPUSD": ["GBP", "USD"],
     "USDJPY": ["USD", "JPY"], "USDCHF": ["USD", "CHF"],
     "USDCAD": ["USD", "CAD"], "AUDUSD": ["AUD", "USD"],
     "NZDUSD": ["NZD", "USD"], "EURJPY": ["EUR", "JPY"],
     "GBPJPY": ["GBP", "JPY"], "EURGBP": ["EUR", "GBP"],
-    # Metals / commodities (USD-denominated)
+    # ── Forex minors (EUR crosses) ────────────────────────────────────────────
+    "EURAUD": ["EUR", "AUD"], "EURCAD": ["EUR", "CAD"],
+    "EURCHF": ["EUR", "CHF"], "EURNZD": ["EUR", "NZD"],
+    "EURSGD": ["EUR", "SGD"], "EURHUF": ["EUR", "HUF"],
+    "EURPLN": ["EUR", "PLN"], "EURTRY": ["EUR", "TRY"],
+    "EURCZK": ["EUR", "CZK"], "EURNOK": ["EUR", "NOK"],
+    "EURSEK": ["EUR", "SEK"],
+    # ── Forex minors (GBP crosses) ────────────────────────────────────────────
+    "GBPAUD": ["GBP", "AUD"], "GBPCAD": ["GBP", "CAD"],
+    "GBPCHF": ["GBP", "CHF"], "GBPNZD": ["GBP", "NZD"],
+    "GBPSGD": ["GBP", "SGD"],
+    # ── Forex minors (AUD/NZD/CAD/CHF crosses) ───────────────────────────────
+    "AUDCAD": ["AUD", "CAD"], "AUDCHF": ["AUD", "CHF"],
+    "AUDJPY": ["AUD", "JPY"], "AUDNZD": ["AUD", "NZD"],
+    "NZDCAD": ["NZD", "CAD"], "NZDCHF": ["NZD", "CHF"],
+    "NZDJPY": ["NZD", "JPY"], "CADCHF": ["CAD", "CHF"],
+    "CADJPY": ["CAD", "JPY"], "CHFJPY": ["CHF", "JPY"],
+    # ── Forex exotics ────────────────────────────────────────────────────────
+    "USDMXN": ["USD", "MXN"], "USDTRY": ["USD", "TRY"],
+    "USDZAR": ["USD", "ZAR"], "USDSGD": ["USD", "SGD"],
+    "USDHKD": ["USD", "HKD"], "USDNOK": ["USD", "NOK"],
+    "USDSEK": ["USD", "SEK"], "USDPLN": ["USD", "PLN"],
+    "SGDJPY": ["SGD", "JPY"],
+    # ── Metals / precious metals ──────────────────────────────────────────────
     "XAUUSD": ["XAU", "USD"], "GOLD"  : ["XAU", "USD"],
-    "SILVER": ["XAG", "USD"],
-    "OILCASH": ["USD"],   "BRENTCASH": ["USD"],   "NGASCASH": ["USD"],
-    # Crypto (USD-denominated)
+    "XAGUSD": ["XAG", "USD"], "SILVER": ["XAG", "USD"],
+    "XPTUSD": ["XPT", "USD"], "XPDUSD": ["XPD", "USD"],
+    # ── Energy commodities ────────────────────────────────────────────────────
+    "OILCASH":   ["USD"], "BRENTCASH": ["USD"],
+    "NGASCASH":  ["USD"], "GASOLINECASH": ["USD"],
+    # ── Crypto vs USD ─────────────────────────────────────────────────────────
     "BTCUSD": ["BTC", "USD"], "ETHUSD": ["ETH", "USD"],
-    "SOLUSD": ["USD"],        "XRPUSD": ["USD"],
-    # US equities (USD macro news matters)
+    "SOLUSD": ["SOL", "USD"], "XRPUSD": ["XRP", "USD"],
+    "LTCUSD": ["LTC", "USD"], "BNBUSD": ["BNB", "USD"],
+    "ADAUSD": ["ADA", "USD"], "DOTUSD": ["DOT", "USD"],
+    "DOGEUSD": ["DOGE", "USD"], "LINKUSD": ["LINK", "USD"],
+    "UNIUSD": ["UNI", "USD"],  "XLMUSD": ["XLM", "USD"],
+    "AVAXUSD": ["AVAX", "USD"], "MATICUSD": ["MATIC", "USD"],
+    # ── Crypto-to-crypto ──────────────────────────────────────────────────────
+    "ETHBTC":  ["ETH", "BTC"],
+    "LTCBTC":  ["LTC", "BTC"],
+    "XRPBTC":  ["XRP", "BTC"],
+    # ── US equities (USD macro + earnings) ───────────────────────────────────
     "APPLE": ["USD"],   "AMAZON": ["USD"],    "TESLA": ["USD"],
     "MICROSOFT": ["USD"], "GOOGLE": ["USD"],  "FACEBOOK": ["USD"],
     "NETFLIX": ["USD"], "NVIDIA": ["USD"],    "ADVMICRODEV": ["USD"],
-    # US indices (USD macro-driven)
+    "META": ["USD"],    "ALPHABET": ["USD"],  "ALIBABA": ["USD"],
+    # ── US indices (USD macro-driven) ─────────────────────────────────────────
     "US30CASH": ["USD"], "US100CASH": ["USD"], "US500CASH": ["USD"],
-    # EU / UK indices
+    # ── EU / UK indices ───────────────────────────────────────────────────────
     "GER40CASH": ["EUR"], "UK100CASH": ["GBP"],
+    "FR40CASH":  ["EUR"], "ES35CASH":  ["EUR"],
+    "IT40CASH":  ["EUR"], "EU50CASH":  ["EUR"],
+    # ── Asia-Pacific indices ──────────────────────────────────────────────────
+    "JP225CASH": ["JPY"], "AU200CASH": ["AUD"],
+    "HK50CASH":  ["HKD"], "CHINA50CASH": ["CNH"],
 }
 
 # Stock symbols → ticker mapping for earnings calendar lookup
@@ -123,6 +164,22 @@ def _currencies_for(symbol: str) -> list[str]:
     for key in _SYMBOL_CURRENCIES:
         if stripped.startswith(key) or raw_upper.startswith(key):
             return _SYMBOL_CURRENCIES[key]
+
+    # Step 3b: generic 6-char pair auto-detection — handles any forex cross or
+    # crypto-to-crypto pair not explicitly listed (e.g. a new XM symbol added
+    # to symbols.json without updating this file).
+    # Split as BASE[3] + QUOTE[3] and return both if both are known currency codes.
+    _KNOWN_CCY = {
+        "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
+        "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "RON", "TRY",
+        "ZAR", "MXN", "SGD", "HKD", "CNH", "HKD", "INR",
+        "BTC", "ETH", "XAU", "XAG", "XPT", "XPD",
+        "LTC", "XRP", "ADA", "DOT", "SOL", "BNB", "LINK",
+    }
+    if len(stripped) == 6:
+        _base, _quote = stripped[:3], stripped[3:]
+        if _base in _KNOWN_CCY and _quote in _KNOWN_CCY:
+            return [_base, _quote]
 
     # Step 4: fallback — most unlisted instruments are USD-denominated
     return ["USD"]

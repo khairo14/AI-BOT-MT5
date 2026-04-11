@@ -90,6 +90,12 @@ def switch_mode(body: SwitchModeRequest, client: MT5Client = Depends(get_client)
         _rm = get_risk_manager()
         if _rm is not None:
             _rm.reset_for_mode_switch()
+            # LIVE-1: re-seed the new account's balance immediately so daily drawdown
+            # protection is active from the first trade, not only after the first close.
+            # main.py seeds on startup but does NOT re-seed on mid-session mode switches.
+            _new_acct = client.get_account_info()
+            if _new_acct and _new_acct.get("balance"):
+                _rm.update_balance(float(_new_acct["balance"]))
     except Exception:
         pass
 

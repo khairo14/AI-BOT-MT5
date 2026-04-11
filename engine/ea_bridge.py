@@ -95,6 +95,7 @@ class EABridge:
             logger.error("EABridge: signal missing 'id' field")
             return False
 
+        from engine.order_manager import BOT_MAGIC as _BOT_MAGIC
         cmd = {
             "id":         sig_id,
             "action":     "open",
@@ -104,7 +105,7 @@ class EABridge:
             "sl":         float(signal.get("sl") or 0),
             "tp":         float(signal.get("tp") or 0),
             "comment":    f"scalp|{signal.get('strategy', '?')[:20]}",
-            "magic":      20260318,
+            "magic":      _BOT_MAGIC,
             # Unix timestamp — EA uses this for stale-guard
             "created_ts": int(time.time()),
         }
