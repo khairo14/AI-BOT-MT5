@@ -63,11 +63,30 @@ class TrailingStopManager:
 
     def _get_pip_value(self, symbol: str) -> float:
         """
-        Get point value in pips for a symbol.
-        JPY pairs: 1 pip = 0.01, others: 1 pip = 0.0001
+        Get the pip/point size for a symbol from MT5 symbol info.
+        Falls back to forex defaults if symbol info is unavailable.
+        - Forex non-JPY: 0.0001
+        - Forex JPY: 0.01
+        - Commodities (BRENT, OIL, GOLD, SILVER): 0.01
+        - Indices (US30, US100): 1.0
+        - Crypto (BTCUSD): 1.0
         """
-        if "JPY" in symbol.upper():
+        try:
+            info = self._client.get_symbol_info(symbol)
+            if info and info.get("point"):
+                return info["point"]
+        except Exception:
+            pass
+        # Fallback: classify by symbol name
+        sym = symbol.upper()
+        if any(x in sym for x in ("JPY",)):
             return 0.01
+        if any(x in sym for x in ("GOLD", "XAUUSD", "SILVER", "XAGUSD", "OIL", "BRENT", "NGAS")):
+            return 0.01
+        if any(x in sym for x in ("US30", "US100", "US500", "GER40", "UK100")):
+            return 1.0
+        if any(x in sym for x in ("BTC", "ETH", "SOL", "XRP")):
+            return 1.0
         return 0.0001
 
     def _extract_mode_from_comment(self, comment: str) -> Optional[str]:
@@ -99,8 +118,8 @@ class TrailingStopManager:
             try:
                 ticket = pos["ticket"]
                 symbol = pos["symbol"]
-                direction = "BUY" if pos["type"] == 0 else "SELL"
-                entry_price = pos["price_open"]
+                direction = "BUY" if pos["type"] == "buy" else "SELL"
+                entry_price = pos["open_price"]
                 current_sl = pos["sl"]
                 comment = pos.get("comment", "")
 
@@ -116,11 +135,11 @@ class TrailingStopManager:
                     continue
 
                 # Get current price
-                tick = self._client.get_tick(symbol)
-                if not tick:
+                price_data = self._client.get_current_price(symbol)
+                if not price_data:
                     continue
 
-                current_price = tick["ask"] if direction == "BUY" else tick["bid"]
+                current_price = price_data["ask"] if direction == "BUY" else price_data["bid"]
                 pip_value = self._get_pip_value(symbol)
 
                 # Initialize state if new position

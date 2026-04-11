@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from engine.notification_manager import notification_manager
+
 _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 # Signals older than this (seconds) with a terminal status are purged from the queue
@@ -84,7 +86,7 @@ _RETRAIN_DEDUP_SECS = 120   # 2-minute cooldown window per key
 _RETRAIN_BARS: dict[str, int] = {
     "scalping":    200_000,  # M5  ≈ 2 years (694 days)
     "day_trading":  50_000,  # H1  ≈ 5.7 years
-    "swing":        20_000,  # H4  ≈ 9.1 years
+    "swing":        30_000,  # H4  ≈ 13.7 years (matched to manual retrain)
 }
 
 # Bar counts for auto-optimizer — same as manual (full historical dataset).
@@ -403,6 +405,15 @@ class SignalBus:
             self.purge_stale()
             # Push to every connected dashboard client
             asyncio.create_task(broadcast_signal(dict(signal)))
+            
+            # Notify user of new signal
+            notification_manager.add(
+                type="signal_generated",
+                title=f"New {mode.replace('_', ' ').title()} Signal",
+                message=f"{signal.get('direction', '').upper()} {signal.get('symbol')} via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%})",
+                severity="info",
+                metadata={"signal_id": signal["id"], "symbol": signal.get("symbol"), "trading_mode": mode}
+            )
 
         return signal
 
@@ -487,6 +498,14 @@ class SignalBus:
                 if not cb_allowed:
                     signal["rejection_reason"] = cb_reason
                     logger.info(f"SignalBus blocked by circuit breaker: {cb_reason}")
+                    # Notify user of circuit breaker activation
+                    notification_manager.add(
+                        type="circuit_breaker",
+                        title="Circuit Breaker Activated",
+                        message=f"{trading_mode_check.replace('_', ' ').title()}: {cb_reason}",
+                        severity="warning",
+                        metadata={"trading_mode": trading_mode_check, "reason": cb_reason}
+                    )
                     return False
 
                 # ── Concurrent + per-symbol limit check ───────────────────────
@@ -631,6 +650,20 @@ class SignalBus:
                     f"Signal executed: {signal['symbol']} {signal['direction']} "
                     f"lot={req.volume} ticket={result.ticket}"
                 )
+                # Notify user of position opened
+                notification_manager.add(
+                    type="position_opened",
+                    title="Position Opened",
+                    message=f"{signal['direction'].upper()} {signal['symbol']} ({req.volume} lots) via {signal.get('strategy', 'manual')} — Ticket #{result.ticket}",
+                    severity="success",
+                    metadata={
+                        "ticket": result.ticket,
+                        "symbol": signal["symbol"],
+                        "direction": signal["direction"],
+                        "volume": req.volume,
+                        "trading_mode": signal.get("trading_mode", "day_trading")
+                    }
+                )
                 # Journal: record trade open
                 try:
                     from engine.trade_journal import trade_journal
@@ -649,6 +682,9 @@ class SignalBus:
                         comment=signal.get("strategy", ""),
                         event="open",
                         confidence=float(signal.get("confidence") or 0.5),
+                        expected_price=signal.get("entry_price"),
+                        slippage=result.slippage,
+                        execution_time_ms=result.execution_time_ms,
                     )
                 except Exception:
                     pass
@@ -856,6 +892,18 @@ async def recover_unclosed_trades(client) -> None:
                 _rec2_bal = 0.0
             _rec2_pct = (profit / _rec2_bal * 100.0) if _rec2_bal > 0 else (profit / 10000.0 * 100.0)
 
+            _stats = memory.stats(trading_type=trading_type, live_only=True)
+            _rec_rl_state: str | None = None
+            try:
+                _rec_rl_state = rl_manager.get_state(
+                    trading_type=trading_type,
+                    win_rate=_stats.get("win_rate", 0.5),
+                    avg_conf=_stats.get("avg_conf", 0.5),
+                    drawdown_pct=0.0,
+                    vol_pct=abs(entry_px - sl) / entry_px * 100.0 if entry_px > 0 else 0.5,
+                )
+            except Exception:
+                pass
             outcome = TradeOutcome(
                 ticket=ticket,
                 symbol=symbol,
@@ -878,10 +926,10 @@ async def recover_unclosed_trades(client) -> None:
                 mode=entry.get("account_mode") or current_mode(),
                 lstm_predicted_direction=direction,
                 regime=entry.get("regime"),
+                rl_state=_rec_rl_state,
                 extra={"source": "live", "slippage_pips": 0.0},
             )
             memory.record(outcome)
-            _stats = memory.stats(trading_type=trading_type, live_only=True)
             # Normalize raw dollar profit → % of balance (same scale as _poll_outcome)
             try:
                 from engine.risk_manager import risk_manager as _rm_rec
@@ -1276,6 +1324,38 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             except Exception:
                 _poll_mode = "live"
 
+            # Capture RL state at trade close time for win-rate-by-state analytics
+            _rl_state_str = None
+            try:
+                trading_type = signal.get("trading_mode", "day_trading")
+                stats = memory.stats(trading_type=trading_type, live_only=True, exclude_manual=True)
+                # Calculate drawdown and volatility for RL state
+                _drawdown_pct = 0.0
+                _vol_pct = abs(entry_px - sl) / max(abs(entry_px), 1e-8) * 100 if entry_px and sl else 0.0
+                from api.runner_loop import _risk_manager as _rm_state
+                from api.main import get_mt5_client as _gmc_state
+                if _rm_state and _gmc_state:
+                    _c_state = _gmc_state()
+                    if _c_state and _c_state.is_connected():
+                        _acct_state = await asyncio.to_thread(_c_state.get_account_info)
+                        if _acct_state and _acct_state.get("balance"):
+                            _bal_state = _acct_state["balance"]
+                            if _rm_state._day_start_balance and _rm_state._day_start_balance > 0:
+                                _drawdown_pct = max(
+                                    0.0,
+                                    (_rm_state._day_start_balance - _bal_state) / _rm_state._day_start_balance * 100.0,
+                                )
+                # Get RL state string
+                _rl_state_str = rl_manager.get_state(
+                    trading_type=trading_type,
+                    win_rate=stats.get("win_rate", 0.5),
+                    avg_conf=stats.get("avg_conf", 0.5),
+                    drawdown_pct=_drawdown_pct,
+                    vol_pct=_vol_pct,
+                )
+            except Exception as _rl_exc:
+                logger.debug(f"RL state capture failed: {_rl_exc}")
+
             outcome = TradeOutcome(
                 ticket=ticket,
                 symbol=signal["symbol"],
@@ -1298,6 +1378,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 mode=signal.get("account_mode") or _poll_mode,
                 lstm_predicted_direction=signal.get("direction", "").upper() or None,
                 regime=signal.get("regime"),
+                rl_state=_rl_state_str,
                 extra={"source": "live", "slippage_pips": _slippage_pips},
             )
             memory.record(outcome)
@@ -1373,6 +1454,16 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "
                 f"profit={profit:+.2f} ({_profit_pct:+.4f}%) pips={pips:+.1f}"
             )
+
+            # ── Daily accuracy snapshot ──────────────────────────────────────
+            # Take a snapshot of LSTM accuracy history every 10 trades to track degradation
+            _snapshot_every = 10
+            if stats.get("n_total", 0) % _snapshot_every == 0:
+                try:
+                    memory.snapshot_accuracy(trading_type=trading_type, min_samples=10, live_only=True)
+                    logger.debug(f"LSTM accuracy snapshot taken for {trading_type} at {stats.get('n_total')} trades")
+                except Exception as _snap_exc:
+                    logger.warning(f"Accuracy snapshot failed: {_snap_exc}")
 
             # ── Auto LSTM retrain ─────────────────────────────────────────────
             # Trigger background retrain once we have enough trades (every 20th).

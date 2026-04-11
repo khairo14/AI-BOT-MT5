@@ -45,6 +45,9 @@ loguru==0.7.2
 # --- System Monitoring (Task #8: Health Check) ---
 psutil==7.0.0
 
+# --- Excel Export ---
+openpyxl==3.1.2
+
 # --- AI / ML (Phase 6+) ---
 # Install separately with: pip install -r requirements-ml.txt
 # torch, scikit-learn, stable-baselines3 are large and only needed from Phase 6

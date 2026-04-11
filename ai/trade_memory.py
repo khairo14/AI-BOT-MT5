@@ -50,6 +50,7 @@ class TradeOutcome:
     mode:            str  = "live"   # "live" or "paper" — used to separate RL/stats per mode
     lstm_predicted_direction: Optional[str] = None  # "BUY" or "SELL" — LSTM prediction at signal time
     regime:          Optional[str] = None   # market regime at signal time (e.g. "trending_bull")
+    rl_state:        Optional[str] = None   # RL state bucket at signal time (e.g. "med_high_active_low_tight")
     extra:           dict = field(default_factory=dict)
 
 class TradeMemory:
@@ -218,6 +219,42 @@ class TradeMemory:
             "by_symbol":        sym_accuracy,
             "degraded_symbols": degraded,
         }
+
+    def snapshot_accuracy(
+        self,
+        trading_type: Optional[str] = None,
+        min_samples: int = 10,
+        live_only: bool = True,
+    ) -> None:
+        """
+        Append a daily accuracy snapshot to history file.
+        
+        Logs overall LSTM accuracy for time-series tracking and auto-retrain triggers.
+        Call this via a scheduled task or after every N closed trades.
+        """
+        acc = self.lstm_accuracy(
+            trading_type=trading_type,
+            min_samples=min_samples,
+            live_only=live_only,
+        )
+        
+        if not acc.get("sufficient_data"):
+            return  # Not enough data yet, skip snapshot
+        
+        _history_path = DATA_DIR / "lstm_accuracy_history.jsonl"
+        
+        snapshot = {
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+            "trading_type": trading_type or "all",
+            "overall_accuracy": acc["overall_accuracy"],
+            "correct": acc["correct"],
+            "total": acc["total"],
+            "by_symbol": acc.get("by_symbol", {}),
+            "degraded_symbols": acc.get("degraded_symbols", []),
+        }
+        
+        with open(_history_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(snapshot) + "\n")
 
     def stats_by_regime(
         self,
@@ -471,6 +508,16 @@ class TradeMemory:
                 from loguru import logger
                 logger.warning(f"TradeMemory: skipping corrupt line in {MEMORY_FILE}: {exc}")
         self._buffer = parsed[-self.MAX_BUFFER:]
+
+    def reload(self) -> int:
+        """Reload the JSONL file from disk into the in-memory buffer.
+        Used after external edits (e.g. backfill scripts) without restarting the API.
+        Returns the number of entries loaded."""
+        with self._lock:
+            self._buffer = []
+        self._load()
+        with self._lock:
+            return len(self._buffer)
 
 
 # Application-level singleton

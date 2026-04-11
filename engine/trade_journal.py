@@ -60,6 +60,9 @@ class TradeJournal:
         close_time: Optional[str] = None,
         event: Literal["open", "close"] = "open",
         confidence: Optional[float] = None,
+        expected_price: Optional[float] = None,
+        slippage: Optional[float] = None,
+        execution_time_ms: Optional[int] = None,
     ) -> None:
         """Append a trade event to the journal."""
         record = {
@@ -81,6 +84,10 @@ class TradeJournal:
             "close_time":   close_time,
             "logged_at":    datetime.now(tz=timezone.utc).isoformat(),
             "confidence":   confidence,
+            # Execution quality metrics (Task 26)
+            "expected_price":    expected_price,
+            "slippage":          slippage,
+            "execution_time_ms": execution_time_ms,
         }
         with self._lock:
             try:

@@ -23,7 +23,7 @@ from slowapi.util import get_remote_address
 # Load environment variables before any imports that use them
 load_dotenv()
 
-from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes, profitability as profitability_routes, auth as auth_routes, mt5_accounts as mt5_accounts_routes
+from api.routes import account, trades, signals, config, ai as ai_routes, risk as risk_routes, backtest as backtest_routes, analytics as analytics_routes, scanner as scanner_routes, profitability as profitability_routes, auth as auth_routes, mt5_accounts as mt5_accounts_routes, notifications as notifications_routes, execution_quality as execution_quality_routes, portfolio as portfolio_routes, prometheus as prometheus_routes
 from api.websocket.feed import router as ws_router
 from api.signal_bus import bus, _set_event_loop
 from api.runner_loop import start_runner_loop
@@ -346,6 +346,10 @@ app.include_router(backtest_routes.router, prefix="/backtest", tags=["Backtest"]
 app.include_router(analytics_routes.router, prefix="/analytics", tags=["Analytics"])
 app.include_router(scanner_routes.router, prefix="/scanner", tags=["Scanner"])
 app.include_router(profitability_routes.router, prefix="/profitability", tags=["Profitability"])
+app.include_router(notifications_routes.router, prefix="/notifications", tags=["Notifications"])
+app.include_router(execution_quality_routes.router, prefix="/execution-quality", tags=["Execution Quality"])
+app.include_router(portfolio_routes.router, prefix="/portfolio", tags=["Portfolio Optimization"])
+app.include_router(prometheus_routes.router, prefix="/metrics", tags=["Prometheus Metrics"])
 app.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
 
 

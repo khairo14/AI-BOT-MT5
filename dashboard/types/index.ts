@@ -235,3 +235,103 @@ export interface AnalyticsPerformance {
   failure_analysis: FailureAnalysis;
   message?: string;
 }
+
+// ── Notifications ──────────────────────────────────────────────────────────
+export type NotificationType = 
+  | "signal_generated"
+  | "position_opened"
+  | "position_closed"
+  | "circuit_breaker"
+  | "model_trained"
+  | "optimizer_complete"
+  | "risk_alert"
+  | "regime_change";
+
+export type NotificationSeverity = "info" | "success" | "warning" | "error";
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  severity: NotificationSeverity;
+  timestamp: string;
+  read: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+// ── Execution Quality ──────────────────────────────────────────────────────
+export interface ExecutionQualityMetrics {
+  total_filled: number;
+  avg_slippage: number | null;
+  avg_execution_time_ms: number | null;
+  slippage_coverage: number;
+  by_symbol: Record<string, {
+    total_filled: number;
+    avg_slippage: number | null;
+    avg_execution_time_ms: number | null;
+  }>;
+  by_trading_type: Record<string, {
+    total_filled: number;
+    avg_slippage: number | null;
+    avg_execution_time_ms: number | null;
+  }>;
+}
+
+// ── Portfolio Optimization ─────────────────────────────────────────────────
+export interface PortfolioStatus {
+  enabled: boolean;
+  min_trades_required: number;
+  rebalance_threshold: number;
+  message?: string;
+}
+
+export interface StrategyAllocation {
+  kelly_fraction: number;
+  kelly_allocation: number;
+  risk_parity_allocation: number;
+  current_allocation: number;
+  recommended_allocation: number;
+  deviation: number;
+  needs_rebalance: boolean;
+}
+
+export interface PortfolioOptimalAllocation {
+  enabled: boolean;
+  total_trades: number;
+  min_trades_required: number;
+  rebalance_threshold: number;
+  by_strategy: Record<string, StrategyAllocation>;
+  correlation_matrix: Record<string, Record<string, number>>;
+  needs_rebalance: boolean;
+  message?: string;
+}
+
+// ── Monitoring ─────────────────────────────────────────────────────────────
+export interface PrometheusMetrics {
+  system: {
+    cpu_usage_percent: number;
+    memory_usage_percent: number;
+    disk_usage_percent: number;
+    thread_count: number;
+  };
+  trading: {
+    open_positions: number;
+    total_pnl: number;
+    trades_today: number;
+    signal_queue_size: number;
+  };
+  mt5: {
+    connected: boolean;
+  };
+  api: {
+    total_requests: number;
+    total_errors: number;
+    avg_latency_ms: number;
+    endpoints: Record<string, {
+      requests: number;
+      errors: number;
+      avg_duration_ms: number;
+    }>;
+  };
+}

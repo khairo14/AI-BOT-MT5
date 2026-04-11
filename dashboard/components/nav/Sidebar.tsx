@@ -177,11 +177,13 @@ const NAV_SECTIONS = [
     items: [
       { href: "/analytics", label: "Performance", icon: "📊" },
       { href: "/profitability", label: "Profitability", icon: "💰" },
+      { href: "/portfolio", label: "Portfolio", icon: "💼" },
     ],
   },
   {
     title: "System",
     items: [
+      { href: "/monitoring", label: "Monitoring", icon: "📡" },
       { href: "/notifications", label: "Notifications", icon: "🔔" },
       { href: "/risk-presets", label: "Risk Presets", icon: "⚖️" },
       { href: "/guide", label: "Trading Guide", icon: "📖" },

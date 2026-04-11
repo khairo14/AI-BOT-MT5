@@ -139,6 +139,15 @@ export const fetchAIStatus = () =>
 export const fetchRLStatus = () =>
   api.get("/ai/rl/status").then((r) => r.data);
 
+export const fetchRLQTable = (tradingType: "scalping" | "day_trading" | "swing") =>
+  api.get(`/ai/rl/qtable/${tradingType}`).then((r) => r.data);
+
+export const fetchRLHistory = (tradingType: "scalping" | "day_trading" | "swing", days = 7) =>
+  api.get(`/ai/rl/history/${tradingType}?days=${days}`).then((r) => r.data);
+
+export const fetchRLWinRateByState = (tradingType: "scalping" | "day_trading" | "swing", minSamples = 5) =>
+  api.get(`/ai/rl/win-rate-by-state/${tradingType}?min_samples=${minSamples}`).then((r) => r.data);
+
 export const resetRLAgent = (trading_type: string) =>
   api.post(`/ai/rl/reset/${trading_type}`).then((r) => r.data);
 
@@ -168,6 +177,101 @@ export const fetchRiskStatus = () =>
 
 export const resetDrawdown = () =>
   api.post("/risk/reset-drawdown").then((r) => r.data);
+
+// ── Notifications ----------------------------------------------------------
+import type { Notification } from "@/types";
+
+export const fetchNotifications = (unreadOnly = false, type?: string): Promise<Notification[]> => {
+  const params = new URLSearchParams();
+  if (unreadOnly) params.set("unread_only", "true");
+  if (type) params.set("type", type);
+  const qs = params.toString();
+  return api.get(`/notifications${qs ? `?${qs}` : ""}`).then((r) => r.data.notifications || r.data);
+};
+
+export const getNotificationStats = () =>
+  api.get("/notifications/stats").then((r) => r.data);
+
+export const markNotificationRead = (id: string) =>
+  api.post(`/notifications/${id}/read`).then((r) => r.data);
+
+export const markAllNotificationsRead = () =>
+  api.post("/notifications/mark-all-read").then((r) => r.data);
+
+// ── Execution Quality ------------------------------------------------------
+import type { ExecutionQualityMetrics } from "@/types";
+
+export const fetchExecutionQuality = (): Promise<ExecutionQualityMetrics> =>
+  api.get("/execution-quality/metrics").then((r) => r.data);
+
+export const deleteNotification = (id: string) =>
+  api.delete(`/notifications/${id}`).then((r) => r.data);
+
+export const clearAllNotifications = () =>
+  api.delete("/notifications").then((r) => r.data);
+
+// ── Portfolio Optimization -------------------------------------------------
+import type { PortfolioStatus, PortfolioOptimalAllocation } from "@/types";
+
+export const fetchPortfolioStatus = (): Promise<PortfolioStatus> =>
+  api.get("/portfolio/status").then((r) => r.data);
+
+export const fetchPortfolioOptimalAllocation = (minTrades?: number): Promise<PortfolioOptimalAllocation> => {
+  const params = minTrades ? `?min_trades_required=${minTrades}` : "";
+  return api.get(`/portfolio/optimal-allocation${params}`).then((r) => r.data);
+};
+
+export const togglePortfolioOptimization = (enabled: boolean): Promise<PortfolioStatus> =>
+  api.patch("/config/app", { 
+    data: { portfolio_optimization: { enabled } } 
+  }).then(() => fetchPortfolioStatus());
+
+// ── Monitoring -------------------------------------------------------------
+export const fetchPrometheusMetrics = (): Promise<string> =>
+  api.get("/metrics", { 
+    headers: { Accept: "text/plain" },
+    transformResponse: [(data) => data] // Don't parse as JSON
+  }).then((r) => r.data);
+
+// Parse Prometheus text format to structured data
+export const fetchMonitoringMetrics = async () => {
+  const text = await fetchPrometheusMetrics();
+  const lines = text.split("\n");
+  const metrics: Record<string, number> = {};
+  
+  for (const line of lines) {
+    if (line.startsWith("#") || !line.trim()) continue;
+    const match = line.match(/^(\w+)(?:\{[^}]*\})?\s+([\d.]+)$/);
+    if (match) {
+      const [, name, value] = match;
+      metrics[name] = parseFloat(value);
+    }
+  }
+  
+  return {
+    system: {
+      cpu_usage_percent: metrics.aibot_cpu_usage_percent || 0,
+      memory_usage_percent: metrics.aibot_memory_usage_percent || 0,
+      disk_usage_percent: metrics.aibot_disk_usage_percent || 0,
+      thread_count: metrics.aibot_thread_count || 0,
+    },
+    trading: {
+      open_positions: metrics.aibot_open_positions || 0,
+      total_pnl: metrics.aibot_total_pnl || 0,
+      trades_today: metrics.aibot_trades_today || 0,
+      signal_queue_size: metrics.aibot_signal_queue_size || 0,
+    },
+    mt5: {
+      connected: (metrics.aibot_mt5_connected || 0) === 1,
+    },
+    api: {
+      total_requests: metrics.aibot_api_requests_total || 0,
+      total_errors: metrics.aibot_api_errors_total || 0,
+      avg_latency_ms: 0, // Calculated from endpoint data
+      endpoints: {},
+    },
+  };
+};
 
 export const resetConsecutiveLosses = () =>
   api.post("/risk/reset-consecutive-losses").then((r) => r.data);
@@ -404,3 +508,12 @@ export const fetchProfitabilityStatus = (): Promise<{
 
 export const fetchRegimeStatus = (): Promise<{ regimes: Record<string, string> }> =>
   api.get("/analytics/regime/status").then((r) => r.data);
+
+export const fetchLstmCalibration = (minSamples = 5) =>
+  api.get(`/ai/lstm/calibration?min_samples=${minSamples}`).then((r) => r.data);
+
+export const fetchLstmAccuracyHistory = (tradingType?: string, days = 30) =>
+  api.get(`/ai/lstm/accuracy/history?days=${days}${tradingType ? `&trading_type=${tradingType}` : ""}`).then((r) => r.data);
+
+export const fetchLstmConfidenceDistribution = (tradingType?: string) =>
+  api.get(`/ai/lstm/confidence-distribution${tradingType ? `?trading_type=${tradingType}` : ""}`).then((r) => r.data);

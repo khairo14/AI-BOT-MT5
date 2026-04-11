@@ -28,6 +28,7 @@ from __future__ import annotations
 import collections
 import itertools
 import json
+from engine.notification_manager import notification_manager
 import threading
 import time
 from datetime import datetime, timezone
@@ -591,6 +592,20 @@ class ParamOptimizer:
                 logger.info(
                     f"Optimizer: {strategy_name}/{symbol} best_score={score:.3f} "
                     f"params={best_params} regimes={list(regime_best_params.keys())}"
+                )
+                # Notify user of optimizer completion
+                notification_manager.add(
+                    type="optimizer_complete",
+                    title="Optimization Complete",
+                    message=f"{strategy_name} optimized for {symbol} (score: {score:.3f})",
+                    severity="success",
+                    metadata={
+                        "strategy": strategy_name,
+                        "symbol": symbol,
+                        "trading_type": trading_type,
+                        "best_score": round(score, 3),
+                        "best_params": best_params
+                    }
                 )
             else:
                 logger.warning(f"Optimizer: no valid combos found for {strategy_name}/{symbol}")

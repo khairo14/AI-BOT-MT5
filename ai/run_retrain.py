@@ -42,7 +42,13 @@ from ai.predictor import predictor as global_predictor
 # Configuration
 # ---------------------------------------------------------------------------
 
-MAX_CONCURRENT_TRAIN = 6   # simultaneous LSTM training jobs (CPU/GPU bound)
+# Dynamic concurrency by trading type — scalping uses 200K bars (high memory),
+# so limit to 2 concurrent jobs to prevent OOM. Day/swing use fewer bars (50K/30K).
+_MAX_CONCURRENT: dict[str, int] = {
+    "scalping":    2,   # 200K M5 bars = high memory usage
+    "day_trading": 6,   # 50K H1 bars = moderate
+    "swing":       6,   # 30K H4 bars = moderate
+}
 
 _BARS: dict[str, int] = {
     "scalping":     200_000,   # M5:  ~2 years
@@ -216,11 +222,16 @@ def main() -> None:
             logger.info(f"  {symbol:20s} {tf:3s} → {status_tag}")
 
     # ── Phase 2: train all models (no MT5 needed) ────────────────────────────
-    logger.info(f"\nPhase 2 — Training LSTMs (max {MAX_CONCURRENT_TRAIN} concurrent) …")
+    logger.info("\nPhase 2 — Training LSTMs (dynamic concurrency by type: scalping=2, day/swing=6) …")
 
     total_submitted = 0
     skipped         = 0
-    active_keys:    set[str] = set()
+    # Track active jobs by trading_type for dynamic throttling
+    active_by_type: dict[str, set[str]] = {
+        "scalping":    set(),
+        "day_trading": set(),
+        "swing":       set(),
+    }
 
     for idx, (symbol, trading_type) in enumerate(jobs, 1):
         df = data_cache.get((symbol, trading_type))
@@ -229,8 +240,10 @@ def main() -> None:
             skipped += 1
             continue
 
-        # Throttle: wait until a concurrency slot is free
-        while len(active_keys) >= MAX_CONCURRENT_TRAIN:
+        # Throttle: wait until a concurrency slot is free for this trading_type
+        max_for_type = _MAX_CONCURRENT.get(trading_type, 6)
+        active_keys = active_by_type[trading_type]
+        while len(active_keys) >= max_for_type:
             done = _wait_batch(active_keys)
             active_keys -= done
             for k in done:
@@ -241,7 +254,7 @@ def main() -> None:
 
         job_key = f"{symbol}__{trading_type}"
         if global_predictor.train_async(symbol, df, trading_type):
-            active_keys.add(job_key)
+            active_by_type[trading_type].add(job_key)
             total_submitted += 1
             logger.info(
                 f"  [{idx:>2d}/{len(jobs)}] started   {symbol}/{trading_type} "
@@ -253,14 +266,17 @@ def main() -> None:
             )
 
     # Drain remaining active jobs
-    logger.info(f"\nWaiting for final {len(active_keys)} job(s) …")
-    while active_keys:
-        done = _wait_batch(active_keys)
-        active_keys -= done
+    all_active = set()
+    for keys in active_by_type.values():
+        all_active |= keys
+    logger.info(f"\nWaiting for final {len(all_active)} job(s) …")
+    while all_active:
+        done = _wait_batch(all_active)
+        all_active -= done
         for k in done:
             sym, tt = k.split("__", 1)
             logger.info(f"  ✓ finished {sym}/{tt}")
-        if active_keys:
+        if all_active:
             time.sleep(10.0)
 
     # ── Phase 3: validate accuracy + update scorer weights ───────────────────

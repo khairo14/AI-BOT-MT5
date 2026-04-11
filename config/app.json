@@ -34,7 +34,7 @@
     "day_trading": 6.0,
     "swing": 15.0
   },
-  "weekend_gap_protection": true,
+  "weekend_gap_protection": false,
   "ai": {
     "price_prediction_enabled": true,
     "confidence_filter_enabled": false,
@@ -98,6 +98,12 @@
     }
   },
   "max_correlated_positions": 1,
+  "portfolio_optimization": {
+    "enabled": false,
+    "min_trades_required": 30,
+    "rebalance_threshold": 0.15,
+    "comment": "Task 25: Portfolio optimization (disabled until 30+ trades per strategy)"
+  },
   "trailing_stops": {
     "enabled": true,
     "scalping": {

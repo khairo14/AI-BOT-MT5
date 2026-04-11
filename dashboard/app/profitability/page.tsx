@@ -7,6 +7,8 @@ export default function ProfitabilityPage() {
   const [report, setReport] = useState<ProfitabilityReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<"all" | "paper" | "live">("all");
+  const [exporting, setExporting] = useState(false);
 
   const loadReport = async (days?: number) => {
     setLoading(true);
@@ -17,6 +19,48 @@ export default function ProfitabilityPage() {
       console.error("Failed to load profitability report:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async (format: "csv" | "excel") => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({
+        account: selectedAccount,
+        format: format,
+      });
+      if (selectedPeriod) {
+        params.append("days", selectedPeriod.toString());
+      }
+
+      const response = await fetch(`http://localhost:8000/trades/journal/export?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`);
+      }
+
+      // Get filename from Content-Disposition header or generate default
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filenameMatch = contentDisposition?.match(/filename=(.+)/);
+      const filename = filenameMatch
+        ? filenameMatch[1].replace(/"/g, "")
+        : `trades_${format === "csv" ? "export.csv" : "export.xlsx"}`;
+
+      // Download file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Failed to export trades. Please try again.");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -65,8 +109,30 @@ export default function ProfitabilityPage() {
               <option value="14">Last 14 Days</option>
               <option value="30">Last 30 Days</option>
             </select>
+            <select
+              value={selectedAccount}
+              onChange={(e) => setSelectedAccount(e.target.value as "all" | "paper" | "live")}
+              className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm"
+            >
+              <option value="all">All Accounts</option>
+              <option value="paper">Paper Only</option>
+              <option value="live">Live Only</option>
+            </select>
+            <div className="h-6 border-l border-gray-700"></div>
+            <button              onClick={() => handleExport("csv")}
+              disabled={exporting}
+              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              {exporting ? "⏳" : "📄"} CSV
+            </button>
             <button
-              onClick={() => loadReport(selectedPeriod || undefined)}
+              onClick={() => handleExport("excel")}
+              disabled={exporting}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              {exporting ? "⏳" : "📊"} Excel
+            </button>
+            <button              onClick={() => loadReport(selectedPeriod || undefined)}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
             >
               🔄 Refresh

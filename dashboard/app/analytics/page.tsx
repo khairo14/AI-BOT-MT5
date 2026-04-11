@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { fetchAnalyticsPerformance, fetchRegimeStatus } from "@/lib/api";
-import type { AnalyticsPerformance, BucketStats } from "@/types";
+import { fetchAnalyticsPerformance, fetchRegimeStatus, fetchExecutionQuality } from "@/lib/api";
+import type { AnalyticsPerformance, BucketStats, ExecutionQualityMetrics } from "@/types";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmt(n: number | undefined, decimals = 2): string {
@@ -253,12 +253,142 @@ function RegimePanel({ regimes }: { regimes: Record<string, string> }) {
   );
 }
 
+// ── execution quality panel ───────────────────────────────────────────────
+function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics | null }) {
+  if (!metrics || metrics.total_filled === 0) return null;
+
+  const formatSlippage = (s: number | null) => {
+    if (s == null) return "—";
+    return `${(s * 10000).toFixed(2)} pips`;
+  };
+
+  const formatTime = (ms: number | null) => {
+    if (ms == null) return "—";
+    return `${ms.toFixed(0)}ms`;
+  };
+
+  const slippageStatus = (s: number | null) => {
+    if (s == null) return "text-gray-400";
+    const pips = s * 10000;
+    if (pips < 1) return "text-green-400";
+    if (pips < 3) return "text-yellow-400";
+    return "text-red-400";
+  };
+
+  const timeStatus = (ms: number | null) => {
+    if (ms == null) return "text-gray-400";
+    if (ms < 200) return "text-green-400";
+    if (ms < 500) return "text-yellow-400";
+    return "text-red-400";
+  };
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <h3 className="text-sm font-semibold text-gray-300 mb-3">Execution Quality</h3>
+      
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <div>
+          <div className="text-xs text-gray-500">Total Filled</div>
+          <div className="text-lg font-bold text-white font-mono">{metrics.total_filled}</div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">Avg Slippage</div>
+          <div className={`text-lg font-bold font-mono ${slippageStatus(metrics.avg_slippage)}`}>
+            {formatSlippage(metrics.avg_slippage)}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">Avg Execution Time</div>
+          <div className={`text-lg font-bold font-mono ${timeStatus(metrics.avg_execution_time_ms)}`}>
+            {formatTime(metrics.avg_execution_time_ms)}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">Slippage Coverage</div>
+          <div className="text-lg font-bold text-white font-mono">
+            {(metrics.slippage_coverage * 100).toFixed(0)}%
+          </div>
+        </div>
+      </div>
+
+      {/* By Symbol */}
+      {Object.keys(metrics.by_symbol).length > 0 && (
+        <div className="mt-4">
+          <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">By Symbol</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-gray-800">
+                  <th className="text-left py-1 pr-3">Symbol</th>
+                  <th className="text-right px-2">Fills</th>
+                  <th className="text-right px-2">Slippage</th>
+                  <th className="text-right px-2">Exec Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(metrics.by_symbol)
+                  .sort((a, b) => b[1].total_filled - a[1].total_filled)
+                  .map(([symbol, data]) => (
+                    <tr key={symbol} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                      <td className="py-1.5 pr-3 text-gray-300 font-mono">{symbol}</td>
+                      <td className="text-right px-2 text-gray-400">{data.total_filled}</td>
+                      <td className={`text-right px-2 font-mono ${slippageStatus(data.avg_slippage)}`}>
+                        {formatSlippage(data.avg_slippage)}
+                      </td>
+                      <td className={`text-right px-2 font-mono ${timeStatus(data.avg_execution_time_ms)}`}>
+                        {formatTime(data.avg_execution_time_ms)}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* By Trading Type */}
+      {Object.keys(metrics.by_trading_type).length > 0 && (
+        <div className="mt-4">
+          <div className="text-xs text-gray-500 mb-2 uppercase tracking-wide">By Trading Mode</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-gray-800">
+                  <th className="text-left py-1 pr-3">Mode</th>
+                  <th className="text-right px-2">Fills</th>
+                  <th className="text-right px-2">Slippage</th>
+                  <th className="text-right px-2">Exec Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(metrics.by_trading_type).map(([mode, data]) => (
+                  <tr key={mode} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                    <td className="py-1.5 pr-3 text-gray-300 font-mono">{mode}</td>
+                    <td className="text-right px-2 text-gray-400">{data.total_filled}</td>
+                    <td className={`text-right px-2 font-mono ${slippageStatus(data.avg_slippage)}`}>
+                      {formatSlippage(data.avg_slippage)}
+                    </td>
+                    <td className={`text-right px-2 font-mono ${timeStatus(data.avg_execution_time_ms)}`}>
+                      {formatTime(data.avg_execution_time_ms)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── main page ─────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
   const [accountTab, setAccountTab]  = useState<typeof ACCOUNT_TABS[number]>("paper");
   const [modeTab,    setModeTab]     = useState<typeof MODE_TABS[number]>("all");
   const [data,   setData]    = useState<AnalyticsPerformance | null>(null);
   const [regimes, setRegimes] = useState<Record<string, string>>({});
+  const [executionQuality, setExecutionQuality] = useState<ExecutionQualityMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
@@ -266,12 +396,14 @@ export default function AnalyticsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [perf, reg] = await Promise.all([
+      const [perf, reg, exec] = await Promise.all([
         fetchAnalyticsPerformance(accountTab, modeTab),
         fetchRegimeStatus().catch(() => ({ regimes: {} })),
+        fetchExecutionQuality().catch(() => null),
       ]);
       setData(perf);
       setRegimes(reg.regimes);
+      setExecutionQuality(exec);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load analytics");
     } finally {
@@ -405,6 +537,9 @@ export default function AnalyticsPage() {
               })()}
             </div>
           </div>
+
+          {/* Execution quality */}
+          <ExecutionQualityPanel metrics={executionQuality} />
 
           {/* Regime status */}
           {Object.keys(regimes).length > 0 && <RegimePanel regimes={regimes} />}

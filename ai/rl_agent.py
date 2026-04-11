@@ -182,6 +182,15 @@ class RLAgent:
         """Return True if signal confidence meets the learned threshold."""
         return confidence >= self._conf_thresh
 
+    def get_current_state(self, win_rate: float, avg_conf: float, drawdown_pct: float = 0.0, vol_pct: float = 0.0) -> str:
+        """
+        Return the RL state bucket given current market conditions.
+        
+        Used to tag trade outcomes with RL state for win-rate breakdown analytics.
+        Does not modify agent state (read-only).
+        """
+        return _state(win_rate, avg_conf, drawdown_pct, vol_pct)
+
     def observe(self, win_rate: float, avg_conf: float, reward: float, drawdown_pct: float = 0.0, vol_pct: float = 0.0) -> None:
         """
         Called after a trade closes. Updates Q-table based on outcome.
@@ -281,6 +290,19 @@ class RLAgent:
             try:
                 with open(_save_path, "w", encoding="utf-8") as f:
                     json.dump(_save_payload, f)
+                # Append history snapshot for time-series tracking
+                _history_path = DATA_DIR / f"rl_history_{self.trading_type}_{self._mode}.jsonl"
+                _history_entry = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "trading_type": self.trading_type,
+                    "mode": self._mode,
+                    "conf_thresh": self._conf_thresh,
+                    "risk_factor": self._risk_factor,
+                    "n_updates": self._n_updates,
+                    "last_state": self._last_state,
+                }
+                with open(_history_path, "a", encoding="utf-8") as hf:
+                    hf.write(json.dumps(_history_entry) + "\n")
             except Exception as exc:
                 logger.warning(f"RL save failed [{self.trading_type}]: {exc}")
         logger.debug(
@@ -503,6 +525,22 @@ class RLAgentManager:
     ) -> None:
         """Feed a closed trade result into the appropriate RL agent."""
         self.agent(trading_type).observe(win_rate, avg_conf, profit_pct, drawdown_pct, vol_pct)
+
+    def get_state(
+        self,
+        trading_type: str,
+        win_rate:     float,
+        avg_conf:     float,
+        drawdown_pct: float = 0.0,
+        vol_pct:      float = 0.0,
+    ) -> str:
+        """
+        Return the RL state bucket for given market conditions.
+        
+        Used to tag trade outcomes with RL state for win-rate breakdown analytics.
+        Does not modify agent state (read-only).
+        """
+        return self.agent(trading_type).get_current_state(win_rate, avg_conf, drawdown_pct, vol_pct)
 
     def status(self) -> dict:
         return {tt: ag.status() for tt, ag in self._agents.items()}

@@ -1,0 +1,19 @@
+scrape_configs:
+  - job_name: 'aibot-mt5'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['localhost:8000']
+        labels:
+          instance: 'production'
+          environment: 'paper'
+          
+  # Optional: Add separate scrape for live account if running multiple instances
+  # - job_name: 'aibot-mt5-live'
+  #   scrape_interval: 15s
+  #   static_configs:
+  #     - targets: ['localhost:8001']
+  #       labels:
+  #         instance: 'production'
+  #         environment: 'live'

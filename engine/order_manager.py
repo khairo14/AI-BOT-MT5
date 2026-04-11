@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+import time
 
 import MetaTrader5 as mt5
 from loguru import logger
 
 from engine.mt5_client import MT5Client
+from engine.notification_manager import notification_manager
 
 # IMPROVE-2: read from config/app.json at import time so the magic number is
 # configurable without any source-code changes. Fallback keeps backward compat.
@@ -75,6 +77,8 @@ class OrderResult:
     ticket: Optional[int] = None
     open_price: Optional[float] = None
     error: Optional[str] = None
+    execution_time_ms: Optional[int] = None
+    slippage: Optional[float] = None
 
 
 class OrderManager:
@@ -92,6 +96,8 @@ class OrderManager:
 
     def place_market_order(self, req: OrderRequest) -> OrderResult:
         """Place a market order (BUY or BUY_MARKET / SELL or SELL_MARKET)."""
+        
+        start_time_ms = int(time.time() * 1000)  # Track execution time
 
         if not self._client.is_connected():
             return OrderResult(success=False, error="MT5 not connected")
@@ -223,8 +229,13 @@ class OrderManager:
             "type_filling": filling,
         }
 
-        with self._client._lock:
-            result = mt5.order_send(request)
+        
+        execution_time_ms = int(time.time() * 1000) - start_time_ms
+        
+        # Calculate slippage (if we have expected price from signal)
+        slippage = None
+        if req.entry_price and result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            slippage = abs(result.price - req.entry_price)
 
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment if result else str(mt5.last_error())
@@ -236,12 +247,16 @@ class OrderManager:
 
         logger.info(
             f"Order placed | #{result.order} | {req.symbol} {req.direction} "
-            f"{req.volume} lots | Entry: {result.price} | SL: {sl} | TP: {tp}"
+            f"{req.volume} lots | Entry: {result.price} | SL: {sl} | TP: {tp} | "
+            f"Execution: {execution_time_ms}ms"
+            + (f" | Slippage: {slippage:.5f}" if slippage else "")
         )
         return OrderResult(
             success=True,
             ticket=result.order,
             open_price=result.price,
+            execution_time_ms=execution_time_ms,
+            slippage=slippage,
         )
 
     # ------------------------------------------------------------------
@@ -265,6 +280,56 @@ class OrderManager:
         pos = positions[0]
         new_sl = sl if sl is not None else pos.sl
         new_tp = tp if tp is not None else pos.tp
+
+        # Validate stops against broker's minimum distance requirement
+        sym_info = self._client.get_symbol_info(pos.symbol)
+        if sym_info:
+            stops_level = sym_info.get("stops_level", 0)
+            point = sym_info.get("point", 0.00001)
+            min_distance = stops_level * point
+            
+            # Get current price (BUY uses ASK to open, SELL uses BID to open)
+            # For SL/TP validation, use the current quote
+            bid = sym_info.get("bid")
+            ask = sym_info.get("ask")
+            
+            if bid and ask and min_distance > 0:
+                # For BUY positions: SL must be <= bid - min_distance, TP must be >= bid + min_distance
+                # For SELL positions: SL must be >= ask + min_distance, TP must be <= ask - min_distance
+                if pos.type == mt5.ORDER_TYPE_BUY:
+                    # Check SL distance from bid
+                    if new_sl > 0:
+                        if new_sl > bid - min_distance:
+                            logger.debug(
+                                f"modify_position #{ticket}: BUY SL {new_sl:.5f} too close to bid {bid:.5f} | "
+                                f"Min distance: {min_distance:.5f} | Skipped"
+                            )
+                            return False
+                    # Check TP distance from bid  
+                    if new_tp > 0:
+                        if new_tp < bid + min_distance:
+                            logger.debug(
+                                f"modify_position #{ticket}: BUY TP {new_tp:.5f} too close to bid {bid:.5f} | "
+                                f"Min distance: {min_distance:.5f} | Skipped"
+                            )
+                            return False
+                else:  # SELL
+                    # Check SL distance from ask
+                    if new_sl > 0:
+                        if new_sl < ask + min_distance:
+                            logger.debug(
+                                f"modify_position #{ticket}: SELL SL {new_sl:.5f} too close to ask {ask:.5f} | "
+                                f"Min distance: {min_distance:.5f} | Skipped"
+                            )
+                            return False
+                    # Check TP distance from ask
+                    if new_tp > 0:
+                        if new_tp > ask - min_distance:
+                            logger.debug(
+                                f"modify_position #{ticket}: SELL TP {new_tp:.5f} too close to ask {ask:.5f} | "
+                                f"Min distance: {min_distance:.5f} | Skipped"
+                            )
+                            return False
 
         request = {
             "action":   mt5.TRADE_ACTION_SLTP,
@@ -338,6 +403,16 @@ class OrderManager:
             f"Position closed | #{ticket} | {pos.symbol} | "
             f"Reason: {reason} | Close price: {price}"
         )
+        
+        # Notify user of position closed
+        notification_manager.add(
+            type="position_closed",
+            title="Position Closed",
+            message=f"{pos.symbol} position #{ticket} closed — {reason}",
+            severity="info",
+            metadata={"ticket": ticket, "symbol": pos.symbol, "reason": reason, "close_price": price}
+        )
+        
         return True
 
     # ------------------------------------------------------------------

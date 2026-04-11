@@ -392,3 +392,186 @@ def get_journal_stats(
         "live":  live_stats,
         "all":   all_stats,
     }
+
+
+@router.get("/journal/export")
+def export_journal(
+    account: str = Query("all", description="paper | live | all"),
+    trading_type: Optional[str] = Query(None, description="scalping | day_trading | swing"),
+    days: Optional[int] = Query(None, description="Filter trades from last N days"),
+    format: str = Query("csv", description="csv | excel"),
+):
+    """
+    Export trade journal as CSV or Excel file.
+    Returns file download with proper headers for browser download prompt.
+    """
+    import csv
+    import io
+    from datetime import datetime, timedelta, timezone
+    from fastapi.responses import StreamingResponse
+    
+    from engine.trade_journal import trade_journal
+
+    if account not in ("paper", "live", "all"):
+        raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
+    
+    if format not in ("csv", "excel"):
+        raise HTTPException(status_code=400, detail="format must be 'csv' or 'excel'")
+
+    # Get all closed trades (both open and close events)
+    entries = trade_journal.get(account=account, trading_type=trading_type, event=None, limit=10_000)
+    
+    # Filter by date if specified
+    if days:
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+        entries = [
+            e for e in entries
+            if datetime.fromisoformat(e.get("logged_at", "").replace("Z", "+00:00")) >= cutoff
+        ]
+    
+    # Group by ticket to match open/close pairs
+    trades_by_ticket = {}
+    for entry in entries:
+        ticket = entry.get("ticket")
+        if ticket not in trades_by_ticket:
+            trades_by_ticket[ticket] = {"open": None, "close": None}
+        if entry.get("event") == "open":
+            trades_by_ticket[ticket]["open"] = entry
+        elif entry.get("event") == "close":
+            trades_by_ticket[ticket]["close"] = entry
+    
+    # Build export rows (only closed trades with both open and close)
+    export_rows = []
+    for ticket, events in trades_by_ticket.items():
+        if not events["open"] or not events["close"]:
+            continue  # Skip incomplete trades
+        
+        open_evt = events["open"]
+        close_evt = events["close"]
+        
+        # Parse timestamps
+        open_time = open_evt.get("logged_at", "")
+        close_time = close_evt.get("logged_at", "")
+        
+        # Calculate duration
+        try:
+            open_dt = datetime.fromisoformat(open_time.replace("Z", "+00:00"))
+            close_dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+            duration_hours = (close_dt - open_dt).total_seconds() / 3600
+        except Exception:
+            duration_hours = 0.0
+        
+        export_rows.append({
+            "Ticket": ticket,
+            "Open Time": open_time,
+            "Close Time": close_time,
+            "Duration (hours)": round(duration_hours, 2),
+            "Symbol": close_evt.get("symbol", ""),
+            "Direction": open_evt.get("direction", "").upper(),
+            "Trading Type": open_evt.get("trading_type", ""),
+            "Strategy": open_evt.get("strategy", ""),
+            "Volume": close_evt.get("volume", 0.0),
+            "Entry Price": open_evt.get("price", 0.0),
+            "Exit Price": close_evt.get("price", 0.0),
+            "Stop Loss": open_evt.get("sl", 0.0),
+            "Take Profit": open_evt.get("tp", 0.0),
+            "Profit": close_evt.get("profit", 0.0),
+            "Pips": close_evt.get("pips", 0.0),
+            "Confidence": open_evt.get("confidence", 0.0),
+            "Account": close_evt.get("account", ""),
+            "Comment": close_evt.get("comment", ""),
+        })
+    
+    # Sort by close time descending
+    export_rows.sort(key=lambda x: x["Close Time"], reverse=True)
+    
+    if format == "csv":
+        # Generate CSV
+        output = io.StringIO()
+        if export_rows:
+            writer = csv.DictWriter(output, fieldnames=export_rows[0].keys())
+            writer.writeheader()
+            writer.writerows(export_rows)
+        
+        output.seek(0)
+        filename = f"trades_{account}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    
+    else:  # excel
+        # Generate Excel using openpyxl
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="openpyxl not installed. Install with: pip install openpyxl"
+            )
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Trade Journal"
+        
+        if export_rows:
+            # Write header
+            headers = list(export_rows[0].keys())
+            ws.append(headers)
+            
+            # Style header row
+            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            
+            # Write data rows
+            for row in export_rows:
+                ws.append(list(row.values()))
+            
+            # Color-code profit column (green for positive, red for negative)
+            profit_col_idx = headers.index("Profit") + 1
+            green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+            red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+            
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row_idx, column=profit_col_idx)
+                try:
+                    if float(cell.value or 0) > 0:
+                        cell.fill = green_fill
+                    elif float(cell.value or 0) < 0:
+                        cell.fill = red_fill
+                except (ValueError, TypeError):
+                    pass
+            
+            # Auto-size columns
+            for col_idx, col in enumerate(ws.columns, start=1):
+                max_length = 0
+                column_letter = get_column_letter(col_idx)
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Save to bytes buffer
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        filename = f"trades_{account}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
