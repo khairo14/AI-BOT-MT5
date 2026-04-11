@@ -475,6 +475,21 @@ class OrderManager:
         step = symbol_info.volume_step
         close_volume = round(_math.floor(close_volume / step) * step, 8)
 
+        # Guard A: volume_min clamp may push close_volume above the actual remaining
+        # position size (e.g. pos.volume=0.01 after a prior partial close, but
+        # volume_min=0.02). Cap to pos.volume — this becomes a full close of the
+        # residual, which is correct and safe.
+        close_volume = min(close_volume, pos.volume)
+
+        # Guard B: floor rounding could yield 0.0 when pos.volume < one lot step.
+        # Sending a zero-volume order to MT5 returns INVALID_VOLUME; bail out cleanly.
+        if close_volume <= 0:
+            logger.warning(
+                f"partial_close #{ticket}: computed close_volume=0 after rounding "
+                f"(pos.volume={pos.volume}, close_pct={close_pct}, step={step}) — skipping"
+            )
+            return False
+
         with self._client._lock:
             tick = mt5.symbol_info_tick(pos.symbol)
         if tick is None:
