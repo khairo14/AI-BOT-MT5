@@ -246,7 +246,7 @@ class PricePredictor:
 
     def status(self) -> dict:
         """Return training status dict for all known symbol+type keys."""
-        all_keys = set(self._models) | set(self._training)
+        all_keys = set(self._models) | set(self._training) | set(self._metadata)
         return {
             key: {
                 "trained":  key in self._models,
@@ -387,14 +387,30 @@ class PricePredictor:
         # PERF-1: Lowered from 58% to 55% — models struggle to exceed 55% in current market.
         _MIN_ACCURACY      = 0.55
         _BOOTSTRAP_MIN     = 0.50   # floor when no prior model exists
-        _model_exists      = (MODELS_DIR / f"{key}_lstm_0.pt").exists()
+        # Check both new ensemble format (_lstm_0.pt) and old legacy format (_lstm.pt)
+        _model_exists      = (
+            (MODELS_DIR / f"{key}_lstm_0.pt").exists() or
+            (MODELS_DIR / f"{key}_lstm.pt").exists()
+        )
         _effective_min     = _MIN_ACCURACY if _model_exists else _BOOTSTRAP_MIN
-        if avg_accuracy <= _effective_min:
+        if avg_accuracy < _effective_min:
             logger.warning(
                 f"LSTM {key}: ensemble avg accuracy {avg_accuracy:.2%} < {_effective_min:.0%} threshold "
                 f"({'protection' if _model_exists else 'bootstrap'} gate) — "
                 f"not saved (members: {[f'{a:.2%}' for a in ensemble_accuracies]})"
             )
+            # Record rejection in metadata so status() shows what happened
+            with self._lock:
+                existing_meta = self._metadata.get(key, {})
+                existing_meta["last_rejection"] = {
+                    "at":               datetime.now(timezone.utc).isoformat(),
+                    "accuracy":         round(avg_accuracy, 4),
+                    "member_accuracies": [round(a, 4) for a in ensemble_accuracies],
+                    "threshold":        _effective_min,
+                    "gate":             "protection" if _model_exists else "bootstrap",
+                    "bars_used":        len(df),
+                }
+                self._metadata[key] = existing_meta
             return
 
         # ── Step 1: Persist ensemble models and scalers to disk ─────────────────────────

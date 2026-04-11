@@ -57,7 +57,7 @@ function parseRLState(state: string | undefined): string {
 }
 
 //  types 
-type AIStatus = Record<string, { accuracy?: number; bars_used?: number; trained_at?: string; training?: boolean }>;
+type AIStatus = Record<string, { accuracy?: number; bars_used?: number; trained_at?: string; training?: boolean; trained?: boolean; ensemble_size?: number; last_rejection?: { at: string; accuracy: number; threshold: number; gate: string } }>;
 type RLStatus = Record<string, { confidence_threshold?: number; risk_factor?: number; q_states?: number; last_state?: string }>;
 type RLHistory = {
   snapshots?: Array<{ timestamp: string; conf_thresh: number; risk_factor: number; n_updates: number }>;
@@ -353,11 +353,27 @@ export default function MLPage() {
                             <span className="font-semibold text-white">{sym}</span>
                             <span className="ml-2 text-xs text-gray-500">{type.replace("_", " ")}</span>
                           </td>
-                          <td className="py-2 pr-4">{m.accuracy != null ? pct(m.accuracy) : "—"}</td>
+                          <td className="py-2 pr-4">
+                            {m.accuracy != null ? pct(m.accuracy) : "—"}
+                            {m.ensemble_size != null && m.ensemble_size > 1 && (
+                              <span className="ml-1 text-xs text-blue-400" title={`Ensemble (${m.ensemble_size} members)`}>×{m.ensemble_size}</span>
+                            )}
+                          </td>
                           <td className="py-2 pr-4">{m.bars_used ?? "—"}</td>
                           <td className="py-2 pr-4 text-gray-400">{relTime(m.trained_at)}</td>
                           <td className="py-2 pr-4">
-                            <Badge ok={!m.training} label={m.training ? "Training" : "Ready"} />
+                            {m.training ? (
+                              <Badge ok={false} label="Training" />
+                            ) : m.last_rejection && !m.trained ? (
+                              <span
+                                className="text-xs px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-400 cursor-help"
+                                title={`Last retrain rejected — accuracy ${(m.last_rejection.accuracy * 100).toFixed(1)}% below ${(m.last_rejection.threshold * 100).toFixed(0)}% ${m.last_rejection.gate} gate. Old model still active.`}
+                              >
+                                Rejected {(m.last_rejection.accuracy * 100).toFixed(1)}%
+                              </span>
+                            ) : (
+                              <Badge ok={true} label="Ready" />
+                            )}
                           </td>
                           <td className="py-2">
                             <button
