@@ -200,6 +200,13 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [switchTarget, setSwitchTarget] = useState<AccountMode | null>(null);
 
+  // Collapsible state for Tools/Reports/System — Trading is always open
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
+    { Tools: false, Reports: false, System: false }
+  );
+  const toggleSection = (title: string) =>
+    setOpenSections(prev => ({ ...prev, [title]: !prev[title] }));
+
   const handleModeToggle = () => {
     if (!account) return;
     const next: AccountMode = account.mode === "paper" ? "live" : "paper";
@@ -209,7 +216,7 @@ export default function Sidebar() {
   return (
     <>
     <aside
-      className="min-h-screen bg-gray-950 border-r border-gray-800 flex flex-col transition-all duration-300 overflow-hidden"
+      className="h-full bg-gray-950 border-r border-gray-800 flex flex-col transition-all duration-300 overflow-hidden"
       style={{ width: collapsed ? "56px" : "224px" }}
     >
       {/* Logo + collapse toggle */}
@@ -230,50 +237,67 @@ export default function Sidebar() {
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 px-2 py-4 space-y-4 overflow-y-auto">
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.title}>
-            {!collapsed && (
-              <div className="px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                {section.title}
-              </div>
-            )}
-            <div className="space-y-1">
-              {section.items.map(({ href, label, icon }) => {
-                const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    title={collapsed ? label : undefined}
-                    className={`flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors ${
-                      active
-                        ? "bg-blue-600 text-white"
-                        : "text-gray-400 hover:text-white hover:bg-gray-800"
-                    }`}
+      <nav className="flex-1 px-2 py-4 space-y-4 overflow-hidden">
+        {NAV_SECTIONS.map((section) => {
+          const isCollapsible = section.title !== "Trading";
+          const isOpen = !isCollapsible || openSections[section.title] !== false;
+          return (
+            <div key={section.title}>
+              {!collapsed && (
+                isCollapsible ? (
+                  <button
+                    onClick={() => toggleSection(section.title)}
+                    className="w-full flex items-center justify-between px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors"
                   >
-                    <span className="text-base shrink-0">{icon}</span>
-                    {!collapsed && (
-                      <>
-                        <span className="flex-1 whitespace-nowrap">{label}</span>
-                        {href === "/notifications" && unreadCount > 0 && (
-                          <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 leading-none">
+                    <span>{section.title}</span>
+                    <span className={`transition-transform duration-200 ${isOpen ? "rotate-0" : "-rotate-90"}`}>▾</span>
+                  </button>
+                ) : (
+                  <div className="px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    {section.title}
+                  </div>
+                )
+              )}
+              {/* Items: always show in collapsed (icon-only) mode; respect toggle otherwise */}
+              {(collapsed || isOpen) && (
+                <div className="space-y-1">
+                  {section.items.map(({ href, label, icon }) => {
+                    const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+                    return (
+                      <Link
+                        key={href}
+                        href={href}
+                        title={collapsed ? label : undefined}
+                        className={`flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors ${
+                          active
+                            ? "bg-blue-600 text-white"
+                            : "text-gray-400 hover:text-white hover:bg-gray-800"
+                        }`}
+                      >
+                        <span className="text-base shrink-0">{icon}</span>
+                        {!collapsed && (
+                          <>
+                            <span className="flex-1 whitespace-nowrap">{label}</span>
+                            {href === "/notifications" && unreadCount > 0 && (
+                              <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 leading-none">
+                                {unreadCount}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {collapsed && href === "/notifications" && unreadCount > 0 && (
+                          <span className="absolute ml-3 -mt-3 text-[9px] bg-blue-600 text-white rounded-full px-1 leading-none">
                             {unreadCount}
                           </span>
                         )}
-                      </>
-                    )}
-                    {collapsed && href === "/notifications" && unreadCount > 0 && (
-                      <span className="absolute ml-3 -mt-3 text-[9px] bg-blue-600 text-white rounded-full px-1 leading-none">
-                        {unreadCount}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Clock + market sessions */}

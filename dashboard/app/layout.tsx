@@ -29,19 +29,17 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950 h-screen flex flex-col overflow-hidden`}
       >
         <AppBootstrap />
         <NotificationBar />
-        <div className="flex min-h-screen flex-col">
-          <div className="flex flex-1">
-            <Sidebar />
-            <main className="flex-1 overflow-y-auto">
-              {children}
-            </main>
-          </div>
-          <LogConsole />
+        <div className="flex flex-1 min-h-0">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto">
+            {children}
+          </main>
         </div>
+        <LogConsole />
       </body>
     </html>
   );
