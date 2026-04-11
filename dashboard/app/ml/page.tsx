@@ -424,7 +424,7 @@ export default function MLPage() {
         <div className="mt-4 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-white">RL Insights (Readable)</p>
+              <p className="text-sm font-medium text-white">RL Insights</p>
               <p className="text-xs text-gray-500">Shows adaptation trend and which market states are performing best vs worst.</p>
             </div>
             <div className="flex items-center gap-2">
