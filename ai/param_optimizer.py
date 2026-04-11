@@ -471,6 +471,9 @@ class ParamOptimizer:
             return True
         try:
             last_dt = datetime.fromisoformat(last)
+            # Ensure timezone-aware so subtraction with utcnow never raises TypeError
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
             logger.warning(f"Optimizer: invalid timestamp for {strategy_name}/{symbol}: {last!r}")
             return True
@@ -492,6 +495,8 @@ class ParamOptimizer:
         if last:
             try:
                 _last_dt_filter = datetime.fromisoformat(last)
+                if _last_dt_filter.tzinfo is None:
+                    _last_dt_filter = _last_dt_filter.replace(tzinfo=timezone.utc)
                 _new_trades = [
                     o for o in outcomes
                     if o.get("close_time") and
