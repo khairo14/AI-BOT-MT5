@@ -1186,7 +1186,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
             ]
             # Include symbols discovered by the market scanner
             scanner_syms = [
-                s for s in scanner_cfg.get("symbols", [])
+                s for s in scanner_cfg.get(trading_type, {}).get("symbols", [])
                 if isinstance(s, str) and s
             ]
             seen: set[str] = set()
