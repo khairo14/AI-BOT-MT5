@@ -79,6 +79,10 @@ class MarketScanner:
     def __init__(self, mt5_client: MT5Client):
         self.mt5 = mt5_client
         self._lock = threading.RLock()
+        # Dedicated lock that serialises concurrent scan_all() calls so that:
+        # a) only one full scan runs at a time (prevents MT5 overload)
+        # b) cache read + write is atomic (no TOCTOU gap)
+        self._scan_lock = threading.Lock()
         self._cache: Optional[ScanSummary] = None
         self._cache_time: Optional[datetime] = None
         
@@ -100,65 +104,74 @@ class MarketScanner:
         """
         Scan all available symbols across all enabled trading types.
         Returns grouped and ranked results.
-        
+
         Args:
             force_refresh: If True, bypass cache and rescan
         """
-        # Check cache
+        # Fast path: return cache without acquiring _scan_lock
         if not force_refresh and self._is_cache_valid():
             logger.info("Returning cached scan results")
             return self._cache
-        
-        start_time = datetime.now(timezone.utc)
-        logger.info("Starting market scan...")
-        
-        # Get all available symbols from MT5
-        all_symbols = self._get_all_symbols()
-        if not all_symbols:
-            logger.error("No symbols available from MT5")
-            return self._empty_summary()
-        
-        logger.info(f"Found {len(all_symbols)} symbols from MT5")
-        
-        # Scan each trading type
-        results_by_type = {}
-        total_passed = 0
-        
-        for trading_type in ["scalping", "day_trading", "swing"]:
-            type_cfg = self.cfg["trading_types"].get(trading_type)
-            if not type_cfg or not type_cfg.get("enabled"):
-                logger.info(f"Trading type '{trading_type}' is disabled, skipping")
-                continue
-            
-            logger.info(f"Scanning for {trading_type}...")
-            results = self._scan_trading_type(all_symbols, trading_type, type_cfg)
-            results_by_type[trading_type] = results
-            total_passed += len(results)
-            logger.info(f"  → {len(results)} symbols passed {trading_type} criteria")
-        
-        # Create summary
-        end_time = datetime.now(timezone.utc)
-        duration = (end_time - start_time).total_seconds()
-        
-        summary = ScanSummary(
-            timestamp=start_time.isoformat(),
-            trading_types=results_by_type,
-            total_scanned=len(all_symbols),
-            total_passed=total_passed,
-            scan_duration_seconds=round(duration, 2),
-            config_hash=self._compute_config_hash()
-        )
-        
-        # Update cache
-        self._cache = summary
-        self._cache_time = start_time
-        
-        logger.info(
-            f"Market scan complete | Scanned: {len(all_symbols)} | "
-            f"Passed: {total_passed} | Duration: {duration:.2f}s"
-        )
-        
-        return summary
+
+        # Serialize concurrent scans — only one thread runs the expensive scan;
+        # others wait, then pick up the fresh cache on release.
+        with self._scan_lock:
+            # Re-check cache after acquiring lock: a concurrent scan may have
+            # already completed while we were waiting.
+            if not force_refresh and self._is_cache_valid():
+                logger.info("Returning cached scan results (post-lock recheck)")
+                return self._cache
+
+            start_time = datetime.now(timezone.utc)
+            logger.info("Starting market scan...")
+
+            # Get all available symbols from MT5
+            all_symbols = self._get_all_symbols()
+            if not all_symbols:
+                logger.error("No symbols available from MT5")
+                return self._empty_summary()
+
+            logger.info(f"Found {len(all_symbols)} symbols from MT5")
+
+            # Scan each trading type
+            results_by_type = {}
+            total_passed = 0
+
+            for trading_type in ["scalping", "day_trading", "swing"]:
+                type_cfg = self.cfg["trading_types"].get(trading_type)
+                if not type_cfg or not type_cfg.get("enabled"):
+                    logger.info(f"Trading type '{trading_type}' is disabled, skipping")
+                    continue
+
+                logger.info(f"Scanning for {trading_type}...")
+                results = self._scan_trading_type(all_symbols, trading_type, type_cfg)
+                results_by_type[trading_type] = results
+                total_passed += len(results)
+                logger.info(f"  → {len(results)} symbols passed {trading_type} criteria")
+
+            # Create summary
+            end_time = datetime.now(timezone.utc)
+            duration = (end_time - start_time).total_seconds()
+
+            summary = ScanSummary(
+                timestamp=start_time.isoformat(),
+                trading_types=results_by_type,
+                total_scanned=len(all_symbols),
+                total_passed=total_passed,
+                scan_duration_seconds=round(duration, 2),
+                config_hash=self._compute_config_hash()
+            )
+
+            # Update cache — atomic write while holding _scan_lock
+            self._cache = summary
+            self._cache_time = start_time
+
+            logger.info(
+                f"Market scan complete | Scanned: {len(all_symbols)} | "
+                f"Passed: {total_passed} | Duration: {duration:.2f}s"
+            )
+
+            return summary
     
     def scan_type(self, trading_type: str, force_refresh: bool = False) -> List[ScanResult]:
         """Scan only for a specific trading type."""
@@ -182,12 +195,11 @@ class MarketScanner:
     # -----------------------------------------------------------------------
     
     def _get_all_symbols(self) -> List[str]:
-        """Get all tradeable symbols from MT5."""
-        with self._lock:
-            symbols_info = mt5.symbols_get()
-        
+        """Get all tradeable symbols from MT5 via the MT5Client wrapper so that
+        mutual exclusion with the trading engine's MT5 calls is guaranteed."""
+        symbols_info = self.mt5.get_all_symbols()
         if not symbols_info:
-            logger.error(f"mt5.symbols_get() failed: {mt5.last_error()}")
+            logger.error("mt5.get_all_symbols() returned empty list")
             return []
         
         # Filter to tradeable symbols, exclude those in blacklist

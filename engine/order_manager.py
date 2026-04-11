@@ -229,9 +229,10 @@ class OrderManager:
             "type_filling": filling,
         }
 
-        
+        with self._client._lock:
+            result = mt5.order_send(request)
         execution_time_ms = int(time.time() * 1000) - start_time_ms
-        
+
         # Calculate slippage (if we have expected price from signal)
         slippage = None
         if req.entry_price and result and result.retcode == mt5.TRADE_RETCODE_DONE:

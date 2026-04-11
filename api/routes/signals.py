@@ -154,6 +154,9 @@ async def reject_signal(signal_id: str, body: RejectRequest = RejectRequest()):
         signal.get("direction"), signal.get("trading_mode"),
     )
     bus._pending_keys.discard(_dk)
+    # GAP-1: sync persistent file when a swing auto-execute signal is rejected
+    if signal.get("auto_execute_at"):
+        bus._save_pending_swing_signals()
     # Broadcast rejection to dashboard so signal cards update in real time
     try:
         from api.websocket.feed import broadcast_signal
@@ -168,7 +171,10 @@ def delete_signal(signal_id: str):
     """Permanently remove a signal from the queue (any status)."""
     if signal_id not in bus.queue:
         raise HTTPException(status_code=404, detail="Signal not found")
-    bus.queue.pop(signal_id, None)
+    _sig = bus.queue.pop(signal_id, None)
+    # GAP-1: sync persistent file when a swing auto-execute signal is deleted
+    if _sig and _sig.get("auto_execute_at"):
+        bus._save_pending_swing_signals()
     return {"status": "deleted", "id": signal_id}
 
 

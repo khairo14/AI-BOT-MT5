@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -270,6 +271,10 @@ async def lifespan(app: FastAPI):
             asyncio.create_task(recover_unclosed_trades(mt5_client))
         except Exception as _rec_exc:
             logger.warning(f"Startup recovery task failed to launch: {_rec_exc}")
+        try:
+            asyncio.create_task(bus.restore_pending_swing_signals())
+        except Exception as _pss_exc:
+            logger.warning(f"Pending swing signals restore failed: {_pss_exc}")
         # G-1: MT5 watchdog — reconnect automatically if the terminal drops
         asyncio.create_task(_mt5_watchdog())
         # RL idle decay — runs every 30 min to decay thresholds during no-trade periods
@@ -323,11 +328,29 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
-    """Attach a correlation ID to every request for log tracing."""
+    """Attach a correlation ID to every request for log tracing.
+    Also records request count, latency, and errors for Prometheus metrics."""
     correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
     request.state.correlation_id = correlation_id
+    _t0 = time.time()
     with logger.contextualize(correlation_id=correlation_id):
         response = await call_next(request)
+    _duration_ms = (time.time() - _t0) * 1000
+    # Feed Prometheus tracking — skip the /metrics endpoint itself to avoid recursion
+    _path = request.url.path
+    if _path != "/metrics":
+        try:
+            from api.routes.prometheus import (
+                increment_request_count,
+                record_request_duration,
+                increment_error_count,
+            )
+            increment_request_count(_path)
+            record_request_duration(_path, _duration_ms)
+            if response.status_code >= 500:
+                increment_error_count(_path)
+        except Exception:
+            pass
     response.headers["X-Correlation-ID"] = correlation_id
     return response
 

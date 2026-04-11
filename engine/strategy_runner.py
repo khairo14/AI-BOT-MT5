@@ -556,6 +556,16 @@ class StrategyRunner:
                 regime=_regime,
                 df_higher=_df_higher,
             )
+            # Capture raw LSTM probability from the predictor's cache for accurate
+            # lstm_predicted_direction tracking in trade memory and Platt calibration.
+            # The cache is populated by scorer.score() → predictor.predict() above.
+            try:
+                _lstm_key = f"{symbol}_{trading_type}"
+                _lstm_cached = scorer.predictor._prediction_cache.get(_lstm_key)
+                if _lstm_cached is not None:
+                    strat_sig.indicators["lstm_raw_prob"] = round(float(_lstm_cached[0]), 4)
+            except Exception:
+                pass
             # AI/ML confidence filter (enabled via Settings → AI → confidence_filter_enabled)
             try:
                 _ai = _get_app_config().get("ai", {})

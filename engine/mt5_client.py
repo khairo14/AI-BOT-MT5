@@ -186,6 +186,17 @@ class MT5Client:
     # Symbol Info
     # ------------------------------------------------------------------
 
+    def get_all_symbols(self) -> list:
+        """Return all MT5 symbols via mt5.symbols_get() under the client lock.
+        Using the client lock (not a caller-side lock) ensures mutual exclusion
+        with every other MT5 call in the codebase."""
+        with self._lock:
+            result = mt5.symbols_get()
+        if result is None:
+            logger.warning(f"mt5.symbols_get() returned None: {mt5.last_error()}")
+            return []
+        return list(result)
+
     def get_symbol_info(self, symbol: str) -> Optional[dict]:
         """Return tick size, pip value, spread, and trading constraints."""
         # M-11 fix: single lock acquisition covers all three MT5 calls, eliminating

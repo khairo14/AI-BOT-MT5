@@ -75,49 +75,54 @@ def _kelly_fraction(win_rate: float, avg_win: float, avg_loss: float) -> float:
     return max(0.0, min(1.0, fraction * 0.5))
 
 
-def _correlation_matrix(strategy_returns: dict[str, list[float]]) -> dict:
+def _correlation_matrix(strategy_returns: dict[str, dict[str, float]]) -> dict:
     """
     Calculate correlation matrix between strategy daily returns.
-    
+
     Args:
-        strategy_returns: {strategy_name: [daily_return_1, daily_return_2, ...]}
-    
+        strategy_returns: {strategy_name: {date_str: daily_return}}
+
+    Returns date-aligned correlation — only the days where BOTH strategies were
+    active are used (inner join). Zero-padding would introduce fake flat days and
+    bias every coefficient toward zero.
+
     Returns:
         {
-            "matrix": {(strategy_a, strategy_b): correlation_coefficient},
+            "matrix": {"strategy_a_strategy_b": correlation_coefficient},
             "avg_correlation": float
         }
     """
     strategies = list(strategy_returns.keys())
     if len(strategies) < 2:
         return {"matrix": {}, "avg_correlation": 0.0}
-    
+
     matrix = {}
     correlations = []
-    
+
     for i, strat_a in enumerate(strategies):
-        for strat_b in strategies[i+1:]:
-            returns_a = np.array(strategy_returns[strat_a])
-            returns_b = np.array(strategy_returns[strat_b])
-            
-            # Ensure same length (pad shorter with 0s)
-            max_len = max(len(returns_a), len(returns_b))
-            if len(returns_a) < max_len:
-                returns_a = np.pad(returns_a, (0, max_len - len(returns_a)))
-            if len(returns_b) < max_len:
-                returns_b = np.pad(returns_b, (0, max_len - len(returns_b)))
-            
-            if len(returns_a) > 1 and len(returns_b) > 1:
-                corr = float(np.corrcoef(returns_a, returns_b)[0, 1])
-                if not math.isnan(corr) and not math.isinf(corr):
-                    matrix[(strat_a, strat_b)] = round(corr, 3)
-                    correlations.append(abs(corr))
-    
+        for strat_b in strategies[i + 1:]:
+            # Inner join on dates — only days both strategies traded
+            common_dates = sorted(
+                set(strategy_returns[strat_a].keys()) &
+                set(strategy_returns[strat_b].keys())
+            )
+            if len(common_dates) < 5:  # need at least 5 common days for a meaningful correlation
+                continue
+            returns_a = np.array([strategy_returns[strat_a][d] for d in common_dates])
+            returns_b = np.array([strategy_returns[strat_b][d] for d in common_dates])
+            # std must be non-zero for corrcoef to be meaningful
+            if returns_a.std() == 0 or returns_b.std() == 0:
+                continue
+            corr = float(np.corrcoef(returns_a, returns_b)[0, 1])
+            if not math.isnan(corr) and not math.isinf(corr):
+                matrix[(strat_a, strat_b)] = round(corr, 3)
+                correlations.append(abs(corr))
+
     avg_corr = sum(correlations) / len(correlations) if correlations else 0.0
-    
+
     return {
         "matrix": {f"{a}_{b}": v for (a, b), v in matrix.items()},
-        "avg_correlation": round(avg_corr, 3)
+        "avg_correlation": round(avg_corr, 3),
     }
 
 
@@ -246,12 +251,13 @@ def get_optimal_allocation(
     # Calculate risk parity allocations
     risk_parity_allocations = _risk_parity_allocation(risk_parity_vols)
     
-    # Calculate correlation matrix
-    strategy_returns_lists = {
-        s: list(strategy_daily_returns[s].values())
+    # Calculate correlation matrix — pass full date-keyed dicts so _correlation_matrix
+    # can align returns by calendar date (inner join) rather than positional index.
+    strategy_returns_dicts = {
+        s: dict(strategy_daily_returns[s])
         for s in kelly_allocations.keys()
     }
-    correlation_data = _correlation_matrix(strategy_returns_lists)
+    correlation_data = _correlation_matrix(strategy_returns_dicts)
     
     # Check if rebalance needed (compare to equal-weight baseline)
     equal_weight = 1.0 / len(kelly_allocations) if kelly_allocations else 0.0

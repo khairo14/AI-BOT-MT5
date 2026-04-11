@@ -634,18 +634,22 @@ class PricePredictor:
                 "needed":   30,
             }
 
-        # Build arrays: raw model output vs actual binary outcome
-        # We don't store raw sigmoid output — use 0.6 as proxy for BUY prediction,
-        # 0.4 for SELL prediction (minimum signal confidence was 0.45+)
+        # Build arrays: raw model output vs actual binary outcome.
+        # Use the lstm_raw_prob stored in extra (set by strategy_runner since the
+        # strategy_runner captures it from predictor._prediction_cache at signal time).
+        # For older records without lstm_raw_prob, fall back to the direction proxy
+        # (0.65 for BUY, 0.35 for SELL) as a best-effort approximation.
         raw_probs = []
         actuals   = []
         for o in outcomes:
             pred   = o.get("lstm_predicted_direction", "")
             profit = o.get("profit", 0)
             actual = 1.0 if profit > 0 else 0.0
-            # Proxy raw probability from direction
-            raw_p  = 0.65 if pred == "BUY" else 0.35
-            raw_probs.append(raw_p)
+            # Prefer the actual stored raw probability; fall back to direction proxy
+            raw_p = o.get("extra", {}).get("lstm_raw_prob")
+            if raw_p is None:
+                raw_p = 0.65 if pred == "BUY" else 0.35
+            raw_probs.append(float(raw_p))
             actuals.append(actual)
 
         # Fit logistic regression: find (a, b) s.t. sigmoid(a*p + b) ≈ actual

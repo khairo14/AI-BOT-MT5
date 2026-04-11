@@ -47,7 +47,6 @@ class AddSymbolRequest(BaseModel):
     """Request to add a symbol to enabled symbols for a trading type."""
     symbol: str
     trading_type: str  # "scalping", "day_trading", or "swing"
-    enabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +316,6 @@ async def add_symbol_to_config(request: Request, body: AddSymbolRequest):
             "message": message,
             "symbol": body.symbol,
             "trading_type": body.trading_type,
-            "enabled": body.enabled,
             "total_symbols": len(symbols_list)
         }
     

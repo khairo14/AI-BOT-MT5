@@ -230,8 +230,7 @@ class PaperTradeEngine:
                             _outcome_t = "tp_hit" if pos.profit > 0 else "sl_hit"
                     _bal_pt    = 0.0
                     try:
-                        from engine.risk_manager import risk_manager as _rm_pt
-                        _bal_pt = _rm_pt._day_start_balance or 0.0
+                        _bal_pt = self.risk_manager._day_start_balance or 0.0
                     except Exception:
                         pass
                     _pnl_pct   = (pos.profit / _bal_pt * 100.0) if _bal_pt > 0 else (pos.profit / 10000.0 * 100.0)

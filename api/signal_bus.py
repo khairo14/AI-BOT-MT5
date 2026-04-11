@@ -54,6 +54,7 @@ _DEFAULT_EXPIRY: dict[str, int] = {
 from loguru import logger
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
+_PENDING_SIGNALS_FILE = Path(__file__).parent.parent / "data" / "pending_signals.json"
 
 # NEW-15: module-level TTL cache for app.json so _get_exec_mode / _is_ea_enabled
 # don't read the file on every add_signal call (up to 200+ reads/min at high scan rate).
@@ -99,6 +100,18 @@ _AUTO_OPT_BARS: dict[str, int] = {
     "day_trading":  50_000,  # H1  ≈ 5.7 years
     "swing":        20_000,  # H4  ≈ 9.1 years
 }
+
+
+def _lstm_dir_from_signal(signal: dict) -> Optional[str]:
+    """Derive lstm_predicted_direction from the raw LSTM probability stored in the
+    signal's indicators dict by strategy_runner. Falls back to the trade direction
+    only when the raw prob is unavailable (e.g. older signals or LSTM disabled).
+    Using the raw prob (>0.5 → BUY, <0.5 → SELL) gives the actual model prediction
+    rather than always echoing the trade direction, enabling real accuracy tracking."""
+    raw = signal.get("indicators", {}).get("lstm_raw_prob")
+    if raw is not None:
+        return "BUY" if float(raw) > 0.5 else "SELL"
+    return signal.get("direction", "").upper() or None
 
 
 def _set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -189,6 +202,7 @@ class SignalBus:
                 self._pending_keys.discard(_k)
         if to_delete:
             logger.debug(f"SignalBus: purged {len(to_delete)} stale signals")
+            self._save_pending_swing_signals()
         return len(to_delete)
 
     async def _broadcast_expired(self, signal: dict) -> None:
@@ -321,6 +335,7 @@ class SignalBus:
                 self.queue[signal["id"]] = signal
                 self._pending_keys.add(_dedup_key)
                 self.purge_stale()
+                self._save_pending_swing_signals()
                 # Broadcast as pending so UI shows the card with full details
                 asyncio.create_task(broadcast_signal(dict(signal)))
                 logger.info(
@@ -475,6 +490,9 @@ class SignalBus:
 
         # Notify dashboard of the outcome
         await broadcast_signal({**signal, "type": "signal_update"})
+        # GAP-1: sync persistent file when a swing auto-execute signal completes
+        if signal.get("auto_execute_at"):
+            self._save_pending_swing_signals()
 
     def _do_execute_sync(self, signal: dict) -> bool:
         """Synchronous order placement — runs in a thread executor."""
@@ -711,6 +729,110 @@ class SignalBus:
             logger.exception(f"_do_execute_sync error: {exc}")
             return False
 
+    def _save_pending_swing_signals(self) -> None:
+        """Persist all currently-pending swing auto-execute signals to disk.
+        Called whenever the pending-swing set changes so the bot can recover
+        them after a restart.
+        """
+        try:
+            pending = [
+                dict(sig) for sig in self.queue.values()
+                if sig.get("auto_execute_at") and sig.get("status") == "pending"
+            ]
+            _PENDING_SIGNALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _PENDING_SIGNALS_FILE.write_text(json.dumps(pending, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.debug(f"SignalBus: could not save pending swing signals: {exc}")
+
+    async def restore_pending_swing_signals(self) -> None:
+        """Called once at startup — re-queues swing auto-execute signals that
+        were in their review window when the bot last restarted.  Signals whose
+        review window passed more than 1 hour ago are silently discarded.
+        """
+        if not _PENDING_SIGNALS_FILE.exists():
+            return
+        try:
+            saved: list[dict] = json.loads(
+                _PENDING_SIGNALS_FILE.read_text(encoding="utf-8")
+            )
+        except Exception as exc:
+            logger.warning(f"SignalBus: could not read pending signals file: {exc}")
+            return
+        if not saved:
+            return
+        from api.websocket.feed import broadcast_signal
+        now = datetime.now(tz=timezone.utc)
+        restored = 0
+        for sig in saved:
+            auto_at_str = sig.get("auto_execute_at")
+            if not auto_at_str or sig.get("status") != "pending":
+                continue
+            try:
+                auto_at = datetime.fromisoformat(auto_at_str.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            elapsed = (now - auto_at).total_seconds()
+            if elapsed > 3600:
+                logger.info(
+                    f"SignalBus restore: skipping stale swing signal "
+                    f"{sig.get('symbol')}/{sig.get('strategy')} "
+                    f"(review window passed {elapsed / 60:.0f} min ago)"
+                )
+                continue
+            self.queue[sig["id"]] = sig
+            _dk = (
+                sig.get("symbol"),
+                sig.get("strategy"),
+                sig.get("direction"),
+                sig.get("trading_mode", ""),
+            )
+            self._pending_keys.add(_dk)
+            delay = max(0.0, (auto_at - now).total_seconds())
+            _mode = sig.get("trading_mode", "swing")
+
+            async def _restore_exec(s: dict, d: float, dk: tuple, m: str) -> None:
+                await asyncio.sleep(d)
+                if s.get("status") != "pending":
+                    self._pending_keys.discard(dk)
+                    return
+                s["status"] = "executing"
+                await broadcast_signal({**s, "type": "signal_update"})
+                try:
+                    from api.runner_loop import _risk_manager as _rm_rstr
+                    if _rm_rstr is not None:
+                        _ok, _msg = _rm_rstr.is_trading_allowed(m)
+                        if not _ok:
+                            s["status"] = "rejected"
+                            s["rejection_reason"] = _msg
+                            self._pending_keys.discard(dk)
+                            logger.info(
+                                f"SignalBus restore: swing auto-execute blocked: {_msg}"
+                            )
+                            await broadcast_signal({**s, "type": "signal_update"})
+                            return
+                except Exception:
+                    pass
+                await self._execute_async(s)
+                self._pending_keys.discard(dk)
+                self._save_pending_swing_signals()
+
+            _task = asyncio.create_task(_restore_exec(sig, delay, _dk, _mode))
+            self._active_tasks.add(_task)
+            _task.add_done_callback(self._active_tasks.discard)
+            asyncio.create_task(broadcast_signal(dict(sig)))
+            restored += 1
+            logger.info(
+                f"SignalBus: restored swing signal "
+                f"{sig.get('symbol')}/{sig.get('strategy')} "
+                f"(auto-execute in {delay:.0f}s)"
+            )
+        if restored:
+            logger.info(f"SignalBus: {restored} pending swing signal(s) restored from disk")
+        try:
+            _PENDING_SIGNALS_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     # ── helpers ─────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -886,8 +1008,8 @@ async def recover_unclosed_trades(client) -> None:
         try:
             # Compute profit_pct so trade memory never stores 0.0 for recovered trades
             try:
-                from engine.risk_manager import risk_manager as _rm_rec2
-                _rec2_bal = _rm_rec2._day_start_balance or 0.0
+                from api.runner_loop import _risk_manager as _rm_rec2
+                _rec2_bal = (_rm_rec2._day_start_balance if _rm_rec2 is not None else None) or 0.0
             except Exception:
                 _rec2_bal = 0.0
             _rec2_pct = (profit / _rec2_bal * 100.0) if _rec2_bal > 0 else (profit / 10000.0 * 100.0)
@@ -924,7 +1046,7 @@ async def recover_unclosed_trades(client) -> None:
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
                 mode=entry.get("account_mode") or current_mode(),
-                lstm_predicted_direction=direction,
+                lstm_predicted_direction=None,  # LSTM data unavailable in recovery path
                 regime=entry.get("regime"),
                 rl_state=_rec_rl_state,
                 extra={"source": "live", "slippage_pips": 0.0},
@@ -932,8 +1054,8 @@ async def recover_unclosed_trades(client) -> None:
             memory.record(outcome)
             # Normalize raw dollar profit → % of balance (same scale as _poll_outcome)
             try:
-                from engine.risk_manager import risk_manager as _rm_rec
-                _rec_bal = _rm_rec._day_start_balance or 0.0
+                from api.runner_loop import _risk_manager as _rm_rec
+                _rec_bal = (_rm_rec._day_start_balance if _rm_rec is not None else None) or 0.0
             except Exception:
                 _rec_bal = 0.0
             _rec_pct = (profit / _rec_bal * 100.0) if _rec_bal > 0 else (profit / 10000.0 * 100.0)
@@ -1376,10 +1498,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
                 mode=signal.get("account_mode") or _poll_mode,
-                lstm_predicted_direction=signal.get("direction", "").upper() or None,
+                lstm_predicted_direction=_lstm_dir_from_signal(signal),
                 regime=signal.get("regime"),
                 rl_state=_rl_state_str,
-                extra={"source": "live", "slippage_pips": _slippage_pips},
+                extra={"source": "live", "slippage_pips": _slippage_pips,
+                       "lstm_raw_prob": signal.get("indicators", {}).get("lstm_raw_prob")},
             )
             memory.record(outcome)
 

@@ -92,11 +92,12 @@ class TrailingStopManager:
     def _extract_mode_from_comment(self, comment: str) -> Optional[str]:
         """Extract trading mode from position comment."""
         comment_lower = comment.lower()
-        if "scalping" in comment_lower:
+        prefix = comment_lower.split("|")[0] if "|" in comment_lower else comment_lower
+        if prefix == "scalp":
             return "scalping"
-        if "day_trading" in comment_lower or "day" in comment_lower:
+        if prefix in ("day", "day_trading"):
             return "day_trading"
-        if "swing" in comment_lower:
+        if prefix == "swing":
             return "swing"
         return None
 
@@ -170,6 +171,14 @@ class TrailingStopManager:
                 else:
                     profit_pips = (entry_price - current_price) / pip_value
 
+                # GAP-2: skip positions where _poll_outcome's ATR trail has already
+                # moved SL to breakeven or better — let that system own them.
+                if current_sl > 0:
+                    if direction == "BUY" and current_sl >= entry_price:
+                        continue
+                    if direction == "SELL" and current_sl <= entry_price:
+                        continue
+
                 # Check if we've reached activation threshold
                 activation_pips = mode_cfg.get("activation_pips", 10)
                 if profit_pips < activation_pips:
@@ -184,12 +193,14 @@ class TrailingStopManager:
                 else:
                     new_sl = state.highest_profit_price + trail_distance
 
-                # Only move SL in profit direction (never backwards)
+                # Only move SL in profit direction (never backwards).
+                # BUG-5 fix: use only current_sl (live MT5 value); state.current_sl
+                # is stale because _poll_outcome can move SL without updating state.
                 should_update = False
                 if direction == "BUY":
-                    should_update = new_sl > current_sl and new_sl > state.current_sl
+                    should_update = new_sl > current_sl
                 else:
-                    should_update = new_sl < current_sl and new_sl < state.current_sl
+                    should_update = new_sl < current_sl
 
                 if should_update:
                     # Modify position
