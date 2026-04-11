@@ -876,11 +876,20 @@ class ParamOptimizer:
 
     def _save_status(self) -> None:
         try:
+            import os as _os, tempfile as _tempfile
             self._STATUS_FILE.parent.mkdir(exist_ok=True)
-            self._STATUS_FILE.write_text(
-                json.dumps(self._status, indent=2),
-                encoding="utf-8",
-            )
+            _serialised = json.dumps(self._status, indent=2)
+            _fd, _tmp = _tempfile.mkstemp(dir=self._STATUS_FILE.parent, suffix=".tmp")
+            try:
+                with _os.fdopen(_fd, "w", encoding="utf-8") as _tf:
+                    _tf.write(_serialised)
+                _os.replace(_tmp, self._STATUS_FILE)
+            except Exception:
+                try:
+                    _os.unlink(_tmp)
+                except OSError:
+                    pass
+                raise
         except Exception as exc:
             logger.warning(f"Optimizer: could not save status: {exc}")
 
