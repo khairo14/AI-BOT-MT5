@@ -35,6 +35,11 @@ from loguru import logger
 MODELS_DIR = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
+# Set GPU allocator config at import time — must be before first CUDA use
+# (if set inside _train() it arrives too late when models are loaded at startup)
+import os as _os
+_os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 # Natural training timeframe per trading type
 TRADING_TYPE_TF: dict[str, str] = {
     "scalping":    "M5",
@@ -46,7 +51,7 @@ SEQUENCE_LEN = 60   # look-back window in bars
 HIDDEN_SIZE  = 64
 NUM_LAYERS   = 2
 EPOCHS       = 60   # raised from 50 for 200k-bar datasets (more data = more epochs needed)
-BATCH_SIZE   = 32
+BATCH_SIZE   = 16   # reduced from 32 to fit large datasets (50k bars) on 8GB GPU
 INPUT_SIZE   = 7    # close_return, hl_range, oc_body, volume_norm, upper_wick, is_near_news, atr_norm
 ENSEMBLE_SIZE = 3   # number of models trained per symbol×type to reduce variance (3-5 recommended)
 
@@ -109,7 +114,10 @@ class PricePredictor:
         self._metadata: dict[str, dict]   = {}   # symbol → {trained_at, accuracy, bars_used, ensemble_size}
         self._training: set[str]          = set()
         self._lock = threading.Lock()
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="LSTM-train")
+        # max_workers=4: safe for 16 GB RAM with batch-only GPU transfer.
+        # Each worker keeps tensors in CPU RAM (~680 MB max for 200k-bar scalping)
+        # and only pushes individual batches to VRAM (~10 MB per worker on GPU).
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="LSTM-train")
         self._inference_pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="LSTM-inference")
         self._calibration: dict[str, tuple[float, float]] = {}
         # Prediction cache: key → (prob, timestamp)
@@ -194,7 +202,7 @@ class PricePredictor:
     def train_async(self, symbol: str, df: pd.DataFrame, trading_type: str = "day_trading") -> bool:
         """
         Start background training for a symbol+type. Returns False if already in progress.
-        Queues job in ThreadPoolExecutor (max 2 concurrent, auto-queues additional).
+        Queues job in ThreadPoolExecutor (max 4 concurrent, auto-queues additional).
         Poll status() to check completion.
         """
         key = _model_key(symbol, trading_type)
@@ -268,6 +276,13 @@ class PricePredictor:
         except Exception as exc:
             logger.exception(f"LSTM training failed for {key}: {exc}")
         finally:
+            # Always free GPU memory after training regardless of success/failure
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
             with self._lock:
                 self._training.discard(key)
 
@@ -336,14 +351,17 @@ class PricePredictor:
 
             # Scale sequences for this member
             X_scaled = np.array([scaled[i: i + SEQUENCE_LEN] for i in range(n_seqs)])
-            
-            X_t = torch.tensor(X_scaled, dtype=torch.float32).to(_device)
-            y_t = torch.tensor(y_arr, dtype=torch.float32).unsqueeze(1).to(_device)
+
+            # Keep tensors on CPU — only individual batches are moved to GPU.
+            # This caps VRAM at ~10 MB per worker regardless of dataset size,
+            # allowing 4 parallel workers on an 8 GB card without OOM.
+            X_t = torch.tensor(X_scaled, dtype=torch.float32)  # CPU
+            y_t = torch.tensor(y_arr, dtype=torch.float32).unsqueeze(1)  # CPU
 
             X_train, X_val = X_t[:split], X_t[split:]
             y_train, y_val = y_t[:split], y_t[split:]
 
-            # Class-balanced loss
+            # Class-balanced loss (criterion lives on GPU, tiny tensor)
             pos_weight = torch.tensor([n_neg / (n_pos + 1e-10)], dtype=torch.float32).to(_device)
             criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
@@ -359,24 +377,36 @@ class PricePredictor:
                 _X_shuf = X_train[_perm]
                 _y_shuf = y_train[_perm]
                 for i in range(0, len(_X_shuf), BATCH_SIZE):
-                    xb = _X_shuf[i: i + BATCH_SIZE]
-                    yb = _y_shuf[i: i + BATCH_SIZE]
+                    # Move only this batch to GPU, process, then it's freed automatically
+                    xb = _X_shuf[i: i + BATCH_SIZE].to(_device)
+                    yb = _y_shuf[i: i + BATCH_SIZE].to(_device)
                     yb_smooth = yb * (1.0 - _LBL_SMOOTH) + _LBL_SMOOTH * 0.5
                     optimizer.zero_grad()
                     criterion(model(xb), yb_smooth).backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
 
-            # Validation accuracy
+            # Validation accuracy — run in batches to avoid OOM on large val sets
             model.eval()
+            all_preds, all_labels = [], []
             with torch.no_grad():
-                preds = (torch.sigmoid(model(X_val)) > 0.5).float()
-                accuracy = (preds == y_val).float().mean().item()
+                for i in range(0, len(X_val), BATCH_SIZE):
+                    xb_val = X_val[i: i + BATCH_SIZE].to(_device)
+                    yb_val = y_val[i: i + BATCH_SIZE].to(_device)
+                    all_preds.append((torch.sigmoid(model(xb_val)) > 0.5).float())
+                    all_labels.append(yb_val)
+            preds_all = torch.cat(all_preds)
+            labels_all = torch.cat(all_labels)
+            accuracy = (preds_all == labels_all).float().mean().item()
 
             ensemble_models.append(model)
             ensemble_scalers.append(scaler)
             ensemble_accuracies.append(accuracy)
             logger.info(f"LSTM {key} member {member_idx}: val accuracy {accuracy:.2%}")
+
+            # Free GPU memory after each member before starting the next
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         # Ensemble average accuracy
         avg_accuracy = sum(ensemble_accuracies) / len(ensemble_accuracies)
