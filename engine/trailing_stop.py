@@ -109,6 +109,16 @@ class TrailingStopManager:
         if not self._config.get("enabled", False):
             return 0
 
+        # Skip entirely when markets are closed (weekends, session gaps).
+        # MT5 rejects modify_position with "Market closed" — this prevents
+        # thousands of error log entries over the weekend.
+        from datetime import datetime, timezone
+        _now = datetime.now(timezone.utc)
+        _dow = _now.weekday()  # 5=Saturday, 6=Sunday
+        if _dow == 6 or (_dow == 5 and _now.hour >= 21):
+            # Saturday all day, or Friday after 21:00 UTC
+            return 0
+
         positions = self._client.get_open_positions()
         if not positions:
             return 0

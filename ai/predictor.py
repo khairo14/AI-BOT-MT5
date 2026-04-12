@@ -51,7 +51,7 @@ SEQUENCE_LEN = 60   # look-back window in bars
 HIDDEN_SIZE  = 64
 NUM_LAYERS   = 2
 EPOCHS       = 60   # raised from 50 for 200k-bar datasets (more data = more epochs needed)
-BATCH_SIZE   = 16   # reduced from 32 to fit large datasets (50k bars) on 8GB GPU
+BATCH_SIZE   = 256  # large batches = fewer CPU→GPU transfers; tensors already on CPU so OOM is not a risk
 INPUT_SIZE   = 7    # close_return, hl_range, oc_body, volume_norm, upper_wick, is_near_news, atr_norm
 ENSEMBLE_SIZE = 3   # number of models trained per symbol×type to reduce variance (3-5 recommended)
 
@@ -114,10 +114,9 @@ class PricePredictor:
         self._metadata: dict[str, dict]   = {}   # symbol → {trained_at, accuracy, bars_used, ensemble_size}
         self._training: set[str]          = set()
         self._lock = threading.Lock()
-        # max_workers=4: safe for 16 GB RAM with batch-only GPU transfer.
-        # Each worker keeps tensors in CPU RAM (~680 MB max for 200k-bar scalping)
-        # and only pushes individual batches to VRAM (~10 MB per worker on GPU).
-        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="LSTM-train")
+        # max_workers=2: 2 concurrent GPU workers; each pushes BATCH_SIZE=256 slices at a time
+        # keeping GPU >80% utilised. RAM cost: 2×680 MB=1.4 GB for scalping — safe on 16 GB.
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="LSTM-train")
         self._inference_pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="LSTM-inference")
         self._calibration: dict[str, tuple[float, float]] = {}
         # Prediction cache: key → (prob, timestamp)

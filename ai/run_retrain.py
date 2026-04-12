@@ -42,12 +42,15 @@ from ai.predictor import predictor as global_predictor
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Dynamic concurrency by trading type — scalping uses 200K bars (high memory),
-# so limit to 2 concurrent jobs to prevent OOM. Day/swing use fewer bars (50K/30K).
+# Dispatch limit per trading type — caps how many jobs are queued at once.
+# Actual GPU concurrency is controlled by predictor._executor (max_workers=2),
+# so setting this higher than 2 just pre-fills the queue — it does not run more
+# jobs simultaneously. Keep scalping at 2 to avoid saturating RAM queue;
+# day/swing are small enough to queue freely.
 _MAX_CONCURRENT: dict[str, int] = {
-    "scalping":    2,   # 200K M5 bars = high memory usage
-    "day_trading": 6,   # 50K H1 bars = moderate
-    "swing":       6,   # 30K H4 bars = moderate
+    "scalping":    2,   # 200K M5 bars — queue conservatively
+    "day_trading": 2,   # matches executor max_workers (no point queuing more)
+    "swing":       2,   # same
 }
 
 _BARS: dict[str, int] = {
@@ -55,7 +58,7 @@ _BARS: dict[str, int] = {
     "day_trading":  50_000,   # H1:  ~5.71 years
     "swing":         30_000,   # H4:  ~13.7 years
 }
-_SKIP_SCALPING = True
+_SKIP_SCALPING = False
 _TF: dict[str, str] = {
     "scalping":    "M5",
     "day_trading": "H1",

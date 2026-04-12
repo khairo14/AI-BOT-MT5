@@ -92,6 +92,7 @@ set EVOTRADE_HOST=%API_HOST%
 set EVOTRADE_PORT=%API_PORT%
 set EVOTRADE_LOGDIR=%LOG_DIR%
 set EVOTRADE_DASH=%DASHBOARD%
+set ENVIRONMENT=production
 
 :: -- start FastAPI hidden (no popup window) --
 echo   Starting FastAPI backend on http://%API_HOST%:%API_PORT% ...
