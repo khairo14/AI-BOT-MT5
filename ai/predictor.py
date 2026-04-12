@@ -395,7 +395,20 @@ class PricePredictor:
             (MODELS_DIR / f"{key}_lstm_0.pt").exists() or
             (MODELS_DIR / f"{key}_lstm.pt").exists()
         )
-        _prior_accuracy    = self._metadata.get(key, {}).get("accuracy", 0.0) if _model_exists else 0.0
+        # Read prior accuracy from in-memory metadata first; fall back to the disk
+        # sidecar (_meta.json) so the gate works even when the previous ensemble
+        # wasn't fully loaded (e.g. only lstm_0.pt existed on disk).
+        _prior_accuracy = self._metadata.get(key, {}).get("accuracy") if _model_exists else None
+        if _prior_accuracy is None and _model_exists:
+            _meta_disk = MODELS_DIR / f"{key}_meta.json"
+            if _meta_disk.exists():
+                try:
+                    _prior_accuracy = json.loads(_meta_disk.read_text(encoding="utf-8")).get("accuracy", 0.0)
+                except Exception:
+                    _prior_accuracy = 0.0
+            else:
+                _prior_accuracy = 0.0
+        _prior_accuracy = float(_prior_accuracy or 0.0)
         # Effective minimum: the higher of absolute floor OR prior model score + margin
         _effective_min     = max(_ABSOLUTE_FLOOR, _prior_accuracy + _IMPROVEMENT_MARGIN) if _model_exists else _ABSOLUTE_FLOOR
         _gate_label        = f"protection (prior {_prior_accuracy:.2%})" if _model_exists else "bootstrap"
@@ -419,13 +432,35 @@ class PricePredictor:
                 self._metadata[key] = existing_meta
             return
 
-        # ── Step 1: Persist ensemble models and scalers to disk ─────────────────────────
-        for idx, (model, scaler) in enumerate(zip(ensemble_models, ensemble_scalers)):
-            model_file  = MODELS_DIR / f"{key}_lstm_{idx}.pt"
-            scaler_path = MODELS_DIR / f"{key}_scaler_{idx}.pkl"
-            torch.save(model.state_dict(), model_file)
-            with open(scaler_path, "wb") as f:
-                pickle.dump(scaler, f)
+        # ── Step 1: Persist ensemble models and scalers to disk (atomic) ───────────────
+        # Save every file to a temp path first, then rename all at once.
+        # This prevents a partial-ensemble state on disk if anything fails mid-save.
+        import os as _os
+        import tempfile as _tempfile
+        _pending: list[tuple[str, Path]] = []  # (tmp_path, final_path)
+        try:
+            for idx, (model, scaler) in enumerate(zip(ensemble_models, ensemble_scalers)):
+                # Model: torch.save to temp
+                _mfd, _mtmp = _tempfile.mkstemp(dir=str(MODELS_DIR), suffix=".pt.tmp")
+                _os.close(_mfd)
+                torch.save(model.state_dict(), _mtmp)
+                _pending.append((_mtmp, MODELS_DIR / f"{key}_lstm_{idx}.pt"))
+                # Scaler: pickle to temp
+                _sfd, _stmp = _tempfile.mkstemp(dir=str(MODELS_DIR), suffix=".pkl.tmp")
+                with _os.fdopen(_sfd, "wb") as _sf:
+                    pickle.dump(scaler, _sf)
+                _pending.append((_stmp, MODELS_DIR / f"{key}_scaler_{idx}.pkl"))
+            # All writes succeeded — atomically rename into place
+            for _tmp, _final in _pending:
+                _os.replace(_tmp, str(_final))
+        except Exception:
+            # Clean up temp files so no orphaned .tmp files litter the models dir
+            for _tmp, _ in _pending:
+                try:
+                    Path(_tmp).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
 
         with self._lock:
             self._models[key]   = ensemble_models
@@ -770,8 +805,15 @@ class PricePredictor:
                         models = [model]
                         scalers = [scaler]
                         logger.info(f"Loaded legacy LSTM model as 1-member ensemble: {key}")
+                    elif models:
+                        # Partial ensemble on disk (e.g. only lstm_0.pt after a failed save).
+                        # Use what loaded successfully rather than discarding the whole key.
+                        logger.warning(
+                            f"Incomplete ensemble for {key} ({len(models)}/{ENSEMBLE_SIZE} members) "
+                            f"— using partial ensemble. Retrain to generate full 3-member ensemble."
+                        )
                     else:
-                        logger.warning(f"Could not load complete ensemble or legacy model for {key}")
+                        logger.warning(f"Could not load any model for {key} — skipping")
                         continue
                 
                 if models and scalers:
