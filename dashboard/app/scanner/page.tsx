@@ -60,7 +60,7 @@ const TYPE_LABELS: Record<string, string> = {
 // ── component ──────────────────────────────────────────────────────────────
 export default function ScannerPage() {
   const { pushNotification } = useBotStore();
-  const [activeTab, setActiveTab] = useState<"scalping" | "day_trading" | "swing">("scalping");
+  const [activeTab, setActiveTab] = useState<"monitor" | "scalping" | "day_trading" | "swing">("monitor");
   const [scanData, setScanData] = useState<ScanSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -271,11 +271,6 @@ export default function ScannerPage() {
         </p>
       </div>
 
-      {/* Scanner Monitor - Active Pairs Performance */}
-      <div className="mb-6">
-        <ScannerMonitor />
-      </div>
-
       {/* Stats */}
       {scanData && (
         <div className="grid grid-cols-4 gap-4 mb-6">
@@ -292,6 +287,16 @@ export default function ScannerPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 mb-4 border-b border-gray-800">
+        <button
+          onClick={() => setActiveTab("monitor")}
+          className={`px-4 py-2 font-medium transition-colors relative ${
+            activeTab === "monitor"
+              ? "text-blue-400 border-b-2 border-blue-400"
+              : "text-gray-400 hover:text-gray-300"
+          }`}
+        >
+          📡 Monitor
+        </button>
         {TRADING_TYPES.map((type) => {
           const count = scanData?.trading_types?.[type]?.length ?? 0;
           return (
@@ -313,8 +318,13 @@ export default function ScannerPage() {
         })}
       </div>
 
-      {/* Search */}
-      <div className="mb-4">
+      {/* Monitor Tab */}
+      {activeTab === "monitor" && (
+        <ScannerMonitor />
+      )}
+
+      {/* Search — only for scan result tabs */}
+      {activeTab !== "monitor" && <div className="mb-4">
         <input
           type="text"
           placeholder="Search symbols or categories..."
@@ -322,10 +332,11 @@ export default function ScannerPage() {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full px-4 py-2 bg-gray-900 border border-gray-800 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
         />
-      </div>
+      </div>}
 
-      {/* Results Table */}
-      {loading ? (
+      {/* Results Table — only for scan result tabs */}
+      {activeTab !== "monitor" && (
+        loading ? (
         <div className="text-center py-20 text-gray-500">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-4"></div>
           <p>Loading scan results...</p>
@@ -453,10 +464,11 @@ export default function ScannerPage() {
             </table>
           </div>
         </div>
+      )
       )}
 
       {/* Footer Info */}
-      {filteredResults.length > 0 && (
+      {activeTab !== "monitor" && filteredResults.length > 0 && (
         <div className="mt-4 text-xs text-gray-500 text-center">
           Showing {filteredResults.length} of {results.length} symbols for {TYPE_LABELS[activeTab]}
         </div>

@@ -252,7 +252,7 @@ def main() -> None:
             logger.info(f"  {symbol:20s} {tf:3s} → {status_tag}")
 
     # ── Phase 2: train all models (no MT5 needed) ────────────────────────────
-    logger.info("\nPhase 2 — Training LSTMs (dynamic concurrency by type: scalping=2, day/swing=6) …")
+    logger.info("\nPhase 2 — Training LSTMs (max 2 concurrent workers across all types) …")
 
     total_submitted = 0
     skipped         = 0

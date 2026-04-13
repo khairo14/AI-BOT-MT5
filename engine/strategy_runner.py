@@ -766,6 +766,10 @@ class StrategyRunner:
                     comment=sig.comment,
                     event="open",
                     confidence=sig.confidence,
+                    expected_price=sig.entry_price,
+                    slippage=result.slippage,
+                    execution_time_ms=result.execution_time_ms,
+                    spread_pips=result.spread_pips,
                 )
             except Exception as _je:
                 logger.warning(f"Journal write failed for {sig.strategy}/{sig.symbol}: {_je}")

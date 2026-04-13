@@ -37,7 +37,7 @@
   "ai": {
     "price_prediction_enabled": true,
     "confidence_filter_enabled": false,
-    "confidence_threshold": 55,
+    "confidence_threshold": 56,
     "rl_agent_enabled": true,
     "swing_scorer_weights": {
       "lstm": 0.4,

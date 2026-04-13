@@ -1,0 +1,13 @@
+{
+  "trained_at": "2026-04-13T07:57:10.642503+00:00",
+  "accuracy": 0.5139,
+  "bars_used": 140816,
+  "trading_type": "scalping",
+  "timeframe": "M5",
+  "ensemble_size": 3,
+  "member_accuracies": [
+    0.512,
+    0.514,
+    0.5157
+  ]
+}

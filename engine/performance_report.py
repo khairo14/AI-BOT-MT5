@@ -31,12 +31,18 @@ class PerformanceReporter:
             for line in f:
                 try:
                     trade = json.loads(line.strip())
+                    # Only count closed trades with a real profit value
+                    if trade.get("event") != "close" or trade.get("profit") is None:
+                        continue
                     if cutoff:
-                        trade_time = datetime.fromisoformat(trade.get("close_time", ""))
+                        close_time_raw = trade.get("close_time")
+                        if not close_time_raw:
+                            continue
+                        trade_time = datetime.fromisoformat(close_time_raw)
                         if trade_time < cutoff:
                             continue
                     trades.append(trade)
-                except (json.JSONDecodeError, ValueError):
+                except (json.JSONDecodeError, ValueError, TypeError):
                     continue
                     
         return trades

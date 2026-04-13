@@ -364,17 +364,19 @@ async def get_scanner_performance(request: Request):
                         if not symbol:
                             continue
                         
+                        trade_type = trade.get("trading_type", "")
+                        key = (symbol, trade_type)
                         event = trade.get("event")
                         profit = trade.get("profit", 0.0) or 0.0
                         
                         if event == "close":
-                            pair_stats[symbol]["trades"] += 1
+                            pair_stats[key]["trades"] += 1
                             if profit > 0:
-                                pair_stats[symbol]["wins"] += 1
+                                pair_stats[key]["wins"] += 1
                             elif profit < 0:
-                                pair_stats[symbol]["losses"] += 1
-                            pair_stats[symbol]["total_profit"] += profit
-                            pair_stats[symbol]["last_signal"] = trade.get("close_time")
+                                pair_stats[key]["losses"] += 1
+                            pair_stats[key]["total_profit"] += profit
+                            pair_stats[key]["last_signal"] = trade.get("close_time")
                     except:
                         continue
         
@@ -388,7 +390,7 @@ async def get_scanner_performance(request: Request):
             
             active_pairs = []
             for sym in symbols:
-                stats = pair_stats[sym]
+                stats = pair_stats[(sym, trading_type)]
                 win_rate = (
                     (stats["wins"] / stats["trades"] * 100) 
                     if stats["trades"] > 0 else 0.0

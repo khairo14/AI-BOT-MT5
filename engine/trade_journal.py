@@ -63,6 +63,7 @@ class TradeJournal:
         expected_price: Optional[float] = None,
         slippage: Optional[float] = None,
         execution_time_ms: Optional[int] = None,
+        spread_pips: Optional[float] = None,
     ) -> None:
         """Append a trade event to the journal."""
         record = {
@@ -88,6 +89,7 @@ class TradeJournal:
             "expected_price":    expected_price,
             "slippage":          slippage,
             "execution_time_ms": execution_time_ms,
+            "spread_pips":       spread_pips,
         }
         with self._lock:
             try:
@@ -143,10 +145,21 @@ class TradeJournal:
 
     def stats(self, account: str = "all") -> dict:
         """Return summary stats for the given account filter."""
+        from datetime import datetime, timezone
         entries = self.get(account=account, limit=10_000)
         closed  = [e for e in entries if e.get("event") == "close" and e.get("profit") is not None]
         if not closed:
-            return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "total_profit": 0.0}
+            return {
+                "total": 0, "wins": 0, "losses": 0,
+                "win_rate": 0.0, "total_profit": 0.0,
+                "today_trades": 0, "today_pnl": 0.0,
+            }
+
+        today_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+        today = [
+            e for e in closed
+            if (e.get("close_time") or e.get("logged_at") or "")[:10] == today_str
+        ]
 
         wins   = [e for e in closed if (e["profit"] or 0) > 0]
         losses = [e for e in closed if (e["profit"] or 0) <= 0]
@@ -163,6 +176,8 @@ class TradeJournal:
             "win_rate":     round(len(wins) / len(closed) * 100, 1),
             "total_profit": round(sum(e["profit"] or 0 for e in closed), 2),
             "by_mode":      by_mode,
+            "today_trades": len(today),
+            "today_pnl":    round(sum(e["profit"] or 0 for e in today), 2),
         }
 
 

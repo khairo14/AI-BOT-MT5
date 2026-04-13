@@ -5,7 +5,7 @@ Profitability reporting and performance validation API endpoints
 from fastapi import APIRouter, Query
 from engine.performance_report import PerformanceReporter
 
-router = APIRouter(prefix="/profitability", tags=["Profitability"])
+router = APIRouter(tags=["Profitability"])
 
 
 @router.get("/")

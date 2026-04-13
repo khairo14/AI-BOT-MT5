@@ -63,8 +63,10 @@ def get_execution_quality(
     total_filled = 0
     total_slippage = 0.0
     total_exec_time = 0.0
+    total_spread = 0.0
     slippage_count = 0
     exec_time_count = 0
+    spread_count = 0
 
     by_symbol = defaultdict(lambda: {
         "count": 0,
@@ -72,6 +74,8 @@ def get_execution_quality(
         "slippage_count": 0,
         "total_exec_time": 0.0,
         "exec_time_count": 0,
+        "total_spread": 0.0,
+        "spread_count": 0,
     })
 
     by_type = defaultdict(lambda: {
@@ -80,6 +84,8 @@ def get_execution_quality(
         "slippage_count": 0,
         "total_exec_time": 0.0,
         "exec_time_count": 0,
+        "total_spread": 0.0,
+        "spread_count": 0,
     })
 
     for entry in entries:
@@ -107,35 +113,49 @@ def get_execution_quality(
             by_type[tt]["total_exec_time"] += exec_time
             by_type[tt]["exec_time_count"] += 1
 
+        # Spread tracking
+        spread = entry.get("spread_pips")
+        if spread is not None and spread > 0:
+            total_spread += spread
+            spread_count += 1
+            by_symbol[symbol]["total_spread"] += spread
+            by_symbol[symbol]["spread_count"] += 1
+            by_type[tt]["total_spread"] += spread
+            by_type[tt]["spread_count"] += 1
+
         by_symbol[symbol]["count"] += 1
         by_type[tt]["count"] += 1
 
     # Calculate averages
     avg_slippage = total_slippage / slippage_count if slippage_count > 0 else 0.0
     avg_exec_time = total_exec_time / exec_time_count if exec_time_count > 0 else 0.0
+    avg_spread = total_spread / spread_count if spread_count > 0 else 0.0
 
     # Build per-symbol breakdown
     symbol_breakdown = {}
     for sym, data in by_symbol.items():
         symbol_breakdown[sym] = {
-            "total_trades": data["count"],
-            "avg_slippage": round(data["total_slippage"] / data["slippage_count"], 5) if data["slippage_count"] > 0 else 0.0,
-            "avg_execution_time_ms": round(data["total_exec_time"] / data["exec_time_count"], 1) if data["exec_time_count"] > 0 else 0.0,
+            "total_filled": data["count"],
+            "avg_slippage": round(data["total_slippage"] / data["slippage_count"], 5) if data["slippage_count"] > 0 else None,
+            "avg_execution_time_ms": round(data["total_exec_time"] / data["exec_time_count"], 1) if data["exec_time_count"] > 0 else None,
+            "avg_spread_pips": round(data["total_spread"] / data["spread_count"], 2) if data["spread_count"] > 0 else None,
         }
 
     # Build per-type breakdown
     type_breakdown = {}
     for tt, data in by_type.items():
         type_breakdown[tt] = {
-            "total_trades": data["count"],
-            "avg_slippage": round(data["total_slippage"] / data["slippage_count"], 5) if data["slippage_count"] > 0 else 0.0,
-            "avg_execution_time_ms": round(data["total_exec_time"] / data["exec_time_count"], 1) if data["exec_time_count"] > 0 else 0.0,
+            "total_filled": data["count"],
+            "avg_slippage": round(data["total_slippage"] / data["slippage_count"], 5) if data["slippage_count"] > 0 else None,
+            "avg_execution_time_ms": round(data["total_exec_time"] / data["exec_time_count"], 1) if data["exec_time_count"] > 0 else None,
+            "avg_spread_pips": round(data["total_spread"] / data["spread_count"], 2) if data["spread_count"] > 0 else None,
         }
 
     return {
         "total_filled": total_filled,
         "avg_slippage": round(avg_slippage, 5),
         "avg_execution_time_ms": round(avg_exec_time, 1),
+        "avg_spread_pips": round(avg_spread, 2),
         "slippage_coverage": round(slippage_count / total_filled * 100, 1) if total_filled > 0 else 0.0,
         "by_symbol": symbol_breakdown,
         "by_trading_type": type_breakdown,

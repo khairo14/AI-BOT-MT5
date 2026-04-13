@@ -13,13 +13,15 @@ function StatCard({
   label,
   value,
   sub,
+  wide,
 }: {
   label: string;
   value: string;
   sub?: ReactNode;
+  wide?: boolean;
 }) {
   return (
-    <div className="bg-gray-800 rounded-xl p-4 flex flex-col gap-1">
+    <div className={`bg-gray-800 rounded-xl p-4 flex flex-col gap-1${wide ? " col-span-2" : ""}`}>
       <span className="text-xs text-gray-500 uppercase tracking-wide">{label}</span>
       <span className="text-xl font-bold text-white">{value}</span>
       {sub && <span className="text-xs text-gray-500">{sub}</span>}
@@ -84,26 +86,35 @@ export default function AccountPanel() {
                   {MODE_LABELS[acct]}
                 </h4>
                 <div className="grid grid-cols-2 gap-3">
-                  <StatCard label="Trades"   value={String(s.total)} />
+                  {/* Row 1: Trades side by side */}
+                  <StatCard label="Total Trades"   value={String(s.total)} />
+                  <StatCard label="Today's Trades" value={String(s.today_trades)} sub="closed today (UTC)" />
+                  {/* Row 2: P&L side by side */}
                   <StatCard
+                    label="Total P&L"
+                    value={`${s.total_profit >= 0 ? "+" : ""}$${s.total_profit.toFixed(2)}`}
+                    sub="all time"
+                  />
+                  <StatCard
+                    label="Today's P&L"
+                    value={`${s.today_pnl >= 0 ? "+" : ""}$${s.today_pnl.toFixed(2)}`}
+                    sub="closed today (UTC)"
+                  />
+                  {/* Row 3: Win Rate full width */}
+                  <StatCard
+                    wide
                     label="Win Rate"
                     value={`${s.win_rate}%`}
                     sub={
-                      <span className="flex flex-col gap-0.5">
+                      <span className="flex gap-3">
                         {(["scalping", "day_trading", "swing"] as const).map((tt) => {
                           const m = s.by_mode?.[tt];
-                          const label = tt === "scalping" ? "scalp" : tt === "day_trading" ? "day" : "swing";
-                          return <span key={tt}>{label} — {m ? `${m.wins}W/${m.losses}L` : "0W/0L"}</span>;
+                          const lbl = tt === "scalping" ? "Scalp" : tt === "day_trading" ? "Day" : "Swing";
+                          return <span key={tt}>{lbl} — {m ? `${m.wins}W/${m.losses}L` : "0W/0L"}</span>;
                         })}
                       </span>
                     }
                   />
-                  <StatCard
-                    label="P&L"
-                    value={`${s.total_profit >= 0 ? "+" : ""}${s.total_profit.toFixed(2)}`}
-                    sub="account currency"
-                  />
-                  <StatCard label="Bot Trades" value={String(s.total)} sub="journal entries" />
                 </div>
               </div>
             );

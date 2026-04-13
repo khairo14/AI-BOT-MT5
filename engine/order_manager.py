@@ -79,6 +79,7 @@ class OrderResult:
     error: Optional[str] = None
     execution_time_ms: Optional[int] = None
     slippage: Optional[float] = None
+    spread_pips: Optional[float] = None
 
 
 class OrderManager:
@@ -176,6 +177,7 @@ class OrderManager:
                     sl = round(price + min_dist, sym_info.digits)
         # Live spread gate — block entry if current spread exceeds mode limit.
         # Uses real-time spread from MT5 (not hardcoded) so news spikes are caught.
+        _captured_spread_pips: Optional[float] = None
         try:
             _app_cfg = _get_om_app_cfg()
             _mode_prefix = req.comment.split("|")[0] if "|" in req.comment else ""
@@ -188,6 +190,7 @@ class OrderManager:
                     _current_sp = sym_info.spread * sym_info.point * (
                         10 if sym_info.digits in (3, 5) else 1
                     )
+                    _captured_spread_pips = round(_current_sp, 2)
                     if _current_sp > _max_sp:
                         return OrderResult(
                             success=False,
@@ -258,6 +261,7 @@ class OrderManager:
             open_price=result.price,
             execution_time_ms=execution_time_ms,
             slippage=slippage,
+            spread_pips=_captured_spread_pips,
         )
 
     # ------------------------------------------------------------------

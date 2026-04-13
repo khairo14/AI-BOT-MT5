@@ -32,6 +32,9 @@ dashboard/.env.local
 ai/models/*.pt
 ai/models/*.pkl
 ai/models/*.h5
+ai/models/versions/**/*.pt
+ai/models/versions/**/*.pkl
+ai/models/versions/**/*.h5
 ai/data/
 data/raw/
 data/processed/

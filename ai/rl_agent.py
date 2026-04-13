@@ -281,42 +281,37 @@ class RLAgent:
                 "last_update_ts": self._last_update_ts,
             }
             _save_path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
-        # Save frequency:
-        #   n_updates < 50  → save every update (early learning, highest volatility)
-        #   n_updates >= 50 → save every 5 updates (was 10 — halved to reduce loss window)
-        # This prevents a restart from rolling back recent conf/risk changes that
-        # haven't yet been persisted, which was causing conf_thresh to snap back
-        # to bootstrap values on restart.
-        _save_every = 1 if self._n_updates < 50 else 5
-        if self._n_updates % _save_every == 0:
+        # Save on every update — JSON file is small (~10KB) and atomic rename
+        # ensures no corruption. The old every-5 policy was losing up to 4
+        # updates on restart, causing visible conf/risk rollbacks.
+        try:
+            _serialised = json.dumps(_save_payload)
+            _fd, _tmp = tempfile.mkstemp(dir=str(_save_path.parent), suffix=".tmp")
             try:
-                _serialised = json.dumps(_save_payload)
-                _fd, _tmp = tempfile.mkstemp(dir=str(_save_path.parent), suffix=".tmp")
+                with os.fdopen(_fd, "w", encoding="utf-8") as _f:
+                    _f.write(_serialised)
+                os.replace(_tmp, _save_path)
+            except Exception:
                 try:
-                    with os.fdopen(_fd, "w", encoding="utf-8") as _f:
-                        _f.write(_serialised)
-                    os.replace(_tmp, _save_path)
-                except Exception:
-                    try:
-                        os.unlink(_tmp)
-                    except OSError:
-                        pass
-                    raise
-                # Append history snapshot for time-series tracking
-                _history_path = DATA_DIR / f"rl_history_{self.trading_type}_{self._mode}.jsonl"
-                _history_entry = {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "trading_type": self.trading_type,
-                    "mode": self._mode,
-                    "conf_thresh": self._conf_thresh,
-                    "risk_factor": self._risk_factor,
-                    "n_updates": self._n_updates,
-                    "last_state": self._last_state,
-                }
-                with open(_history_path, "a", encoding="utf-8") as hf:
-                    hf.write(json.dumps(_history_entry) + "\n")
-            except Exception as exc:
-                logger.warning(f"RL save failed [{self.trading_type}]: {exc}")
+                    os.unlink(_tmp)
+                except OSError:
+                    pass
+                raise
+            # Append history snapshot for time-series tracking
+            _history_path = DATA_DIR / f"rl_history_{self.trading_type}_{self._mode}.jsonl"
+            _history_entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "trading_type": self.trading_type,
+                "mode": self._mode,
+                "conf_thresh": self._conf_thresh,
+                "risk_factor": self._risk_factor,
+                "n_updates": self._n_updates,
+                "last_state": self._last_state,
+            }
+            with open(_history_path, "a", encoding="utf-8") as hf:
+                hf.write(json.dumps(_history_entry) + "\n")
+        except Exception as exc:
+            logger.warning(f"RL save failed [{self.trading_type}]: {exc}")
         logger.debug(
             f"RL [{self.trading_type}] reward={reward:+.4f} "
             f"conf_thresh={self._conf_thresh:.2f} "

@@ -159,6 +159,8 @@ export interface JournalStats {
   win_rate: number;
   total_profit: number;
   by_mode?: Record<string, { wins: number; losses: number }>;
+  today_trades: number;
+  today_pnl: number;
 }
 
 export interface JournalStatsResponse {
@@ -265,16 +267,19 @@ export interface ExecutionQualityMetrics {
   total_filled: number;
   avg_slippage: number | null;
   avg_execution_time_ms: number | null;
+  avg_spread_pips: number | null;
   slippage_coverage: number;
   by_symbol: Record<string, {
     total_filled: number;
     avg_slippage: number | null;
     avg_execution_time_ms: number | null;
+    avg_spread_pips: number | null;
   }>;
   by_trading_type: Record<string, {
     total_filled: number;
     avg_slippage: number | null;
     avg_execution_time_ms: number | null;
+    avg_spread_pips: number | null;
   }>;
 }
 

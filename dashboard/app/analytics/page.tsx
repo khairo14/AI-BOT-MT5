@@ -28,6 +28,8 @@ function ratioColor(v: number): string {
   return "text-red-400";
 }
 
+const SECTION_TABS  = ["overview", "execution"] as const;
+const SECTION_LABELS: Record<string, string> = { overview: "Overview", execution: "Execution Quality" };
 const ACCOUNT_TABS  = ["paper", "live", "all"] as const;
 const MODE_TABS     = ["all", "scalping", "day_trading", "swing"] as const;
 const MODE_LABELS: Record<string, string> = {
@@ -286,7 +288,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
       <h3 className="text-sm font-semibold text-gray-300 mb-3">Execution Quality</h3>
       
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
         <div>
           <div className="text-xs text-gray-500">Total Filled</div>
           <div className="text-lg font-bold text-white font-mono">{metrics.total_filled}</div>
@@ -295,6 +297,12 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
           <div className="text-xs text-gray-500">Avg Slippage</div>
           <div className={`text-lg font-bold font-mono ${slippageStatus(metrics.avg_slippage)}`}>
             {formatSlippage(metrics.avg_slippage)}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">Avg Spread</div>
+          <div className="text-lg font-bold font-mono text-gray-300">
+            {metrics.avg_spread_pips != null ? `${metrics.avg_spread_pips.toFixed(2)} pips` : "—"}
           </div>
         </div>
         <div>
@@ -322,6 +330,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
                   <th className="text-left py-1 pr-3">Symbol</th>
                   <th className="text-right px-2">Fills</th>
                   <th className="text-right px-2">Slippage</th>
+                  <th className="text-right px-2">Spread</th>
                   <th className="text-right px-2">Exec Time</th>
                 </tr>
               </thead>
@@ -334,6 +343,9 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
                       <td className="text-right px-2 text-gray-400">{data.total_filled}</td>
                       <td className={`text-right px-2 font-mono ${slippageStatus(data.avg_slippage)}`}>
                         {formatSlippage(data.avg_slippage)}
+                      </td>
+                      <td className="text-right px-2 font-mono text-gray-300">
+                        {data.avg_spread_pips != null ? `${data.avg_spread_pips.toFixed(2)}p` : "—"}
                       </td>
                       <td className={`text-right px-2 font-mono ${timeStatus(data.avg_execution_time_ms)}`}>
                         {formatTime(data.avg_execution_time_ms)}
@@ -357,6 +369,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
                   <th className="text-left py-1 pr-3">Mode</th>
                   <th className="text-right px-2">Fills</th>
                   <th className="text-right px-2">Slippage</th>
+                  <th className="text-right px-2">Spread</th>
                   <th className="text-right px-2">Exec Time</th>
                 </tr>
               </thead>
@@ -367,6 +380,9 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
                     <td className="text-right px-2 text-gray-400">{data.total_filled}</td>
                     <td className={`text-right px-2 font-mono ${slippageStatus(data.avg_slippage)}`}>
                       {formatSlippage(data.avg_slippage)}
+                    </td>
+                    <td className="text-right px-2 font-mono text-gray-300">
+                      {data.avg_spread_pips != null ? `${data.avg_spread_pips.toFixed(2)}p` : "—"}
                     </td>
                     <td className={`text-right px-2 font-mono ${timeStatus(data.avg_execution_time_ms)}`}>
                       {formatTime(data.avg_execution_time_ms)}
@@ -384,6 +400,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
 
 // ── main page ─────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
+  const [sectionTab, setSectionTab] = useState<typeof SECTION_TABS[number]>("overview");
   const [accountTab, setAccountTab]  = useState<typeof ACCOUNT_TABS[number]>("paper");
   const [modeTab,    setModeTab]     = useState<typeof MODE_TABS[number]>("all");
   const [data,   setData]    = useState<AnalyticsPerformance | null>(null);
@@ -439,8 +456,25 @@ export default function AnalyticsPage() {
         </button>
       </div>
 
-      {/* Account tabs */}
-      <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
+      {/* Section tabs */}
+      <div className="flex gap-2 border-b border-gray-800 mb-2">
+        {SECTION_TABS.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setSectionTab(tab)}
+            className={`px-4 py-2 font-medium text-sm transition-colors relative ${
+              sectionTab === tab
+                ? "text-blue-400 border-b-2 border-blue-400"
+                : "text-gray-400 hover:text-gray-300"
+            }`}
+          >
+            {SECTION_LABELS[tab]}
+          </button>
+        ))}
+      </div>
+
+      {/* Account tabs — overview only */}
+      {sectionTab === "overview" && <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
         {ACCOUNT_TABS.map((tab) => (
           <button
             key={tab}
@@ -454,10 +488,10 @@ export default function AnalyticsPage() {
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
-      </div>
+      </div>}
 
-      {/* Mode tabs */}
-      <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
+      {/* Mode tabs — overview only */}
+      {sectionTab === "overview" && <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
         {MODE_TABS.map((tab) => (
           <button
             key={tab}
@@ -471,9 +505,19 @@ export default function AnalyticsPage() {
             {MODE_LABELS[tab]}
           </button>
         ))}
-      </div>
+      </div>}
 
-      {error && (
+      {/* Execution Quality tab */}
+      {sectionTab === "execution" && (
+        <div className="mt-2">
+          {executionQuality && executionQuality.total_filled > 0
+            ? <ExecutionQualityPanel metrics={executionQuality} />
+            : <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-10 text-center text-gray-500">No execution quality data available</div>
+          }
+        </div>
+      )}
+
+      {sectionTab === "overview" && <>{error && (
         <div className="bg-red-950/50 border border-red-800/50 rounded-xl px-4 py-3 text-sm text-red-300">
           {error}
         </div>
@@ -538,9 +582,6 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* Execution quality */}
-          <ExecutionQualityPanel metrics={executionQuality} />
-
           {/* Regime status */}
           {Object.keys(regimes).length > 0 && <RegimePanel regimes={regimes} />}
 
@@ -579,6 +620,7 @@ export default function AnalyticsPage() {
           <FailurePanel data={data.failure_analysis} />
         </>
       )}
+    </>}
     </div>
   );
 }
