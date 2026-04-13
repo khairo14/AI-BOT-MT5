@@ -705,6 +705,7 @@ class SignalBus:
                         expected_price=signal.get("entry_price"),
                         slippage=result.slippage,
                         execution_time_ms=result.execution_time_ms,
+                        spread_pips=result.spread_pips,
                     )
                 except Exception:
                     pass

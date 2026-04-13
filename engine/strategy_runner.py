@@ -545,12 +545,16 @@ class StrategyRunner:
             _htf_str = _htf_map.get(trading_type)
             _df_higher = tf_data.get(_htf_str) if _htf_str else None
 
+            # Use the better TP for R:R scoring — strategies that emit TP1 (1:1) and
+            # TP2 (2:1) should be scored against TP2 so the rr_score reflects the
+            # realistic potential of the trade, not the conservative first target.
+            _tp_for_scoring = _tp2_price if _tp2_price is not None else _tp_price
             strat_sig.confidence = scorer.score(
                 symbol=symbol,
                 direction=sig.direction,
                 entry=_entry_price,
                 sl=_sl_price,
-                tp=_tp_price or _entry_price,
+                tp=_tp_for_scoring or _entry_price,
                 df=primary_df,
                 trading_type=trading_type,
                 regime=_regime,

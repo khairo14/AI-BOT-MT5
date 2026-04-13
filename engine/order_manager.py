@@ -184,18 +184,17 @@ class OrderManager:
             _mode_map = {"scalp": "scalping", "day": "day_trading", "swing": "swing"}
             _tt = _mode_map.get(_mode_prefix, "")
             if _tt:
+                _current_sp = sym_info.spread * sym_info.point * (
+                    10 if sym_info.digits in (3, 5) else 1
+                )
+                _captured_spread_pips = round(_current_sp, 2)
                 _spread_limits = _app_cfg.get("max_spread_pips", {})
                 _max_sp = _spread_limits.get(_tt)
-                if _max_sp is not None:
-                    _current_sp = sym_info.spread * sym_info.point * (
-                        10 if sym_info.digits in (3, 5) else 1
+                if _max_sp is not None and _current_sp > _max_sp:
+                    return OrderResult(
+                        success=False,
+                        error=f"Spread too wide: {_current_sp:.2f} > max {_max_sp:.2f} pips [{_tt}]"
                     )
-                    _captured_spread_pips = round(_current_sp, 2)
-                    if _current_sp > _max_sp:
-                        return OrderResult(
-                            success=False,
-                            error=f"Spread too wide: {_current_sp:.2f} > max {_max_sp:.2f} pips [{_tt}]"
-                        )
         except Exception as _sp_exc:
             logger.debug(f"Spread gate skipped: {_sp_exc}")
 
