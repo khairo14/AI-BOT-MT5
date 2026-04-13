@@ -40,10 +40,6 @@ const SESSIONS = [
   },
 ] as const;
 
-function getSessionStatus(now: Date): { open: boolean; nextMs: number } {
-  return { open: false, nextMs: 0 }; // placeholder — per-session logic below
-}
-
 function getForexStatus(now: Date): { open: boolean; label: string } {
   const day = now.getUTCDay(); // 0=Sun, 6=Sat
   const h = now.getUTCHours(), m = now.getUTCMinutes();
@@ -97,6 +93,41 @@ function getEquityStatus(
   return { open: true, label: `Closes in ${Math.floor(diffClose / 60)}h ${diffClose % 60}m` };
 }
 
+// ── Forex trading session definitions ─────────────────────────────────────
+// openUTC / closeUTC in whole hours. Sessions crossing midnight: openUTC > closeUTC.
+const TRADING_SESSION_DEFS = [
+  { name: "Sydney",   flag: "🇦🇺", tz: "Australia/Sydney",  openUTC: 22, closeUTC: 7  },
+  { name: "Tokyo",    flag: "🇯🇵", tz: "Asia/Tokyo",         openUTC: 0,  closeUTC: 9  },
+  { name: "London",   flag: "🇬🇧", tz: "Europe/London",      openUTC: 7,  closeUTC: 17 },
+  { name: "New York", flag: "🇺🇸", tz: "America/New_York",   openUTC: 13, closeUTC: 22 },
+] as const;
+
+function getSessionLocalTime(tz: string, now: Date): string {
+  return now.toLocaleTimeString("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function isForexSessionOpen(openUTC: number, closeUTC: number, now: Date): boolean {
+  const h = now.getUTCHours();
+  const day = now.getUTCDay(); // 0=Sun, 6=Sat
+  // Forex sessions only run Mon–Fri
+  if (day === 6) return false;
+  if (openUTC > closeUTC) {
+    // crosses midnight: open if h >= openUTC OR h < closeUTC
+    // but Sydney / Tokyo close Friday – avoid showing open on weekends
+    if (day === 0 && h < closeUTC) return true; // Sun late night bleeds into Mon
+    if (day === 5 && h >= openUTC) return true;  // Fri night for Sydney
+    if (day !== 0 && day !== 5) return h >= openUTC || h < closeUTC;
+    return false;
+  }
+  return h >= openUTC && h < closeUTC;
+}
+
 function ClockAndMarkets() {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
@@ -123,6 +154,12 @@ function ClockAndMarkets() {
     { name: "Commodities", icon: "🛢", ...commodities },
   ];
 
+  const tradingSessions = TRADING_SESSION_DEFS.map((s) => ({
+    ...s,
+    localTime: getSessionLocalTime(s.tz, now),
+    open: isForexSessionOpen(s.openUTC, s.closeUTC, now),
+  }));
+
   return (
     <div className="px-2 pb-3 space-y-2">
       {/* Clock */}
@@ -136,6 +173,25 @@ function ClockAndMarkets() {
           <span className="font-mono text-blue-400">{utcTime}</span>
         </div>
       </div>
+
+      {/* Forex trading session clocks */}
+      <div className="bg-gray-900 rounded-lg p-2 space-y-1">
+        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Sessions</p>
+        {tradingSessions.map((s) => (
+          <div key={s.name} className="flex items-center gap-1.5 text-xs">
+            <span className="shrink-0">{s.flag}</span>
+            <span className={`flex-1 whitespace-nowrap font-medium ${s.open ? "text-gray-200" : "text-gray-500"}`}>
+              {s.name}
+            </span>
+            <span className="font-mono text-[10px] text-gray-400">{s.localTime}</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.open ? "bg-green-400" : "bg-gray-600"}`}
+              title={s.open ? "Open" : "Closed"}
+            />
+          </div>
+        ))}
+      </div>
+
       {/* Market sessions */}
       <div className="space-y-1">
         {markets.map((m) => (
