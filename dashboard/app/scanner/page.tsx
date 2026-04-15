@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import ScannerMonitor from "@/components/dashboard/ScannerMonitor";
+import MarketAnalysisTab from "@/components/dashboard/MarketAnalysisTab";
 
 // Mode capacity limits
 const MODE_LIMITS: Record<string, number> = {
@@ -60,7 +61,7 @@ const TYPE_LABELS: Record<string, string> = {
 // ── component ──────────────────────────────────────────────────────────────
 export default function ScannerPage() {
   const { pushNotification } = useBotStore();
-  const [activeTab, setActiveTab] = useState<"monitor" | "scalping" | "day_trading" | "swing">("monitor");
+  const [activeTab, setActiveTab] = useState<"monitor" | "analysis" | "scalping" | "day_trading" | "swing">("monitor");
   const [scanData, setScanData] = useState<ScanSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -297,6 +298,16 @@ export default function ScannerPage() {
         >
           📡 Monitor
         </button>
+        <button
+          onClick={() => setActiveTab("analysis")}
+          className={`px-4 py-2 font-medium transition-colors relative ${
+            activeTab === "analysis"
+              ? "text-blue-400 border-b-2 border-blue-400"
+              : "text-gray-400 hover:text-gray-300"
+          }`}
+        >
+          🌐 Market Analysis
+        </button>
         {TRADING_TYPES.map((type) => {
           const count = scanData?.trading_types?.[type]?.length ?? 0;
           return (
@@ -323,8 +334,13 @@ export default function ScannerPage() {
         <ScannerMonitor />
       )}
 
+      {/* Market Analysis Tab */}
+      {activeTab === "analysis" && (
+        <MarketAnalysisTab scanData={scanData} />
+      )}
+
       {/* Search — only for scan result tabs */}
-      {activeTab !== "monitor" && <div className="mb-4">
+      {activeTab !== "monitor" && activeTab !== "analysis" && <div className="mb-4">
         <input
           type="text"
           placeholder="Search symbols or categories..."
@@ -335,7 +351,7 @@ export default function ScannerPage() {
       </div>}
 
       {/* Results Table — only for scan result tabs */}
-      {activeTab !== "monitor" && (
+      {activeTab !== "monitor" && activeTab !== "analysis" && (
         loading ? (
         <div className="text-center py-20 text-gray-500">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-4"></div>
@@ -468,7 +484,7 @@ export default function ScannerPage() {
       )}
 
       {/* Footer Info */}
-      {activeTab !== "monitor" && filteredResults.length > 0 && (
+      {activeTab !== "monitor" && activeTab !== "analysis" && filteredResults.length > 0 && (
         <div className="mt-4 text-xs text-gray-500 text-center">
           Showing {filteredResults.length} of {results.length} symbols for {TYPE_LABELS[activeTab]}
         </div>
