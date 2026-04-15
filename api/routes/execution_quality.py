@@ -23,6 +23,42 @@ from fastapi import APIRouter, Query
 router = APIRouter()
 
 
+def _pip_size(symbol: str) -> float:
+    """Return pip size for a symbol (used to convert legacy raw-price slippage to pips)."""
+    s = symbol.upper()
+    if any(x in s for x in ("JPY",)):
+        return 0.01
+    if any(x in s for x in ("GOLD", "XAUUSD", "SILVER", "XAGUSD", "OIL", "BRENT", "NGAS")):
+        return 0.01
+    if any(x in s for x in ("US30", "US100", "US500", "GER40", "UK100")):
+        return 1.0
+    if any(x in s for x in ("BTC", "ETH", "SOL", "XRP", "BCH", "LTC", "XLM", "ADA")):
+        return 1.0
+    return 0.0001
+
+
+def _to_pips(slippage: float, symbol: str) -> float:
+    """
+    Normalise a slippage value to pips.
+
+    Records written before the pip-conversion fix store a raw price diff
+    (e.g. 0.00021 for GBPUSD).  Records written after store pips directly
+    (e.g. 2.1).  Heuristic: if the value is < 0.1 it must be a raw price
+    diff for any realistic instrument (max 50-pip raw for forex = 0.005,
+    for JPY = 0.50 — but JPY raw at 0.50 > 0.1, handled below).
+    Specifically:
+      - forex raw  < 0.01   → divide by 0.0001
+      - JPY raw    0.01–0.5 → divide by 0.01
+      - already pips >= 0.1 → return as-is (new format or JPY already pips)
+    """
+    pip = _pip_size(symbol)
+    # If stored value already looks pip-scale (>= 0.1) treat as pips
+    if slippage >= 0.1:
+        return round(slippage, 2)
+    # Otherwise it's a legacy raw price diff — convert
+    return round(slippage / pip, 2) if pip > 0 else slippage
+
+
 @router.get("/metrics")
 def get_execution_quality(
     account: str = Query("all", regex="^(paper|live|all)$"),
@@ -93,9 +129,10 @@ def get_execution_quality(
         symbol = entry.get("symbol", "UNKNOWN")
         tt = entry.get("trading_type", "unknown")
 
-        # Slippage tracking
-        slippage = entry.get("slippage")
-        if slippage is not None and slippage > 0:
+        # Slippage tracking — normalise to pips (handles legacy raw-price records)
+        slippage_raw = entry.get("slippage")
+        if slippage_raw is not None and slippage_raw > 0:
+            slippage = _to_pips(slippage_raw, symbol)
             total_slippage += slippage
             slippage_count += 1
             by_symbol[symbol]["total_slippage"] += slippage
