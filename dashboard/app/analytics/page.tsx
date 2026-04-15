@@ -261,7 +261,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
 
   const formatSlippage = (s: number | null) => {
     if (s == null) return "—";
-    return `${(s * 10000).toFixed(2)} pips`;
+    return `${s.toFixed(2)} pips`;
   };
 
   const formatTime = (ms: number | null) => {
@@ -271,9 +271,8 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
 
   const slippageStatus = (s: number | null) => {
     if (s == null) return "text-gray-400";
-    const pips = s * 10000;
-    if (pips < 1) return "text-green-400";
-    if (pips < 3) return "text-yellow-400";
+    if (s < 1) return "text-green-400";
+    if (s < 3) return "text-yellow-400";
     return "text-red-400";
   };
 
@@ -314,7 +313,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
         <div>
           <div className="text-xs text-gray-500">Slippage Coverage</div>
           <div className="text-lg font-bold text-white font-mono">
-            {(metrics.slippage_coverage * 100).toFixed(0)}%
+            {metrics.slippage_coverage.toFixed(1)}%
           </div>
         </div>
       </div>

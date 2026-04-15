@@ -235,10 +235,16 @@ class OrderManager:
             result = mt5.order_send(request)
         execution_time_ms = int(time.time() * 1000) - start_time_ms
 
-        # Calculate slippage (if we have expected price from signal)
+        # Calculate slippage in pips (if we have expected price from signal).
+        # Divide by pip size so the value is instrument-agnostic:
+        #   5-digit forex (EUR/USD): point=0.00001, digits=5 → pip = 0.0001
+        #   3-digit JPY   (AUD/JPY): point=0.001,   digits=3 → pip = 0.01
+        #   2-digit Gold  (XAU/USD): point=0.01,    digits=2 → pip = 0.01
         slippage = None
         if req.entry_price and result and result.retcode == mt5.TRADE_RETCODE_DONE:
-            slippage = abs(result.price - req.entry_price)
+            raw_slip = abs(result.price - req.entry_price)
+            pip_size = sym_info.point * (10 if sym_info.digits in (3, 5) else 1)
+            slippage = round(raw_slip / pip_size, 2) if pip_size > 0 else raw_slip
 
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             err = result.comment if result else str(mt5.last_error())
