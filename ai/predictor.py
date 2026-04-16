@@ -440,6 +440,25 @@ class PricePredictor:
             else:
                 _prior_accuracy = 0.0
         _prior_accuracy = float(_prior_accuracy or 0.0)
+        # If the stored model was trained with a different INPUT_SIZE (architecture changed),
+        # the old accuracy is not comparable — treat as bootstrap so the new model isn't
+        # unfairly blocked by a prior that used a different feature set.
+        _prior_input_size = None
+        if _model_exists:
+            _meta_disk = MODELS_DIR / f"{key}_meta.json"
+            if _meta_disk.exists():
+                try:
+                    _prior_input_size = json.loads(_meta_disk.read_text(encoding="utf-8")).get("input_size")
+                except Exception:
+                    pass
+        # Treat "no input_size in meta" (pre-tracking model) the same as a mismatch —
+        # all old models on disk were 7-feature; current INPUT_SIZE is 12.
+        _arch_changed = _model_exists and (
+            _prior_input_size is None or int(_prior_input_size) != INPUT_SIZE
+        )
+        if _arch_changed:
+            _model_exists = False  # treat as bootstrap — architecture is incompatible
+            _prior_accuracy = 0.0
         # Effective minimum: the higher of absolute floor OR prior model score + margin
         _effective_min     = max(_ABSOLUTE_FLOOR, _prior_accuracy + _IMPROVEMENT_MARGIN) if _model_exists else _ABSOLUTE_FLOOR
         _gate_label        = f"protection (prior {_prior_accuracy:.2%})" if _model_exists else "bootstrap"
@@ -503,6 +522,7 @@ class PricePredictor:
                 "trading_type": trading_type,
                 "timeframe":    tf,
                 "ensemble_size": ENSEMBLE_SIZE,
+                "input_size":   INPUT_SIZE,
                 "member_accuracies": [round(a, 4) for a in ensemble_accuracies],
             }
 

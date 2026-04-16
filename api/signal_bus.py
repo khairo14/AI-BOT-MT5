@@ -100,7 +100,7 @@ _RETRAIN_BARS: dict[str, int] = {
 _AUTO_OPT_BARS: dict[str, int] = {
     "scalping":    200_000,  # M5  ≈ 2 years
     "day_trading":  50_000,  # H1  ≈ 5.7 years
-    "swing":        20_000,  # H4  ≈ 9.1 years
+    "swing":        30_000,  # H4  ≈ 13.7 years (matches _RETRAIN_BARS and run_retrain.py)
 }
 
 
