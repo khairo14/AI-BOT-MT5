@@ -15,6 +15,7 @@ import {
   toggleCircuitBreaker,
   fetchHealth,
   reconnectMT5,
+  fetchStrategyStatus,
   type HealthResponse,
 } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
@@ -123,19 +124,23 @@ export default function SettingsPage() {
   } | null>(null);
   const [cbBusy, setCbBusy] = useState(false);
 
+  // Per-strategy circuit breaker status
+  const [strategyStatus, setStrategyStatus] = useState<Record<string, { consecutive_losses: number; paused_until: string | null }>>({});
+
   // MT5 connection
   const [mt5Connected, setMt5Connected] = useState<boolean | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [exec, riskData, appData, modeData, cbData, healthData] = await Promise.all([
+      const [exec, riskData, appData, modeData, cbData, healthData, stratData] = await Promise.all([
         fetchExecutionMode(),
         fetchRiskConfig(),
         fetchAppConfig(),
         fetchAccountMode(),
         fetchRiskStatus(),
         fetchHealth(),
+        fetchStrategyStatus().catch(() => ({})),
       ]);
       setExecModes(exec);
       setRisk(riskData as unknown as Record<string, unknown>);
@@ -146,6 +151,7 @@ export default function SettingsPage() {
       setNewsFilter((nf?.enabled as boolean) ?? true);
       setSessionFilter((sf?.enabled as boolean) ?? true);
       setCbStatus(cbData);
+      setStrategyStatus(stratData as Record<string, { consecutive_losses: number; paused_until: string | null }>);
       setMt5Connected(healthData.checks.mt5_connection === "ok");
     } catch {
       pushNotification({ type: "error", title: "Settings load failed", message: "Could not reach the API." });
@@ -350,6 +356,33 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* Per-strategy circuit breaker status */}
+        {Object.keys(strategyStatus).length > 0 && (
+          <div className="pt-1">
+            <p className="text-xs text-gray-500 mb-2">Per-strategy halts</p>
+            <div className="flex flex-wrap gap-2 text-xs">
+              {Object.entries(strategyStatus).map(([strat, s]) =>
+                s.paused_until ? (
+                  <span
+                    key={strat}
+                    title={`Paused until ${s.paused_until}`}
+                    className="px-2 py-1 rounded font-semibold bg-red-900/50 text-red-300 cursor-help"
+                  >
+                    {strat.replace(/_/g, " ")} halted ({s.consecutive_losses}L)
+                  </span>
+                ) : s.consecutive_losses > 0 ? (
+                  <span key={strat} className="px-2 py-1 rounded bg-gray-800 text-gray-400">
+                    {strat.replace(/_/g, " ")}: {s.consecutive_losses}L
+                  </span>
+                ) : null
+              )}
+              {Object.values(strategyStatus).every((s) => !s.paused_until && s.consecutive_losses === 0) && (
+                <span className="text-gray-600">All strategies clear</span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Action buttons */}
         <div className="flex gap-3 pt-1 flex-wrap">
           <button
@@ -375,9 +408,10 @@ export default function SettingsPage() {
               setCbBusy(true);
               try {
                 await resetConsecutiveLosses();
-                const updated = await fetchRiskStatus();
+                const [updated, stratData] = await Promise.all([fetchRiskStatus(), fetchStrategyStatus().catch(() => ({}))]);
                 setCbStatus(updated);
-                pushNotification({ type: "success", title: "Consecutive losses reset", message: "All mode pauses cleared." });
+                setStrategyStatus(stratData as Record<string, { consecutive_losses: number; paused_until: string | null }>);
+                pushNotification({ type: "success", title: "Consecutive losses reset", message: "All mode and strategy pauses cleared." });
               } catch {
                 pushNotification({ type: "error", title: "Reset failed", message: "" });
               } finally { setCbBusy(false); }

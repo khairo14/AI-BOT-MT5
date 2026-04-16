@@ -202,6 +202,13 @@ _REGIME_STRATEGIES: dict[str, set[str]] = {
     "quiet":             set(),   # no trades in quiet / undefined market
 }
 
+# Dynamic regime gate thresholds.
+# Only overrides the static gate when a strategy-regime pair has accrued enough
+# history.  Below _REGIME_GATE_MIN_SAMPLES trades the static gate is the sole
+# authority — prevents over-blocking on a new, data-sparse system.
+_REGIME_GATE_MIN_SAMPLES: int  = 20   # minimum trades before dynamic WR check activates
+_REGIME_GATE_WR_THRESHOLD: float = 0.30  # block if WR < 30% AND min_samples met
+
 MT5_TF = {
     "M1":  mt5.TIMEFRAME_M1,
     "M5":  mt5.TIMEFRAME_M5,
@@ -328,6 +335,35 @@ class StrategyRunner:
                     f"Regime gate blocked {strat_name}/{symbol}: regime={_regime}"
                 )
                 return None
+
+        # Dynamic regime gate — if this strategy has accrued ≥_REGIME_GATE_MIN_SAMPLES
+        # in the current regime and WR is below threshold, block regardless of the
+        # static whitelist.  Falls back to static gate while data is insufficient.
+        if _regime:
+            try:
+                from ai.trade_memory import memory as _tm
+                _regime_stats = _tm.stats_by_regime(
+                    trading_type=trading_type,
+                    min_samples=_REGIME_GATE_MIN_SAMPLES,
+                    live_only=True,
+                )
+                if _regime_stats.get("sufficient_data"):
+                    _strat_data = (
+                        _regime_stats.get("by_regime", {})
+                        .get(_regime, {})
+                        .get("by_strategy", {})
+                        .get(strat_name, {})
+                    )
+                    if _strat_data.get("total", 0) >= _REGIME_GATE_MIN_SAMPLES:
+                        _wr = _strat_data.get("win_rate", 1.0)
+                        if _wr < _REGIME_GATE_WR_THRESHOLD:
+                            logger.info(
+                                f"Dynamic regime gate blocked {strat_name}/{symbol}: "
+                                f"WR={_wr:.1%} < {_REGIME_GATE_WR_THRESHOLD:.0%} in {_regime}"
+                            )
+                            return None
+            except Exception as _dge:
+                logger.debug(f"Dynamic regime gate error for {strat_name}: {_dge}")
 
         params   = self._strategy_params(strat_name, symbol, regime=_regime)
         strategy = strat_cls(symbol=symbol, params=params)
@@ -584,7 +620,7 @@ class StrategyRunner:
             except Exception:
                 pass
             # RL gate — suppress low-confidence signals dynamically
-            if not scorer.is_tradeable(strat_sig.confidence, trading_type):
+            if not scorer.is_tradeable(strat_sig.confidence, trading_type, strategy_name=strat_name):
                 logger.debug(
                     f"RL gate blocked {strat_name}/{symbol}: "
                     f"confidence={strat_sig.confidence:.2f}"

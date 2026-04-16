@@ -160,6 +160,7 @@ def run_backtest(
     risk_pct: float = 1.0,
     extra_dfs: dict[str, pd.DataFrame] | None = None,
     use_ai_filters: bool = True,
+    commission_r: float = 0.05,
 ) -> Optional[BacktestResult]:
     """
     Walk-forward backtest a strategy on historical OHLCV data.
@@ -181,6 +182,11 @@ def run_backtest(
                          to every signal — matching live execution conditions.
                          Low-confidence or RL-rejected signals are skipped.
                          The RL risk_factor also scales per-trade P&L as in live.
+        commission_r:    round-turn commission expressed in units of R (default 0.05).
+                         Deducted on every closed trade regardless of outcome.
+                         0.05 ≈ 5% of the 1R SL distance → ~$5 commission per
+                         $100 risked, representative of XM Standard (~$7/lot avg).
+                         Set to 0.0 to disable commission modelling.
 
     Returns:
         BacktestResult or None if strategy_name is unknown.
@@ -273,12 +279,12 @@ def run_backtest(
                     df_window, trading_type,
                 )
                 # RL gate: skip signal if confidence is below learned threshold
-                if _rl_manager is not None and not _scorer.is_tradeable(_conf_score, trading_type):
+                if _rl_manager is not None and not _scorer.is_tradeable(_conf_score, trading_type, strategy_name):
                     i += step
                     continue
                 # RL risk factor: scale position size as the live engine does
                 if _rl_manager is not None:
-                    _ai_risk_scale = _rl_manager.risk_factor(trading_type)
+                    _ai_risk_scale = _rl_manager.risk_factor(strategy_name, trading_type)
             except Exception as exc:
                 logger.debug(f"Backtester AI filter error at bar {i}: {exc}")
 
@@ -310,11 +316,11 @@ def run_backtest(
         effective_risk = risk_pct * _ai_risk_scale
         if outcome == "tp_hit":
             tp_rr    = abs((sig.tp_price - sig.entry_price)) / risk
-            pnl_pct  = effective_risk * (tp_rr - spread_r)
+            pnl_pct  = effective_risk * (tp_rr - spread_r) - effective_risk * commission_r
         elif outcome == "sl_hit":
-            pnl_pct  = -effective_risk * (1.0 + spread_r)
+            pnl_pct  = -effective_risk * (1.0 + spread_r) - effective_risk * commission_r
         else:   # timeout
-            pnl_pct  = effective_risk * (rr - spread_r)
+            pnl_pct  = effective_risk * (rr - spread_r) - effective_risk * commission_r
 
         equity    *= 1.0 + pnl_pct / 100.0
         trade_num += 1

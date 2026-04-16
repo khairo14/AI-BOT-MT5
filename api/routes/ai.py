@@ -35,8 +35,8 @@ TRADING_TYPE = Literal["scalping", "day_trading", "swing"]
 # Default bar counts per trading type — match run_retrain.py and auto-retrain settings.
 _TRAIN_BARS: dict[str, int] = {
     "scalping":    200_000,  # M5  ≈ 2 years
-    "day_trading": 50_000,   # H1  ≈ 5.7 years
-    "swing":        20_000,  # H4  ≈ 9.1 years
+    "day_trading":  50_000,  # H1  ≈ 5.7 years
+    "swing":         30_000,  # H4  ≈ 13.7 years
 }
 
 
@@ -887,10 +887,13 @@ def get_win_rate_by_state(
 
 
 @router.get("/rl/qtable/{trading_type}")
-def get_rl_qtable(trading_type: TRADING_TYPE):
+def get_rl_qtable(
+    trading_type: TRADING_TYPE,
+    strategy_name: Optional[str] = Query(None, description="Specific strategy (e.g. sr_breakout). Omit for trading-type fallback."),
+):
     """
-    Return full Q-table for a specific trading type with state breakdown.
-    
+    Return full Q-table for a specific strategy/trading type with state breakdown.
+
     Returns:
     - q_values: Dict of state → [Q-values for each action]
     - states_breakdown: List of states with parsed components
@@ -899,8 +902,8 @@ def get_rl_qtable(trading_type: TRADING_TYPE):
     - statistics: Min/max Q-values, state coverage
     """
     from ai.rl_agent import ACTIONS
-    
-    agent = rl_manager.agent(trading_type)
+
+    agent = rl_manager.agent(strategy_name, trading_type)
     
     # Get Q-table (protected by lock in status())
     agent_status = agent.status()
@@ -968,20 +971,30 @@ def get_rl_qtable(trading_type: TRADING_TYPE):
 
 
 @router.post("/rl/reset/{trading_type}")
-def rl_reset(trading_type: TRADING_TYPE):
-    """Reset a specific RL agent back to default thresholds (useful for testing)."""
+def rl_reset(
+    trading_type: TRADING_TYPE,
+    strategy_name: Optional[str] = Query(None, description="Specific strategy to reset. Omit to reset all strategies for this trading type."),
+):
+    """Reset one (or all) RL agent(s) for a trading type back to default thresholds."""
     import os
-    from ai.rl_agent import DATA_DIR, DEFAULT_CONF_THRESH, DEFAULT_RISK_FACTOR
+    from ai.rl_agent import DATA_DIR, RLAgent, _ALL_STRATEGIES
     from engine.account_store import current_mode as _cm
     _mode = _cm()
-    # Delete the mode-suffixed file that is actually in use (e.g. rl_qtable_scalping_live.json)
-    path = DATA_DIR / f"rl_qtable_{trading_type}_{_mode}.json"
-    if path.exists():
-        os.remove(path)
-    # Reinitialise agent
-    from ai.rl_agent import RLAgent
-    rl_manager._agents[trading_type] = RLAgent(trading_type, mode=_mode)
-    return {"status": "reset", "trading_type": trading_type, "mode": _mode}
+
+    strategies_to_reset = (
+        [strategy_name]
+        if strategy_name
+        else _ALL_STRATEGIES.get(trading_type, [])
+    )
+    reset_keys = []
+    for strat in strategies_to_reset:
+        key = f"{strat}_{trading_type}"
+        path = DATA_DIR / f"rl_qtable_{strat}_{trading_type}_{_mode}.json"
+        if path.exists():
+            os.remove(path)
+        rl_manager._agents[key] = RLAgent(trading_type, mode=_mode, strategy_name=strat)
+        reset_keys.append(key)
+    return {"status": "reset", "trading_type": trading_type, "strategies_reset": reset_keys, "mode": _mode}
 
 
 # ───────────────────────────────────
@@ -1086,8 +1099,8 @@ def optimizer_status():
 # with the standalone run and will NOT downgrade already-optimized results.
 _OPT_BARS: dict[str, int] = {
     "scalping":    200_000,   # M5  ~2 years
-    "day_trading": 50_000,   # H1  ~2 years
-    "swing":        30_000,   # H4  ~2 years
+    "day_trading":  50_000,   # H1  ~5.7 years
+    "swing":         30_000,   # H4  ~13.7 years
 }
 
 

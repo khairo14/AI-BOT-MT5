@@ -22,6 +22,7 @@ DEFAULT_PARAMS = {
     "atr_period": 14,
     "tp1_rr": 1.0,
     "tp2_rr": 2.0,
+    "vol_confirm_mult": 1.2,  # volume must exceed 20-bar avg × this (0 = disabled)
 }
 
 
@@ -99,7 +100,16 @@ class MACDEMATrend(BaseStrategy):
             "bear_bounce": bear_bounce,
         }
 
-        if h1_trend == "BULL" and h1_macd_bull and bull_bounce:
+        # Volume confirmation on entry bar (M15 primary timeframe)
+        vol_ok = True
+        vol_mult = p.get("vol_confirm_mult", 1.2)
+        if vol_mult > 0 and "volume" in df.columns and len(df) >= 21:
+            curr_vol = df["volume"].iloc[-1]
+            avg_vol  = df["volume"].iloc[-21:-1].mean()
+            if avg_vol > 0:
+                vol_ok = curr_vol > avg_vol * vol_mult
+
+        if h1_trend == "BULL" and h1_macd_bull and bull_bounce and vol_ok:
             sl_dist = max(curr_atr * 1.2, abs(curr_close - curr_ema20_m15) * 1.5)
             sl  = round(curr_close - sl_dist, 5)
             tp1 = round(curr_close + sl_dist * p["tp1_rr"], 5)
@@ -119,7 +129,7 @@ class MACDEMATrend(BaseStrategy):
                 indicators=indicators,
             )
 
-        if h1_trend == "BEAR" and h1_macd_bear and bear_bounce:
+        if h1_trend == "BEAR" and h1_macd_bear and bear_bounce and vol_ok:
             sl_dist = max(curr_atr * 1.2, abs(curr_close - curr_ema20_m15) * 1.5)
             sl  = round(curr_close + sl_dist, 5)
             tp1 = round(curr_close - sl_dist * p["tp1_rr"], 5)

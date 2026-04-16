@@ -20,7 +20,9 @@ DEFAULT_PARAMS = {
     "rsi_max": 65,
     "max_spread_pips": 1.5,
     "sl_pips": 4,
-    "rr": 2.0,
+    "tp1_rr": 1.2,          # partial close at 1.2R
+    "rr": 2.0,              # tp2 (full close) at 2.0R
+    "vol_confirm_mult": 1.2, # volume must exceed 20-bar avg × this (0 = disabled)
 }
 
 
@@ -60,12 +62,24 @@ class EMAScalp(BaseStrategy):
         curr_rsi = rsi.iloc[-1]
         curr_close = close.iloc[-1]
 
+        # Volume confirmation on signal bar (M1 primary timeframe)
+        vol_ok = True
+        vol_mult = p.get("vol_confirm_mult", 1.2)
+        if vol_mult > 0 and "volume" in df.columns and len(df) >= 21:
+            curr_vol = df["volume"].iloc[-1]
+            avg_vol  = df["volume"].iloc[-21:-1].mean()
+            if avg_vol > 0:
+                vol_ok = curr_vol > avg_vol * vol_mult
+
         indicators = {
             "ema_fast": round(curr_fast, 5),
             "ema_slow": round(curr_slow, 5),
             "rsi": round(curr_rsi, 2),
             "m5_bias": bias,
+            "vol_ok": vol_ok,
         }
+
+        pip = self._pip_size()
 
         # --- BUY: EMA fast crosses above slow, bias bullish, RSI in range ---
         if (
@@ -73,16 +87,18 @@ class EMAScalp(BaseStrategy):
             and curr_fast > curr_slow
             and bias == "BULL"
             and p["rsi_min"] <= curr_rsi <= p["rsi_max"]
+            and vol_ok
         ):
-            pip = self._pip_size()
-            sl = round(curr_close - p["sl_pips"] * pip, 5)
-            tp = round(curr_close + p["sl_pips"] * p["rr"] * pip, 5)
+            sl  = round(curr_close - p["sl_pips"] * pip, 5)
+            tp1 = round(curr_close + p["sl_pips"] * p["tp1_rr"] * pip, 5)
+            tp2 = round(curr_close + p["sl_pips"] * p["rr"] * pip, 5)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -99,16 +115,18 @@ class EMAScalp(BaseStrategy):
             and curr_fast < curr_slow
             and bias == "BEAR"
             and sell_rsi_min <= curr_rsi <= sell_rsi_max
+            and vol_ok
         ):
-            pip = self._pip_size()
-            sl = round(curr_close + p["sl_pips"] * pip, 5)
-            tp = round(curr_close - p["sl_pips"] * p["rr"] * pip, 5)
+            sl  = round(curr_close + p["sl_pips"] * pip, 5)
+            tp1 = round(curr_close - p["sl_pips"] * p["tp1_rr"] * pip, 5)
+            tp2 = round(curr_close - p["sl_pips"] * p["rr"] * pip, 5)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,

@@ -1,0 +1,13 @@
+{
+  "trained_at": "2026-04-14T12:32:10.789788+00:00",
+  "accuracy": 0.5004,
+  "bars_used": 15999,
+  "trading_type": "swing",
+  "timeframe": "H4",
+  "ensemble_size": 3,
+  "member_accuracies": [
+    0.505,
+    0.5041,
+    0.4922
+  ]
+}

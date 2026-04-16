@@ -147,14 +147,15 @@ ACTIONS: list[tuple[float, float]] = [
 
 class RLAgent:
     """
-    Per-trading-type Q-learning agent that tunes confidence threshold
+    Per-strategy Q-learning agent that tunes confidence threshold
     and risk factor based on recent trade outcomes.
     """
 
-    def __init__(self, trading_type: str, mode: str = "live"):
-        self.trading_type = trading_type
-        self._mode        = mode   # "live" or "paper"
-        self._lock        = threading.Lock()
+    def __init__(self, trading_type: str, mode: str = "live", strategy_name: str | None = None):
+        self.trading_type  = trading_type
+        self.strategy_name = strategy_name  # None → legacy per-type behaviour
+        self._mode         = mode   # "live" or "paper"
+        self._lock         = threading.Lock()
 
         self._q: dict[str, list[float]] = {}   # state → Q-values for each action
         self._conf_thresh = DEFAULT_CONF_THRESH
@@ -171,6 +172,20 @@ class RLAgent:
         self._load()
 
     # ── public API ────────────────────────────────────────────────────────────
+
+    @property
+    def _qtable_path(self) -> "Path":
+        """Return the canonical Q-table file path for this agent."""
+        if self.strategy_name:
+            return DATA_DIR / f"rl_qtable_{self.strategy_name}_{self.trading_type}_{self._mode}.json"
+        return DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
+
+    @property
+    def _history_path(self) -> "Path":
+        """Return the canonical history JSONL file path for this agent."""
+        if self.strategy_name:
+            return DATA_DIR / f"rl_history_{self.strategy_name}_{self.trading_type}_{self._mode}.jsonl"
+        return DATA_DIR / f"rl_history_{self.trading_type}_{self._mode}.jsonl"
 
     @property
     def confidence_threshold(self) -> float:
@@ -280,7 +295,7 @@ class RLAgent:
                 "n_updates":      self._n_updates,
                 "last_update_ts": self._last_update_ts,
             }
-            _save_path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
+            _save_path = self._qtable_path
         # Save on every update — JSON file is small (~10KB) and atomic rename
         # ensures no corruption. The old every-5 policy was losing up to 4
         # updates on restart, causing visible conf/risk rollbacks.
@@ -298,9 +313,10 @@ class RLAgent:
                     pass
                 raise
             # Append history snapshot for time-series tracking
-            _history_path = DATA_DIR / f"rl_history_{self.trading_type}_{self._mode}.jsonl"
+            _history_path = self._history_path
             _history_entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "strategy_name": self.strategy_name,
                 "trading_type": self.trading_type,
                 "mode": self._mode,
                 "conf_thresh": self._conf_thresh,
@@ -321,6 +337,7 @@ class RLAgent:
     def status(self) -> dict:
         current_eps = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self._n_updates))
         return {
+            "strategy_name":        self.strategy_name,
             "trading_type":         self.trading_type,
             "mode":                 self._mode,
             "confidence_threshold": round(self._conf_thresh, 4),
@@ -353,7 +370,7 @@ class RLAgent:
                 "n_updates":      self._n_updates,
                 "last_update_ts": self._last_update_ts,
             }
-        _path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
+        _path = self._qtable_path
         try:
             _serialised = json.dumps(_payload)
             _fd, _tmp = tempfile.mkstemp(dir=str(_path.parent), suffix=".tmp")
@@ -397,23 +414,26 @@ class RLAgent:
         )
 
     def _load(self) -> None:
-        path = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
-        # Migrate old filename (no mode suffix) to new name on first run
-        if not path.exists():
-            legacy = DATA_DIR / f"rl_qtable_{self.trading_type}.json"
+        path = self._qtable_path
+        # Migrate old filename (no strategy prefix) to new name on first run
+        if not path.exists() and self.strategy_name:
+            legacy = DATA_DIR / f"rl_qtable_{self.trading_type}_{self._mode}.json"
             if legacy.exists():
                 try:
-                    legacy.rename(path)
-                    logger.info(f"RL: migrated {legacy.name} -> {path.name}")
+                    import shutil
+                    shutil.copy2(legacy, path)
+                    logger.info(f"RL: copied legacy {legacy.name} -> {path.name} for {self.strategy_name}")
                 except Exception:
                     pass
         if not path.exists():
             # Bootstrap live agent from paper learning on first live run.
-            # Paper uses identical live market data (same prices, spreads, volatility),
-            # so everything the agent learned in paper is directly applicable to live.
-            # This means the full Q-table, conf_thresh, and risk_factor all carry over.
             if self._mode == "live":
-                paper_path = DATA_DIR / f"rl_qtable_{self.trading_type}_paper.json"
+                # Try strategy-specific paper file first, then fall back to legacy.
+                paper_path = (
+                    DATA_DIR / f"rl_qtable_{self.strategy_name}_{self.trading_type}_paper.json"
+                    if self.strategy_name else
+                    DATA_DIR / f"rl_qtable_{self.trading_type}_paper.json"
+                )
                 if paper_path.exists():
                     try:
                         with open(paper_path, "r", encoding="utf-8") as f:
@@ -485,10 +505,26 @@ class RLAgent:
             logger.warning(f"RL agent could not load [{self.trading_type}/{self._mode}]: {exc}")
 
 
+# Maps each trading type to the strategies that run under it.
+# Used by RLAgentManager to create one RLAgent per strategy (9 total).
+_ALL_STRATEGIES: dict[str, list[str]] = {
+    "scalping":    ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+    "day_trading": ["macd_ema_trend", "sr_breakout", "rsi_divergence"],
+    "swing":       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
+}
+
+# Reverse map: strategy_name → trading_type
+_STRATEGY_TYPE: dict[str, str] = {
+    s: tt
+    for tt, strategies in _ALL_STRATEGIES.items()
+    for s in strategies
+}
+
+
 class RLAgentManager:
     """
-    Holds one RLAgent per trading type. Each account mode (live/paper)
-    gets its own Q-tables so they learn independently.
+    Holds one RLAgent per strategy (9 total across 3 trading types).
+    Each account mode (live/paper) gets its own Q-tables so they learn independently.
     """
 
     def __init__(self):
@@ -499,13 +535,26 @@ class RLAgentManager:
         except Exception:
             _mode = "live"
         self._mode = _mode
-        self._agents = {
-            tt: RLAgent(tt, mode=_mode)
-            for tt in ("scalping", "day_trading", "swing")
+        self._agents: dict[str, RLAgent] = {
+            f"{strategy}_{trading_type}": RLAgent(trading_type, mode=_mode, strategy_name=strategy)
+            for trading_type, strategies in _ALL_STRATEGIES.items()
+            for strategy in strategies
         }
 
-    def agent(self, trading_type: str) -> RLAgent:
-        return self._agents.get(trading_type, self._agents["day_trading"])
+    def _key(self, strategy_name: str | None, trading_type: str) -> str:
+        """Return the agent dict key, resolving unknowns to a safe fallback."""
+        if strategy_name:
+            key = f"{strategy_name}_{trading_type}"
+            if key in self._agents:
+                return key
+        # Fallback: any agent for that trading_type
+        for k in self._agents:
+            if k.endswith(f"_{trading_type}"):
+                return k
+        return next(iter(self._agents))
+
+    def agent(self, strategy_name: str | None, trading_type: str) -> RLAgent:
+        return self._agents[self._key(strategy_name, trading_type)]
 
     def switch_mode(self, new_mode: str) -> None:
         """Reload all RL agents for a new account mode (live ↔ paper).
@@ -514,20 +563,20 @@ class RLAgentManager:
         """
         self._mode = new_mode
         self._agents = {
-            tt: RLAgent(tt, mode=new_mode)
-            for tt in ("scalping", "day_trading", "swing")
+            f"{strategy}_{trading_type}": RLAgent(trading_type, mode=new_mode, strategy_name=strategy)
+            for trading_type, strategies in _ALL_STRATEGIES.items()
+            for strategy in strategies
         }
-        logger.info(f"RL agents reloaded for mode: {new_mode}")
+        logger.info(f"RL agents reloaded for mode: {new_mode} ({len(self._agents)} strategy agents)")
 
-    def should_take_signal(self, trading_type: str, confidence: float) -> bool:
-        return self.agent(trading_type).should_take_signal(confidence)
+    def should_take_signal(self, strategy_name: str | None, trading_type: str, confidence: float) -> bool:
+        return self.agent(strategy_name, trading_type).should_take_signal(confidence)
 
-    def risk_factor(self, trading_type: str) -> float:
-        return self.agent(trading_type).risk_factor
+    def risk_factor(self, strategy_name: str | None, trading_type: str) -> float:
+        return self.agent(strategy_name, trading_type).risk_factor
 
     def shutdown(self) -> None:
-        """Force-save all Q-tables — called from API lifespan shutdown so that
-        up to 9 pending updates are not lost on ungraceful termination."""
+        """Force-save all Q-tables on graceful shutdown."""
         for ag in self._agents.values():
             ag.shutdown()
 
@@ -539,9 +588,10 @@ class RLAgentManager:
         avg_conf:     float,
         drawdown_pct: float = 0.0,
         vol_pct:      float = 0.0,
+        strategy_name: str | None = None,
     ) -> None:
         """Feed a closed trade result into the appropriate RL agent."""
-        self.agent(trading_type).observe(win_rate, avg_conf, profit_pct, drawdown_pct, vol_pct)
+        self.agent(strategy_name, trading_type).observe(win_rate, avg_conf, profit_pct, drawdown_pct, vol_pct)
 
     def get_state(
         self,
@@ -550,17 +600,21 @@ class RLAgentManager:
         avg_conf:     float,
         drawdown_pct: float = 0.0,
         vol_pct:      float = 0.0,
+        strategy_name: str | None = None,
     ) -> str:
         """
         Return the RL state bucket for given market conditions.
-        
-        Used to tag trade outcomes with RL state for win-rate breakdown analytics.
-        Does not modify agent state (read-only).
+        Read-only — does not modify agent state.
         """
-        return self.agent(trading_type).get_current_state(win_rate, avg_conf, drawdown_pct, vol_pct)
+        return self.agent(strategy_name, trading_type).get_current_state(win_rate, avg_conf, drawdown_pct, vol_pct)
 
     def status(self) -> dict:
-        return {tt: ag.status() for tt, ag in self._agents.items()}
+        """Return per-strategy status keyed by strategy_name."""
+        result: dict[str, dict] = {}
+        for key, ag in self._agents.items():
+            s = ag.status()
+            result[s.get("strategy_name") or key] = s
+        return result
 
 
 # Application-level singleton

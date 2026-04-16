@@ -294,7 +294,8 @@ class SignalBus:
                 conf = float(signal.get("confidence") or 0.0)
                 try:
                     from ai.rl_agent import rl_manager as _rl_bus
-                    _is_tradeable = _rl_bus.should_take_signal(mode, conf)
+                    _strat_bus = signal.get("strategy") or None
+                    _is_tradeable = _rl_bus.should_take_signal(_strat_bus, mode, conf)
                 except Exception:
                     _is_tradeable = conf >= 0.50
                 if not _is_tradeable:
@@ -527,6 +528,22 @@ class SignalBus:
                         metadata={"trading_mode": trading_mode_check, "reason": cb_reason}
                     )
                     return False
+
+                # ── Per-strategy circuit breaker check ────────────────────────
+                _strat_name = signal.get("strategy")
+                if _strat_name:
+                    strat_ok, strat_reason = _risk_manager.is_strategy_allowed(_strat_name)
+                    if not strat_ok:
+                        signal["rejection_reason"] = strat_reason
+                        logger.info(f"SignalBus blocked by per-strategy CB: {strat_reason}")
+                        notification_manager.add(
+                            type="circuit_breaker",
+                            title="Strategy Circuit Breaker",
+                            message=strat_reason,
+                            severity="warning",
+                            metadata={"strategy": _strat_name, "reason": strat_reason}
+                        )
+                        return False
 
                 # ── Concurrent + per-symbol limit check ───────────────────────
                 if isinstance(self._client, MT5Client):
@@ -1042,6 +1059,7 @@ async def recover_unclosed_trades(client) -> None:
                     avg_conf=_stats.get("avg_conf", 0.5),
                     drawdown_pct=0.0,
                     vol_pct=abs(entry_px - sl) / entry_px * 100.0 if entry_px > 0 else 0.5,
+                    strategy_name=entry.get("comment") or None,
                 )
             except Exception:
                 pass
@@ -1083,6 +1101,7 @@ async def recover_unclosed_trades(client) -> None:
                 profit_pct=_rec_pct,
                 win_rate=_stats.get("win_rate", 0.5),
                 avg_conf=_stats.get("avg_conf", 0.5),
+                strategy_name=entry.get("comment") or None,
             )
         except Exception as _exc:
             logger.debug(f"Recovery: trade memory record failed for #{ticket}: {_exc}")
@@ -1493,6 +1512,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     avg_conf=stats.get("avg_conf", 0.5),
                     drawdown_pct=_drawdown_pct,
                     vol_pct=_vol_pct,
+                    strategy_name=signal.get("strategy") or None,
                 )
             except Exception as _rl_exc:
                 logger.debug(f"RL state capture failed: {_rl_exc}")
@@ -1565,10 +1585,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 from engine.account_store import current_mode as _get_mode
                 _cur_mode = _get_mode()
                 if _rm is not None and _cur_mode == signal.get("account_mode", _cur_mode):
+                    _strat_name = signal.get("strategy") or None
                     if profit > 0:
-                        _rm.record_win(trading_type)
+                        _rm.record_win(trading_type, strategy_name=_strat_name)
                     else:
-                        _rm.record_loss(trading_type)
+                        _rm.record_loss(trading_type, strategy_name=_strat_name)
                     # H-3 fix: single account fetch reused for both drawdown tracking and RL reward.
                     from api.main import get_mt5_client as _gclient2
                     _c2 = _gclient2()
@@ -1596,6 +1617,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 avg_conf=stats.get("avg_conf", 0.5),
                 drawdown_pct=_drawdown_pct,
                 vol_pct=abs(entry_px - sl) / max(abs(entry_px), 1e-8) * 100 if entry_px and sl else 0.0,
+                strategy_name=signal.get("strategy") or None,
             )
             logger.info(
                 f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "

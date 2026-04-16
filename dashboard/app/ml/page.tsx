@@ -397,63 +397,78 @@ export default function MLPage() {
 
       {/*  2. RL Agents  */}
       <section>
-        <SectionHeader title="RL Agents" sub="Tabular Q-learning agent per trading mode — adjusts confidence threshold and risk factor over time." />
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+          <SectionHeader title="RL Agents" sub="Tabular Q-learning agent per strategy — adjusts confidence threshold and risk factor over time." />
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="text-xs text-gray-500">Filter</label>
+            <select
+              value={rlInsightsMode}
+              onChange={(e) => setRlInsightsMode(e.target.value as (typeof MODES)[number])}
+              className="px-2 py-1 text-xs bg-gray-950 border border-gray-700 rounded text-gray-200"
+            >
+              {MODES.map((m) => (
+                <option key={m} value={m}>{m.replace("_", " ")}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {/* Per-strategy agent cards filtered by selected trading type */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {MODES.map((mode) => {
-            const agent = rlStatus[mode] ?? {};
-            return (
-              <div key={mode} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold text-white capitalize">{mode.replace("_", " ")}</p>
-                </div>
-                <div className="text-sm space-y-1 text-gray-400">
-                  <div className="flex justify-between">
-                    <span>Confidence threshold</span>
-                    <span className="text-white font-medium">{pct(agent.confidence_threshold)}</span>
+          {Object.entries(rlStatus)
+            .filter(([, ag]) => (ag as { trading_type?: string }).trading_type === rlInsightsMode)
+            .map(([stratKey, agRaw]) => {
+              const ag = agRaw as { strategy_name?: string; trading_type?: string; confidence_threshold?: number; risk_factor?: number; q_states?: number; last_state?: string; n_updates?: number; epsilon?: number };
+              const label = (ag.strategy_name ?? stratKey).replace(/_/g, " ");
+              return (
+                <div key={stratKey} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-white capitalize">{label}</p>
+                    {ag.epsilon != null && (
+                      <span className="text-xs text-gray-500" title="Exploration rate (ε)">ε {ag.epsilon.toFixed(3)}</span>
+                    )}
                   </div>
-                  <div className="flex justify-between">
-                    <span>Risk factor</span>
-                    <span className="text-white font-medium">{agent.risk_factor != null ? agent.risk_factor.toFixed(2) : "—"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Q-table states</span>
-                    <span className="text-white font-medium">{agent.q_states ?? "—"}</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-gray-400 text-sm inline-flex items-center gap-1">
-                      Last state
-                      <span 
-                        className="cursor-help text-blue-400" 
-                        title="Win-rate: ↓ Low (<40%), → Med (40-60%), ↑ High (>60%)&#10;Confidence: Low/Med/High - avg signal confidence&#10;Session: Overlap (peak 12-17 UTC), Active (London/NY), Quiet (Asian)&#10;Drawdown: Safe (<1.5%), Elevated (1.5-3%), Near Limit (≥3%)&#10;Volatility: Tight (<1% SL), Wide (≥1% - crypto/gold/oil)"
-                      >
-                        ⓘ
+                  <div className="text-sm space-y-1 text-gray-400">
+                    <div className="flex justify-between">
+                      <span>Confidence threshold</span>
+                      <span className="text-white font-medium">{pct(ag.confidence_threshold)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Risk factor</span>
+                      <span className="text-white font-medium">{ag.risk_factor != null ? ag.risk_factor.toFixed(2) : "—"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Q-table states</span>
+                      <span className="text-white font-medium">{ag.q_states ?? "—"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Updates</span>
+                      <span className="text-white font-medium">{ag.n_updates ?? "—"}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-gray-400 text-sm inline-flex items-center gap-1">
+                        Last state
+                        <span
+                          className="cursor-help text-blue-400"
+                          title="Win-rate: ↓ Low (<40%), → Med (40-60%), ↑ High (>60%)&#10;Confidence: Low/Med/High - avg signal confidence&#10;Session: Overlap (peak 12-17 UTC), Active (London/NY), Quiet (Asian)&#10;Drawdown: Safe (<1.5%), Elevated (1.5-3%), Near Limit (≥3%)&#10;Volatility: Tight (<1% SL), Wide (≥1% - crypto/gold/oil)"
+                        >
+                          ⓘ
+                        </span>
                       </span>
-                    </span>
-                    <span className="text-white font-medium text-xs">{parseRLState(agent.last_state)}</span>
+                      <span className="text-white font-medium text-xs">{parseRLState(ag.last_state)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
 
         <div className="mt-4 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-white">RL Insights</p>
+              <p className="text-sm font-medium text-white">RL Insights — {rlInsightsMode.replace("_", " ")}</p>
               <p className="text-xs text-gray-500">Shows adaptation trend and which market states are performing best vs worst.</p>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500">Mode</label>
-              <select
-                value={rlInsightsMode}
-                onChange={(e) => setRlInsightsMode(e.target.value as (typeof MODES)[number])}
-                className="px-2 py-1 text-xs bg-gray-950 border border-gray-700 rounded text-gray-200"
-              >
-                {MODES.map((m) => (
-                  <option key={m} value={m}>{m.replace("_", " ")}</option>
-                ))}
-              </select>
               <label className="text-xs text-gray-500">Days</label>
               <select
                 value={rlInsightsDays}

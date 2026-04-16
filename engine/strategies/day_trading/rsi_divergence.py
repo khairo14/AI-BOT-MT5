@@ -17,7 +17,8 @@ DEFAULT_PARAMS = {
     "ema_bias_period": 50,
     "divergence_lookback": 20,
     "atr_period": 14,
-    "tp_rr": 1.5,
+    "tp_rr": 1.5,   # tp1 (partial close), also fallback if no tp2_rr
+    "tp2_rr": 2.5,  # tp2 (full close)
 }
 
 
@@ -107,13 +108,15 @@ class RSIDivergence(BaseStrategy):
             sl_dist = abs(curr_close - sl)
             if self._sl_too_close("BUY", curr_close, sl):
                 return self._no_signal(indicators)
-            tp = round(curr_close + sl_dist * p["tp_rr"], 5)
+            tp1 = round(curr_close + sl_dist * p["tp_rr"], 5)
+            tp2 = round(curr_close + sl_dist * p["tp2_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -127,13 +130,15 @@ class RSIDivergence(BaseStrategy):
             sl_dist = abs(sl - curr_close)
             if self._sl_too_close("SELL", curr_close, sl):
                 return self._no_signal(indicators)
-            tp = round(curr_close - sl_dist * p["tp_rr"], 5)
+            tp1 = round(curr_close - sl_dist * p["tp_rr"], 5)
+            tp2 = round(curr_close - sl_dist * p["tp2_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,

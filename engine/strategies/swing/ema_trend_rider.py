@@ -21,7 +21,9 @@ DEFAULT_PARAMS = {
     "atr_period": 14,
     "pullback_atr_tolerance": 0.5,
     "sl_atr_mult": 1.5,
-    "tp_rr": 2.5,
+    "tp1_rr": 1.5,           # partial close at 1.5R
+    "tp_rr": 2.5,            # tp2 (full close) at 2.5R
+    "vol_confirm_mult": 1.2,  # volume must exceed 20-bar avg × this (0 = disabled)
 }
 
 
@@ -84,6 +86,15 @@ class EMATrendRider(BaseStrategy):
         adx_ok = curr_adx >= p["adx_threshold"]
         tol    = curr_atr * p["pullback_atr_tolerance"]
 
+        # Volume confirmation on entry bar
+        vol_ok = True
+        vol_mult = p.get("vol_confirm_mult", 1.2)
+        if vol_mult > 0 and "volume" in df.columns and len(df) >= 21:
+            curr_vol = df["volume"].iloc[-1]
+            avg_vol  = df["volume"].iloc[-21:-1].mean()
+            if avg_vol > 0:
+                vol_ok = curr_vol > avg_vol * vol_mult
+
         # Pullback to EMA21 — price within tolerance of the EMA
         at_ema_pull = abs(curr_close - curr_ema21) <= tol
 
@@ -98,20 +109,23 @@ class EMATrendRider(BaseStrategy):
             "at_ema_pull": at_ema_pull,
             "h4_bullish": h4_bullish,
             "d1_bullish": d1_bullish,
+            "vol_ok": vol_ok,
         }
 
-        if bull_aligned and adx_ok and at_ema_pull and curr_close > curr_ema21:
+        if bull_aligned and adx_ok and at_ema_pull and curr_close > curr_ema21 and vol_ok:
             sl = round(low_h1.iloc[-5:].min() - curr_atr * p["sl_atr_mult"], 5)
             if self._sl_too_close("BUY", curr_close, sl):
                 return self._no_signal(indicators)
             sl_dist = abs(curr_close - sl)
-            tp = round(curr_close + sl_dist * p["tp_rr"], 5)
+            tp1 = round(curr_close + sl_dist * p["tp1_rr"], 5)
+            tp2 = round(curr_close + sl_dist * p["tp_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -120,18 +134,20 @@ class EMATrendRider(BaseStrategy):
                 indicators=indicators,
             )
 
-        if bear_aligned and adx_ok and at_ema_pull and curr_close < curr_ema21:
+        if bear_aligned and adx_ok and at_ema_pull and curr_close < curr_ema21 and vol_ok:
             sl = round(high_h1.iloc[-5:].max() + curr_atr * p["sl_atr_mult"], 5)
             if self._sl_too_close("SELL", curr_close, sl):
                 return self._no_signal(indicators)
             sl_dist = abs(sl - curr_close)
-            tp = round(curr_close - sl_dist * p["tp_rr"], 5)
+            tp1 = round(curr_close - sl_dist * p["tp1_rr"], 5)
+            tp2 = round(curr_close - sl_dist * p["tp_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,

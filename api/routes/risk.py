@@ -218,6 +218,31 @@ def set_circuit_breaker(body: dict):
 
 
 # ---------------------------------------------------------------------------
+# GET /risk/strategy-status
+# ---------------------------------------------------------------------------
+
+@router.get("/strategy-status")
+def strategy_circuit_breaker_status():
+    """
+    Returns per-strategy circuit-breaker state from the RiskManager.
+
+    Response: dict keyed by strategy_name, each entry has:
+      - consecutive_losses: int
+      - paused_until: ISO timestamp or null
+    """
+    from engine.risk_manager import RiskManager
+    try:
+        from api.main import get_risk_manager
+        rm = get_risk_manager()
+        if rm is None:
+            raise AttributeError
+    except (ImportError, AttributeError):
+        rm = RiskManager()
+
+    return rm.strategy_status()
+
+
+# ---------------------------------------------------------------------------
 # GET /risk/presets — Task #12
 # ---------------------------------------------------------------------------
 

@@ -184,7 +184,7 @@ class SignalScorer:
             logger.warning(f"SignalScorer error [{symbol}]: {exc}")
             return 0.5
 
-    def is_tradeable(self, confidence: float, trading_type: str = "day_trading") -> bool:
+    def is_tradeable(self, confidence: float, trading_type: str = "day_trading", strategy_name: str | None = None) -> bool:
         """
         Ask the RL agent whether this signal's confidence clears the
         dynamically-learned threshold for the given trading type.
@@ -198,7 +198,7 @@ class SignalScorer:
             pass
         try:
             from ai.rl_agent import rl_manager
-            return rl_manager.should_take_signal(trading_type, confidence)
+            return rl_manager.should_take_signal(strategy_name, trading_type, confidence)
         except Exception:
             return True
 

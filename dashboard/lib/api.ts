@@ -178,6 +178,9 @@ export const fetchRiskStatus = () =>
 export const resetDrawdown = () =>
   api.post("/risk/reset-drawdown").then((r) => r.data);
 
+export const fetchStrategyStatus = (): Promise<Record<string, { consecutive_losses: number; paused_until: string | null }>> =>
+  api.get("/risk/strategy-status").then((r) => r.data);
+
 // ── Notifications ----------------------------------------------------------
 import type { Notification } from "@/types";
 

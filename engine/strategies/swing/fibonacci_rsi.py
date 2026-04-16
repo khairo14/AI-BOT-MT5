@@ -16,7 +16,8 @@ DEFAULT_PARAMS = {
     "impulse_lookback": 50,
     "fib_entry_low": 0.50,
     "fib_entry_high": 0.618,
-    "fib_tp": 1.0,       # TP at 100% swing retracement (full extension)
+    "fib_tp": 1.0,       # TP at 100% swing retracement (full extension) — used as tp2
+    "tp1_rr": 1.5,       # tp1 at 1.5R (partial close before swinging to full target)
     "rsi_period": 14,
     "rsi_bull_min": 35,
     "rsi_bull_max": 65,
@@ -126,13 +127,16 @@ class FibonacciRSI(BaseStrategy):
             sl = round(curr_close - curr_atr * p["sl_atr_mult"], 5)
             if self._sl_too_close("BUY", curr_close, sl):
                 return self._no_signal(indicators)
-            tp = round(swing_high, 5)  # TP at 100% extension (origin swing high)
+            sl_dist = abs(curr_close - sl)
+            tp1 = round(curr_close + sl_dist * p["tp1_rr"], 5)
+            tp2 = round(swing_high, 5)  # tp2 = 100% extension (origin swing high)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -145,13 +149,16 @@ class FibonacciRSI(BaseStrategy):
             sl = round(curr_close + curr_atr * p["sl_atr_mult"], 5)
             if self._sl_too_close("SELL", curr_close, sl):
                 return self._no_signal(indicators)
-            tp = round(swing_low, 5)  # TP at 100% (origin low)
+            sl_dist = abs(sl - curr_close)
+            tp1 = round(curr_close - sl_dist * p["tp1_rr"], 5)
+            tp2 = round(swing_low, 5)   # tp2 = 100% (origin low)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,

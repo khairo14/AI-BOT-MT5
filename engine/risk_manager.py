@@ -65,6 +65,10 @@ class RiskManager:
             "swing": None,
         }
 
+        # Per-strategy consecutive loss tracking (keyed by strategy_name)
+        self._strategy_losses: dict[str, int] = {}
+        self._strategy_paused: dict[str, Optional[datetime]] = {}
+
         # Global circuit breaker
         self._daily_halted = False
         self._weekly_halted = False
@@ -106,6 +110,11 @@ class RiskManager:
                     k: v.isoformat() if v else None
                     for k, v in self._paused_modes.items()
                 },
+                "strategy_losses":     self._strategy_losses,
+                "strategy_paused":     {
+                    k: v.isoformat() if v else None
+                    for k, v in self._strategy_paused.items()
+                },
             }
             _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
             _serialised = json.dumps(state)
@@ -143,6 +152,10 @@ class RiskManager:
             for k, v in state.get("paused_modes", {}).items():
                 if k in self._paused_modes:
                     self._paused_modes[k] = datetime.fromisoformat(v) if v else None
+            for k, v in state.get("strategy_losses", {}).items():
+                self._strategy_losses[k] = int(v)
+            for k, v in state.get("strategy_paused", {}).items():
+                self._strategy_paused[k] = datetime.fromisoformat(v) if v else None
             logger.info("RiskManager: circuit breaker state restored from disk")
         except Exception as exc:
             logger.warning(f"RiskManager: could not restore state: {exc}")
@@ -406,8 +419,8 @@ class RiskManager:
                         self._on_circuit_breaker("weekly", f"Weekly drawdown {weekly_dd:.2f}% reached {weekly_limit}% limit")
             self._save_state()
 
-    def record_loss(self, trading_mode: str) -> None:
-        """Increment consecutive loss counter for a mode. Pauses mode if limit hit."""
+    def record_loss(self, trading_mode: str, strategy_name: str | None = None) -> None:
+        """Increment consecutive loss counter for a mode (and optionally a strategy)."""
         mode = trading_mode.lower()
         with self._lock:
             self._consecutive_losses[mode] = self._consecutive_losses.get(mode, 0) + 1
@@ -421,13 +434,88 @@ class RiskManager:
                     f"Mode '{mode}' paused for {pause_hours}h after "
                     f"{self._consecutive_losses[mode]} consecutive losses."
                 )
+            # Per-strategy tracking
+            if strategy_name:
+                self._strategy_losses[strategy_name] = self._strategy_losses.get(strategy_name, 0) + 1
+                strat_limit = self._config["drawdown"].get(
+                    "max_strategy_consecutive_losses", limit
+                )
+                strat_pause_hours = self._config["drawdown"].get(
+                    "strategy_pause_hours", pause_hours
+                )
+                if self._strategy_losses[strategy_name] >= strat_limit:
+                    self._strategy_paused[strategy_name] = datetime.now(tz=timezone.utc)
+                    logger.warning(
+                        f"Strategy '{strategy_name}' paused for {strat_pause_hours}h after "
+                        f"{self._strategy_losses[strategy_name]} consecutive losses."
+                    )
             self._save_state()
 
-    def record_win(self, trading_mode: str) -> None:
-        """Reset consecutive loss counter on a win."""
+    def record_win(self, trading_mode: str, strategy_name: str | None = None) -> None:
+        """Reset consecutive loss counter on a win (mode and optionally strategy)."""
         with self._lock:
             self._consecutive_losses[trading_mode.lower()] = 0
+            if strategy_name:
+                self._strategy_losses[strategy_name] = 0
+                # Clear strategy pause on win
+                self._strategy_paused.pop(strategy_name, None)
             self._save_state()
+
+    def is_strategy_allowed(self, strategy_name: str) -> tuple[bool, str]:
+        """
+        Check whether a specific strategy is currently paused by its per-strategy
+        consecutive-loss circuit breaker.
+
+        Returns (is_allowed, reason_or_empty_string).
+        """
+        with self._lock:
+            paused_at = self._strategy_paused.get(strategy_name)
+            if paused_at is None:
+                return True, ""
+            pause_hours = self._config["drawdown"].get(
+                "strategy_pause_hours",
+                self._config["drawdown"]["consecutive_loss_pause_hours"],
+            )
+            elapsed = (datetime.now(tz=timezone.utc) - paused_at).total_seconds() / 3600
+            if elapsed >= pause_hours:
+                # Pause expired — clear automatically
+                self._strategy_paused.pop(strategy_name, None)
+                self._strategy_losses[strategy_name] = 0
+                return True, ""
+            remaining = pause_hours - elapsed
+            return False, (
+                f"Strategy '{strategy_name}' paused for {remaining:.1f}h after "
+                f"{self._strategy_losses.get(strategy_name, 0)} consecutive losses."
+            )
+
+    def strategy_status(self) -> dict:
+        """Return per-strategy loss counters and pause state for dashboard display."""
+        with self._lock:
+            pause_hours = self._config["drawdown"].get(
+                "strategy_pause_hours",
+                self._config["drawdown"]["consecutive_loss_pause_hours"],
+            )
+            strat_limit = self._config["drawdown"].get(
+                "max_strategy_consecutive_losses",
+                self._config["drawdown"]["max_consecutive_losses"],
+            )
+            result = {}
+            for name, losses in self._strategy_losses.items():
+                paused_at = self._strategy_paused.get(name)
+                halted = False
+                remaining_h = 0.0
+                if paused_at is not None:
+                    elapsed = (datetime.now(tz=timezone.utc) - paused_at).total_seconds() / 3600
+                    if elapsed < pause_hours:
+                        halted = True
+                        remaining_h = round(pause_hours - elapsed, 1)
+                result[name] = {
+                    "consecutive_losses": losses,
+                    "limit": strat_limit,
+                    "halted": halted,
+                    "remaining_hours": remaining_h,
+                }
+            return result
 
     def reset_drawdown(self, current_balance: Optional[float] = None) -> None:
         """Manually clear daily/weekly circuit-breaker halts."""
@@ -446,6 +534,8 @@ class RiskManager:
             for mode in self._consecutive_losses:
                 self._consecutive_losses[mode] = 0
                 self._paused_modes[mode] = None
+            self._strategy_losses.clear()
+            self._strategy_paused.clear()
             self._save_state()
         logger.info("Circuit breaker: consecutive-loss counters reset.")
 
@@ -462,6 +552,8 @@ class RiskManager:
             for mode in self._consecutive_losses:
                 self._consecutive_losses[mode] = 0
                 self._paused_modes[mode] = None
+            self._strategy_losses.clear()
+            self._strategy_paused.clear()
             # RISK-3: record switch time so check_concurrent_limit enforces a
             # brief settling hold for any in-flight requests targeting old state.
             self._mode_switch_ts = datetime.now(tz=timezone.utc)

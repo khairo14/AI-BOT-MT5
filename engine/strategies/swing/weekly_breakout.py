@@ -21,9 +21,11 @@ DEFAULT_PARAMS = {
     "macd_signal": 9,
     "adx_period": 14,
     "adx_threshold": 22,
-    "tp_rr": 2.0,
+    "tp1_rr": 1.5,           # partial close at 1.5R
+    "tp_rr": 2.0,            # tp2 (full close) at 2.0R
     "sl_atr_mult": 1.0,
     "entry_buffer_pips": 2,
+    "vol_confirm_mult": 1.2,  # volume must exceed 20-bar avg × this (0 = disabled)
 }
 
 
@@ -89,11 +91,21 @@ class WeeklyBreakout(BaseStrategy):
 
         buffer = p["entry_buffer_pips"] * 0.0001  # convert pips
 
+        # Volume confirmation: breakout bar must show expanded volume
+        vol_ok = True
+        vol_mult = p.get("vol_confirm_mult", 1.2)
+        if vol_mult > 0 and "volume" in df.columns and len(df) >= 21:
+            curr_vol = df["volume"].iloc[-1]
+            avg_vol  = df["volume"].iloc[-21:-1].mean()
+            if avg_vol > 0:
+                vol_ok = curr_vol > avg_vol * vol_mult
+
         bull_break = (
             curr_close > pw_high + out_pips
             and curr_hist > 0
             and prev_hist > 0                          # MACD histogram positive & growing
             and adx_ok
+            and vol_ok
         )
 
         bear_break = (
@@ -101,6 +113,7 @@ class WeeklyBreakout(BaseStrategy):
             and curr_hist < 0
             and prev_hist < 0                          # MACD histogram negative
             and adx_ok
+            and vol_ok
         )
 
         indicators = {
@@ -117,13 +130,15 @@ class WeeklyBreakout(BaseStrategy):
             entry = round(curr_close, 5)
             sl    = round(pw_high - curr_atr * p["sl_atr_mult"], 5)
             sl_dist = abs(entry - sl)
-            tp    = round(entry + sl_dist * p["tp_rr"], 5)
+            tp1   = round(entry + sl_dist * p["tp1_rr"], 5)
+            tp2   = round(entry + sl_dist * p["tp_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
                     entry_price=entry,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -136,13 +151,15 @@ class WeeklyBreakout(BaseStrategy):
             entry = round(curr_close, 5)
             sl    = round(pw_low + curr_atr * p["sl_atr_mult"], 5)
             sl_dist = abs(sl - entry)
-            tp    = round(entry - sl_dist * p["tp_rr"], 5)
+            tp1   = round(entry - sl_dist * p["tp1_rr"], 5)
+            tp2   = round(entry - sl_dist * p["tp_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",
                     entry_price=entry,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,

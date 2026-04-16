@@ -45,6 +45,10 @@ config/scanner.json
 
 # Logs — keep directory, exclude runtime files
 logs/*.log
+logs/*.log.zip
+logs/*.json
+logs/*.json.zip
+logs/*.zip
 logs/*.pid
 logs/pids.json
 !logs/.gitkeep

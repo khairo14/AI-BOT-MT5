@@ -52,7 +52,9 @@ HIDDEN_SIZE  = 64
 NUM_LAYERS   = 2
 EPOCHS       = 60   # raised from 50 for 200k-bar datasets (more data = more epochs needed)
 BATCH_SIZE   = 256  # large batches = fewer CPU→GPU transfers; tensors already on CPU so OOM is not a risk
-INPUT_SIZE   = 7    # close_return, hl_range, oc_body, volume_norm, upper_wick, is_near_news, atr_norm
+INPUT_SIZE   = 12   # close_return, hl_range, oc_body, volume_norm, upper_wick,
+               #   is_near_news, atr_norm, ema50_200_spread, rsi14_norm,
+               #   macd_hist_norm, bb_position, lower_wick
 ENSEMBLE_SIZE = 3   # number of models trained per symbol×type to reduce variance (3-5 recommended)
 
 # Prediction cache settings (5-minute TTL to reduce redundant OHLCV fetches + feature computation)
@@ -862,14 +864,19 @@ class PricePredictor:
 
 def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_trading") -> Optional[np.ndarray]:
     """
-    Return (N, 7) feature array:
-      col 0 — close return (close[i] - close[i-1]) / close[i-1]
-      col 1 — bar range (high - low) / close
-      col 2 — open-close body (close - open) / open
-      col 3 — volume normalised by mean
-      col 4 — upper wick (high - close) / close
-      col 5 — is_near_news binary flag (1.0 within 30 min of high-impact event, else 0.0)
-      col 6 — ATR(14) normalised by close (volatility regime indicator)
+    Return (N, 12) feature array:
+      col  0 — close return (close[i] - close[i-1]) / close[i-1]
+      col  1 — bar range (high - low) / close
+      col  2 — open-close body (close - open) / open
+      col  3 — volume normalised by mean
+      col  4 — upper wick (high - close) / close
+      col  5 — is_near_news binary flag (1.0 within 45-min of high-impact event)
+      col  6 — ATR(14) normalised by close (volatility regime)
+      col  7 — EMA50/200 spread normalised: (ema50 - ema200) / close  (trend context)
+      col  8 — RSI(14) normalised to [0, 1]: rsi / 100
+      col  9 — MACD histogram normalised by ATR14  (trend momentum strength)
+      col 10 — Bollinger position: (close - bb_lower) / (bb_upper - bb_lower + eps)
+      col 11 — lower wick (close - low) / close  (bearish pressure proxy)
     """
     needed = {"open", "high", "low", "close"}
     vol_col = "volume" if "volume" in df.columns else "tick_volume"
@@ -915,7 +922,47 @@ def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_
     atr14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
     atr_n = atr14 / (close + eps)
 
-    return np.column_stack([ret_c, ret_hl, ret_oc, vol_n, wick, news_flag, atr_n])
+    # ── Feature 7: EMA50/200 spread normalised by close ──────────────────
+    # Captures trend context: positive = bullish alignment, negative = bearish
+    _close_s = pd.Series(close)
+    ema50  = _close_s.ewm(span=50,  adjust=False).mean().values
+    ema200 = _close_s.ewm(span=200, adjust=False).mean().values
+    ema_spread = (ema50 - ema200) / (close + eps)
+
+    # ── Feature 8: RSI(14) normalised to [0, 1] ──────────────────────────
+    delta  = np.diff(close, prepend=close[0])
+    gain   = np.where(delta > 0, delta, 0.0)
+    loss   = np.where(delta < 0, -delta, 0.0)
+    avg_gain = pd.Series(gain).ewm(com=13, adjust=False).mean().values
+    avg_loss = pd.Series(loss).ewm(com=13, adjust=False).mean().values
+    rs       = avg_gain / (avg_loss + eps)
+    rsi14    = 1.0 - 1.0 / (1.0 + rs)  # [0, 1] directly (avoid /100 then /100)
+
+    # ── Feature 9: MACD histogram normalised by ATR14 ────────────────────
+    ema12   = _close_s.ewm(span=12, adjust=False).mean().values
+    ema26   = _close_s.ewm(span=26, adjust=False).mean().values
+    macd    = ema12 - ema26
+    signal9 = pd.Series(macd).ewm(span=9, adjust=False).mean().values
+    hist    = macd - signal9
+    macd_n  = hist / (atr14 + eps)  # normalise by volatility to be scale-invariant
+
+    # ── Feature 10: Bollinger Band position ──────────────────────────────
+    bb_mid   = _close_s.rolling(20, min_periods=1).mean().values
+    bb_std20 = _close_s.rolling(20, min_periods=1).std(ddof=0).fillna(0).values
+    bb_upper = bb_mid + 2.0 * bb_std20
+    bb_lower = bb_mid - 2.0 * bb_std20
+    bb_range = (bb_upper - bb_lower) + eps
+    bb_pos   = (close - bb_lower) / bb_range  # 0.0 = at lower band, 1.0 = at upper band
+    bb_pos   = np.clip(bb_pos, 0.0, 1.0)      # clamp outside-band excursions to [0,1]
+
+    # ── Feature 11: lower wick ────────────────────────────────────────────
+    lower_wick = (close - low) / (close + eps)
+
+    return np.column_stack([
+        ret_c, ret_hl, ret_oc, vol_n, wick,
+        news_flag, atr_n,
+        ema_spread, rsi14, macd_n, bb_pos, lower_wick,
+    ])
 
 
 def _model_key(symbol: str, trading_type: str) -> str:
