@@ -236,7 +236,7 @@ class NewsFilter:
                     continue
                 if ev.get("currency", "").upper() not in currencies:
                     continue
-                ev_time = self._parse_time(ev.get("date", ""), ev.get("time", ""))
+                ev_time = ev.get("_dt")
                 if ev_time is None:
                     continue
                 window_start = ev_time - timedelta(minutes=before_min)
@@ -342,6 +342,9 @@ class NewsFilter:
                     return
                 resp.raise_for_status()
                 for ev in resp.json():
+                    # Normalize: new FF API uses "country" instead of "currency"
+                    if "currency" not in ev and "country" in ev:
+                        ev["currency"] = ev["country"]
                     dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
                     ev["_dt"] = dt
                     events.append(ev)
@@ -370,12 +373,15 @@ class NewsFilter:
                         f"NewsFilter: FF nextweek 429 — backoff {_retry_after2 // 60}min"
                     )
                 elif _resp2.status_code == 200:
-                    _seen = {(ev.get("date"), ev.get("time"), ev.get("title"))
+                    _seen = {(ev.get("date"), ev.get("title"))
                              for ev in events}
                     _added = 0
                     for ev in _resp2.json():
-                        _key = (ev.get("date"), ev.get("time"), ev.get("title"))
+                        _key = (ev.get("date"), ev.get("title"))
                         if _key not in _seen:
+                            # Normalize: new FF API uses "country" instead of "currency"
+                            if "currency" not in ev and "country" in ev:
+                                ev["currency"] = ev["country"]
                             dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
                             ev["_dt"] = dt
                             events.append(ev)
@@ -494,19 +500,15 @@ class NewsFilter:
     def _parse_time(date_str: str, time_str: str) -> Optional[datetime]:
         """Parse Forex Factory date+time strings into UTC datetime.
 
-        LOGIC-5 / RISK-4: ForexFactory publishes all event times in US/Eastern
-        (America/New_York), which observes Daylight Saving Time (EDT = UTC-4
-        from 2nd Sunday in March through 1st Sunday in November; EST = UTC-5
-        the rest of the year).  This is documented in the FF FAQ and confirmed
-        by cross-checking FF event times with Reuters/Bloomberg timestamps.
-
-        The conversion below uses ``ZoneInfo("America/New_York")`` with DST-aware
-        arithmetic when the tzdata package is available (Python 3.9+), or falls
-        back to manual US DST rule calculation otherwise.  Hardcoding UTC-5 or
-        UTC-4 year-round would shift every spring/autumn event time by ±1 hour.
+        Handles two FF API formats:
+          New (current): date is a full ISO 8601 string, e.g. "2026-04-14T08:30:00-04:00"
+          Old (legacy):  date="03-17-2026", time="8:30am" (US/Eastern, DST-aware)
         """
         try:
-            # FF format examples: date="03-17-2026", time="8:30am"
+            # New FF format: date is already a full ISO 8601 string with UTC offset
+            if date_str and "T" in date_str:
+                return datetime.fromisoformat(date_str).astimezone(UTC)
+            # Old FF format: separate date and time strings in US/Eastern
             dt_str = f"{date_str} {time_str}"
             dt = datetime.strptime(dt_str, "%m-%d-%Y %I:%M%p")
             # FF times are US/Eastern — convert to UTC
