@@ -153,17 +153,13 @@ async def _rl_idle_decay_loop() -> None:
             # Per-mode idle thresholds — must match _IDLE_DECAY_HOURS in rl_agent.py
             # so this background loop behaves identically to the in-observe() decay.
             _IDLE_HOURS = {"scalping": 4.0, "day_trading": 6.0, "swing": 12.0}
-            for trading_type, agent in _rl._agents.items():
+            for _key, agent in _rl._agents.items():
+                # Use agent.trading_type (e.g. "scalping"), not the dict key
+                # (e.g. "ema_scalp_scalping"), so per-mode thresholds apply correctly.
+                _agent_type = agent.trading_type
                 _last_ts = getattr(agent, "_last_update_ts", _now_ts)
                 _hours_idle = (_now_ts - _last_ts) / 3600
-                _threshold = _IDLE_HOURS.get(trading_type, 6.0)
-                # Decay whenever above the hard floor (DEFAULT_CONF_THRESH = 0.55).
-                # The old condition "> 0.55" excluded agents at exactly 0.55 — but
-                # bootstrap can set values below 0.55 (e.g. scalping 0.54) that should
-                # still decay upward toward 0.55 if they were manually set lower.
-                # Use ">= floor of this mode" instead so decay always trends toward default.
-                _CONF_FLOOR = {"scalping": 0.52, "day_trading": 0.52, "swing": 0.50}
-                _floor = _CONF_FLOOR.get(trading_type, 0.52)
+                _threshold = _IDLE_HOURS.get(_agent_type, 6.0)
                 if _hours_idle >= _threshold and agent._conf_thresh > DEFAULT_CONF_THRESH:
                     agent._conf_thresh = max(
                         DEFAULT_CONF_THRESH,
@@ -172,7 +168,7 @@ async def _rl_idle_decay_loop() -> None:
                     agent._last_update_ts = _now_ts
                     agent._force_save()
                     logger.info(
-                        f"RL idle decay [{trading_type}]: "
+                        f"RL idle decay [{agent.strategy_name}/{_agent_type}]: "
                         f"conf_thresh → {agent._conf_thresh:.2f} "
                         f"(idle {_hours_idle:.1f}h)"
                     )
