@@ -126,6 +126,12 @@ _EARNINGS_PAUSE_AFTER_HOURS  = 4   # 4 hours after earnings
 
 UTC = timezone.utc
 
+# Rate-limit backoff state — shared across all NewsFilter instances (module-level).
+# When FF returns 429, we honour the Retry-After header (or default 15 min) and
+# skip all fetches until the backoff expires.
+_ff_backoff_until: Optional[datetime] = None
+_ff_backoff_lock  = threading.Lock()
+
 
 def _currencies_for(symbol: str) -> list[str]:
     """Return the currency codes affected by a symbol.
@@ -310,11 +316,30 @@ class NewsFilter:
             import httpx
             from datetime import timedelta as _td
 
+            # ── Rate-limit guard: respect backoff set by previous 429 ─────────
+            global _ff_backoff_until
+            with _ff_backoff_lock:
+                if _ff_backoff_until is not None and datetime.now(tz=UTC) < _ff_backoff_until:
+                    _remaining = int((_ff_backoff_until - datetime.now(tz=UTC)).total_seconds() / 60)
+                    logger.debug(f"NewsFilter: skipping fetch — rate-limit backoff active ({_remaining}min remaining)")
+                    return
+
             events: list[dict] = []
 
             # ── Step 1: always fetch this week (guaranteed to exist) ──────────
             try:
-                resp = httpx.get(_FF_URL_THIS, timeout=10)
+                resp = httpx.get(_FF_URL_THIS, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+                if resp.status_code == 429:
+                    # Honour Retry-After header; default to 15 minutes if absent
+                    _retry_after = int(resp.headers.get("Retry-After", 900))
+                    _retry_after = max(_retry_after, 900)  # floor at 15 min
+                    with _ff_backoff_lock:
+                        _ff_backoff_until = datetime.now(tz=UTC) + _td(seconds=_retry_after)
+                    logger.warning(
+                        f"NewsFilter: FF returned 429 — backoff for {_retry_after // 60}min "
+                        f"(until {_ff_backoff_until.strftime('%H:%M UTC')})"
+                    )
+                    return
                 resp.raise_for_status()
                 for ev in resp.json():
                     dt = self._parse_time(ev.get("date", ""), ev.get("time", ""))
@@ -335,8 +360,16 @@ class NewsFilter:
                 _days_to_monday = (7 - _now_utc.weekday()) % 7 or 7
                 _next_monday = (_now_utc + _td(days=_days_to_monday)).strftime("%Y-%m-%d")
                 _next_url  = f"{_FF_URL_THIS}?week={_next_monday}"
-                _resp2 = httpx.get(_next_url, timeout=10)
-                if _resp2.status_code == 200:
+                _resp2 = httpx.get(_next_url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+                if _resp2.status_code == 429:
+                    _retry_after2 = int(_resp2.headers.get("Retry-After", 900))
+                    _retry_after2 = max(_retry_after2, 900)
+                    with _ff_backoff_lock:
+                        _ff_backoff_until = datetime.now(tz=UTC) + _td(seconds=_retry_after2)
+                    logger.warning(
+                        f"NewsFilter: FF nextweek 429 — backoff {_retry_after2 // 60}min"
+                    )
+                elif _resp2.status_code == 200:
                     _seen = {(ev.get("date"), ev.get("time"), ev.get("title"))
                              for ev in events}
                     _added = 0
