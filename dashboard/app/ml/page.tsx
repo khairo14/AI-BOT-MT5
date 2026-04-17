@@ -108,6 +108,12 @@ type OptimizerStatus = {
 
 const MODES = ["scalping", "day_trading", "swing"] as const;
 
+const STRATEGY_BY_MODE: Record<string, string[]> = {
+  scalping:    ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+  day_trading: ["sr_breakout", "macd_ema_trend", "rsi_divergence"],
+  swing:       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
+};
+
 /** Optimizer job key helpers */
 const job_strat = (key: string, job: OptimizerJob) => job.strategy ?? key.split("__")[0];
 const job_sym   = (key: string, job: OptimizerJob) => job.symbol   ?? key.split("__")[1] ?? key;
@@ -129,6 +135,7 @@ export default function MLPage() {
   const [rlWinRate, setRlWinRate] = useState<RLWinRateByState>({});
   const [rlInsightsMode, setRlInsightsMode] = useState<(typeof MODES)[number]>("day_trading");
   const [rlInsightsDays, setRlInsightsDays] = useState(7);
+  const [rlInsightsStrategy, setRlInsightsStrategy] = useState("sr_breakout");
   const [memStats, setMemStats] = useState<Record<string, MemStats>>({});
   const [optStatus, setOptStatus] = useState<OptimizerStatus>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -166,8 +173,8 @@ export default function MLPage() {
       const [ai, rl, rlHist, rlStates, opt, appCfg, cal, accHist, confDist, ...mems] = await Promise.allSettled([
         fetchAIStatus(),
         fetchRLStatus(),
-        fetchRLHistory(rlInsightsMode, rlInsightsDays),
-        fetchRLWinRateByState(rlInsightsMode, 1),
+        fetchRLHistory(rlInsightsMode, rlInsightsDays, rlInsightsStrategy),
+        fetchRLWinRateByState(rlInsightsMode, 1, rlInsightsStrategy),
         fetchOptimizerStatus(),
         fetchAppConfig(),
         fetchLstmCalibration(5),
@@ -226,7 +233,7 @@ export default function MLPage() {
       });
       setMemStats(statsMap);
     } catch (_) {/* silently skip on network error */}
-  }, [rlInsightsMode, rlInsightsDays]);
+  }, [rlInsightsMode, rlInsightsDays, rlInsightsStrategy]);
 
   useEffect(() => {
     load();
@@ -403,7 +410,11 @@ export default function MLPage() {
             <label className="text-xs text-gray-500">Filter</label>
             <select
               value={rlInsightsMode}
-              onChange={(e) => setRlInsightsMode(e.target.value as (typeof MODES)[number])}
+              onChange={(e) => {
+                const m = e.target.value as (typeof MODES)[number];
+                setRlInsightsMode(m);
+                setRlInsightsStrategy(STRATEGY_BY_MODE[m]?.[0] ?? "");
+              }}
               className="px-2 py-1 text-xs bg-gray-950 border border-gray-700 rounded text-gray-200"
             >
               {MODES.map((m) => (
@@ -465,10 +476,20 @@ export default function MLPage() {
         <div className="mt-4 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-white">RL Insights — {rlInsightsMode.replace("_", " ")}</p>
+              <p className="text-sm font-medium text-white">RL Insights — {rlInsightsMode.replace("_", " ")} / {rlInsightsStrategy.replace(/_/g, " ")}</p>
               <p className="text-xs text-gray-500">Shows adaptation trend and which market states are performing best vs worst.</p>
             </div>
             <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-500">Strategy</label>
+              <select
+                value={rlInsightsStrategy}
+                onChange={(e) => setRlInsightsStrategy(e.target.value)}
+                className="px-2 py-1 text-xs bg-gray-950 border border-gray-700 rounded text-gray-200"
+              >
+                {(STRATEGY_BY_MODE[rlInsightsMode] ?? []).map((s) => (
+                  <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                ))}
+              </select>
               <label className="text-xs text-gray-500">Days</label>
               <select
                 value={rlInsightsDays}

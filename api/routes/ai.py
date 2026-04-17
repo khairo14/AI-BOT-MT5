@@ -651,6 +651,7 @@ def rl_status():
 def get_rl_history(
     trading_type: TRADING_TYPE,
     days: int = Query(7, ge=1, le=90),
+    strategy_name: Optional[str] = Query(None, description="Specific strategy (e.g. ema_scalp). Omit for legacy per-type history."),
 ):
     """
     Return time-series history of RL threshold evolution for a trading type.
@@ -681,14 +682,18 @@ def get_rl_history(
         _mode_data = json.load(f)
         _mode = _mode_data.get("mode", "paper")
     
-    _history_path = Path("ai/data") / f"rl_history_{trading_type}_{_mode}.jsonl"
+    if strategy_name:
+        _history_path = Path("ai/data") / f"rl_history_{strategy_name}_{trading_type}_{_mode}.jsonl"
+    else:
+        _history_path = Path("ai/data") / f"rl_history_{trading_type}_{_mode}.jsonl"
     
     if not _history_path.exists():
         return {
             "trading_type": trading_type,
+            "strategy_name": strategy_name,
             "mode": _mode,
             "snapshots": [],
-            "message": f"No history file found for {trading_type}/{_mode}"
+            "message": f"No history file found for {strategy_name or trading_type}/{_mode}"
         }
     
     # Read JSONL history file
@@ -775,6 +780,7 @@ def get_rl_history(
 def get_win_rate_by_state(
     trading_type: TRADING_TYPE,
     min_samples: int = Query(5, ge=1),
+    strategy_name: Optional[str] = Query(None, description="Filter by strategy (matches 'comment' field in trade memory)."),
 ):
     """
     Return win rate breakdown by RL state bucket.
@@ -803,6 +809,14 @@ def get_win_rate_by_state(
         live_only=True,
     )
     
+    # Filter by strategy if requested
+    if strategy_name:
+        outcomes = [o for o in outcomes if o.get("comment") == strategy_name]
+
+    # Filter by strategy if requested
+    if strategy_name:
+        outcomes = [o for o in outcomes if o.get("comment") == strategy_name]
+
     # Filter for trades with rl_state populated
     tracked = [o for o in outcomes if o.get("rl_state")]
     

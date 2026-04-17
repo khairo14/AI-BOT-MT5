@@ -142,11 +142,17 @@ export const fetchRLStatus = () =>
 export const fetchRLQTable = (tradingType: "scalping" | "day_trading" | "swing") =>
   api.get(`/ai/rl/qtable/${tradingType}`).then((r) => r.data);
 
-export const fetchRLHistory = (tradingType: "scalping" | "day_trading" | "swing", days = 7) =>
-  api.get(`/ai/rl/history/${tradingType}?days=${days}`).then((r) => r.data);
+export const fetchRLHistory = (tradingType: "scalping" | "day_trading" | "swing", days = 7, strategyName?: string) => {
+  const params = new URLSearchParams({ days: String(days) });
+  if (strategyName) params.set("strategy_name", strategyName);
+  return api.get(`/ai/rl/history/${tradingType}?${params}`).then((r) => r.data);
+};
 
-export const fetchRLWinRateByState = (tradingType: "scalping" | "day_trading" | "swing", minSamples = 5) =>
-  api.get(`/ai/rl/win-rate-by-state/${tradingType}?min_samples=${minSamples}`).then((r) => r.data);
+export const fetchRLWinRateByState = (tradingType: "scalping" | "day_trading" | "swing", minSamples = 5, strategyName?: string) => {
+  const params = new URLSearchParams({ min_samples: String(minSamples) });
+  if (strategyName) params.set("strategy_name", strategyName);
+  return api.get(`/ai/rl/win-rate-by-state/${tradingType}?${params}`).then((r) => r.data);
+};
 
 export const resetRLAgent = (trading_type: string) =>
   api.post(`/ai/rl/reset/${trading_type}`).then((r) => r.data);
