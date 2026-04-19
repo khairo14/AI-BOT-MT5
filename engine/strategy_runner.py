@@ -257,6 +257,7 @@ class StrategyRunner:
 
         self._strategies_cfg: dict = self._load_json("strategies.json")
         self._symbols_cfg: dict    = self._load_json("symbols.json")
+        self._cfg_loaded_at: float = _time.monotonic()
 
         # Pending signals for manual confirmation (populated when mode == "manual")
         self.pending_signals: list[StrategySignal] = []
@@ -450,7 +451,7 @@ class StrategyRunner:
             _rl_enabled = _get_app_config().get("ai", {}).get("rl_agent_enabled", True)
             if _rl_enabled:
                 from ai.rl_agent import rl_manager as _rl
-                rf = _rl.risk_factor(trading_type)
+                rf = _rl.risk_factor(strat_name, trading_type)
                 if rf != 1.0:
                     min_lot = sym_info.get("min_lot", 0.01)
                     lot_step = sym_info.get("lot_step", 0.01)
@@ -619,13 +620,6 @@ class StrategyRunner:
                         return None
             except Exception:
                 pass
-            # RL gate — suppress low-confidence signals dynamically
-            if not scorer.is_tradeable(strat_sig.confidence, trading_type, strategy_name=strat_name):
-                logger.debug(
-                    f"RL gate blocked {strat_name}/{symbol}: "
-                    f"confidence={strat_sig.confidence:.2f}"
-                )
-                return None
         except Exception as _exc:
             logger.debug(f"Signal scorer skipped for {symbol}: {_exc}")
 
@@ -638,9 +632,13 @@ class StrategyRunner:
     def run_mode(self, trading_type: str, symbols_override: list[str] | None = None) -> list[StrategySignal]:
         """Run all enabled symbols for a single trading type. Used by the runner loop.
         If symbols_override is provided (from scanner config), only those symbols are scanned."""
-        # Reload configs on each run so dashboard changes take effect without restart
-        self._strategies_cfg = self._load_json("strategies.json")
-        self._symbols_cfg    = self._load_json("symbols.json")
+        # Reload configs with a 5-second TTL so dashboard changes propagate within
+        # one scan cycle without unnecessary disk reads on every strategy tick.
+        _now_cfg = _time.monotonic()
+        if _now_cfg - self._cfg_loaded_at >= 5.0:
+            self._strategies_cfg = self._load_json("strategies.json")
+            self._symbols_cfg    = self._load_json("symbols.json")
+            self._cfg_loaded_at  = _now_cfg
         new_signals: list[StrategySignal] = []
         symbols = symbols_override if symbols_override is not None else self._enabled_symbols(trading_type)
         active_strategies = self._active_strategies(trading_type)

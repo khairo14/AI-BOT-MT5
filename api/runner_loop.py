@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,20 +60,18 @@ _trailing_stop_task: Optional[asyncio.Task] = None
 _mode_tasks: dict[str, asyncio.Task] = {}  # per-mode task refs to detect accumulation
 _risk_manager = None  # exposed so /risk/status can read live state
 _trailing_stop_manager = None  # exposed so /positions endpoint can read trailing status
-_paused: bool = False  # set True during account mode switch
+_pause_event = threading.Event()  # set() to pause, clear() to resume
 
 
 def pause_runner() -> None:
     """Signal the loop to skip iterations (used during account switching)."""
-    global _paused
-    _paused = True
+    _pause_event.set()
     logger.info("Strategy runner paused.")
 
 
 def resume_runner() -> None:
     """Resume the runner after account switching."""
-    global _paused
-    _paused = False
+    _pause_event.clear()
     logger.info("Strategy runner resumed.")
 
 
@@ -147,7 +146,7 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
     while True:
         await asyncio.sleep(5)  # base tick
 
-        if _paused:
+        if _pause_event.is_set():
             continue
 
         # Auto-reconnect: if MT5 dropped, attempt reconnection before proceeding.
@@ -211,8 +210,7 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                                 f"Weekend gap protection [{_now_utc.strftime('%a %H:%M UTC')}]: "
                                 f"closing {len(_swing_open)} swing position(s) before weekend"
                             )
-                            from engine.order_manager import OrderManager
-                            _om = OrderManager(client)
+                            _om = order_manager
                             for _pos in _swing_open:
                                 try:
                                     await asyncio.to_thread(
@@ -399,7 +397,7 @@ async def _trailing_stop_loop(manager) -> None:
     while True:
         await asyncio.sleep(5)  # Check every 5 seconds
         
-        if _paused:
+        if _pause_event.is_set():
             continue
         
         try:

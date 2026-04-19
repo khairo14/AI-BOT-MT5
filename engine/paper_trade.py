@@ -129,7 +129,11 @@ class PaperTradeEngine:
     def sync_positions(self) -> None:
         """Sync local ledger with actual MT5 demo positions and update P&L."""
         mt5_positions = self.client.get_open_positions()
-        mt5_tickets   = {p["ticket"] for p in mt5_positions} if mt5_positions else set()
+        # PAPER-1: None means MT5 is disconnected — do not falsely close all positions.
+        if mt5_positions is None:
+            logger.debug("PaperTrade sync: MT5 returned None (disconnected) — skipping sync")
+            return
+        mt5_tickets   = {p["ticket"] for p in mt5_positions}
 
         with self._lock:
             snapshot = list(self._positions.items())
@@ -263,6 +267,7 @@ class PaperTradeEngine:
                     _vol_pct  = abs(pos.open_price - pos.sl_price) / max(abs(pos.open_price), 1e-8) * 100.0 if pos.sl_price else 0.0
                     from ai.rl_agent import rl_manager as _rl_pt
                     _rl_pt.on_trade_closed(
+                        strategy_name=pos.strategy,
                         trading_type=pos.trading_type,
                         profit_pct=_pnl_pct,
                         win_rate=_stats_pt.get("win_rate", 0.5),

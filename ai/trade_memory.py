@@ -177,14 +177,6 @@ class TradeMemory:
             profit = o.get("profit", 0)
             if not pred or not actual:
                 continue
-            # Correct if prediction matches actual profitable direction
-            is_correct = (
-                (pred == "BUY"  and profit > 0 and actual == "BUY") or
-                (pred == "SELL" and profit > 0 and actual == "SELL") or
-                (pred == "BUY"  and profit < 0 and actual == "SELL") or
-                (pred == "SELL" and profit < 0 and actual == "BUY")
-            )
-            # Simpler: prediction correct if market went the predicted direction
             is_correct = (pred == actual and profit > 0) or (pred != actual and profit < 0)
             correct += int(is_correct)
             total   += 1

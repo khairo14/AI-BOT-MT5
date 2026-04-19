@@ -262,9 +262,15 @@ class SignalBus:
                 sym = signal.get("symbol", "")
                 direction = signal.get("direction", "").upper()
                 mode_prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(mode, mode)
+                _bot_magic: int | None = None
+                try:
+                    from engine.order_manager import BOT_MAGIC as _bot_magic
+                except Exception:
+                    pass
                 for pos in open_positions:
                     if (
-                        pos.get("symbol") == sym
+                        (_bot_magic is None or pos.get("magic") == _bot_magic)
+                        and pos.get("symbol") == sym
                         and pos.get("type", "").upper() == direction
                         and str(pos.get("comment", "")).startswith(mode_prefix)
                     ):
@@ -652,6 +658,23 @@ class SignalBus:
                                 max_lot=_sym_info_lot.get("max_lot", 100.0),
                                 lot_step=_sym_info_lot.get("lot_step", 0.01),
                             )
+                            # LOT-1: apply RL risk factor so the revalidated lot
+                            # respects the same dynamic sizing used at signal creation.
+                            try:
+                                from ai.rl_agent import rl_manager as _rl_rv
+                                import math as _math_rv
+                                _rf_rv = _rl_rv.risk_factor(
+                                    signal.get("strategy", ""), trading_mode
+                                )
+                                if _rf_rv != 1.0:
+                                    _step_rv = _sym_info_lot.get("lot_step", 0.01)
+                                    _min_rv  = _sym_info_lot.get("min_lot", 0.01)
+                                    _new_lot = max(
+                                        _min_rv,
+                                        round(_math_rv.floor(_new_lot * _rf_rv / _step_rv) * _step_rv, 8),
+                                    )
+                            except Exception:
+                                pass
                             if abs(_new_lot - _lot) / max(_lot, 1e-8) > 0.10:
                                 logger.info(
                                     f"Lot revalidated for stale signal {signal.get('id','?')}: "
@@ -1627,10 +1650,10 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             # ── Daily accuracy snapshot ──────────────────────────────────────
             # Take a snapshot of LSTM accuracy history every 10 trades to track degradation
             _snapshot_every = 10
-            if stats.get("n_total", 0) % _snapshot_every == 0:
+            if stats.get("total", 0) > 0 and stats.get("total", 0) % _snapshot_every == 0:
                 try:
                     memory.snapshot_accuracy(trading_type=trading_type, min_samples=10, live_only=True)
-                    logger.debug(f"LSTM accuracy snapshot taken for {trading_type} at {stats.get('n_total')} trades")
+                    logger.debug(f"LSTM accuracy snapshot taken for {trading_type} at {stats.get('total')} trades")
                 except Exception as _snap_exc:
                     logger.warning(f"Accuracy snapshot failed: {_snap_exc}")
 
