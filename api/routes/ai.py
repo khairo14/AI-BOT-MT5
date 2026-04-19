@@ -809,13 +809,9 @@ def get_win_rate_by_state(
         live_only=True,
     )
     
-    # Filter by strategy if requested
+    # Filter by strategy if requested (trade_memory uses "strategy" field)
     if strategy_name:
-        outcomes = [o for o in outcomes if o.get("comment") == strategy_name]
-
-    # Filter by strategy if requested
-    if strategy_name:
-        outcomes = [o for o in outcomes if o.get("comment") == strategy_name]
+        outcomes = [o for o in outcomes if o.get("strategy") == strategy_name]
 
     # Filter for trades with rl_state populated
     tracked = [o for o in outcomes if o.get("rl_state")]
