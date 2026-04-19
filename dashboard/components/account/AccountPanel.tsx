@@ -265,7 +265,7 @@ export default function AccountPanel() {
                       <td className="py-2 pr-4 font-mono text-gray-400 whitespace-nowrap">{fmtTime(e.open_time)}</td>
                       <td className="py-2 pr-4 font-mono text-gray-400 whitespace-nowrap">{fmtTime(e.close_time)}</td>
                       <td className="py-2 pr-4 font-semibold">{e.symbol}</td>
-                      <td className={`py-2 pr-4 font-semibold ${e.direction === "buy" ? "text-green-400" : "text-red-400"}`}>
+                      <td className={`py-2 pr-4 font-semibold ${e.direction.toUpperCase() === "BUY" ? "text-green-400" : "text-red-400"}`}>
                         {e.direction.toUpperCase()}
                       </td>
                       <td className="py-2 pr-4">{e.volume}</td>
