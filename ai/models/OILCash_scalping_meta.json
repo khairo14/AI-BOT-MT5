@@ -1,13 +1,14 @@
 {
-  "trained_at": "2026-04-13T16:39:10.130037+00:00",
-  "accuracy": 0.5089,
-  "bars_used": 133130,
+  "trained_at": "2026-04-16T08:28:23.672504+00:00",
+  "accuracy": 0.5033,
+  "bars_used": 200000,
   "trading_type": "scalping",
   "timeframe": "M5",
   "ensemble_size": 3,
+  "input_size": 12,
   "member_accuracies": [
-    0.5083,
-    0.51,
-    0.5084
+    0.5016,
+    0.5034,
+    0.5049
   ]
 }

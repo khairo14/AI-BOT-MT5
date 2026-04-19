@@ -1,13 +1,14 @@
 {
-  "trained_at": "2026-04-12T09:41:04.860444+00:00",
-  "accuracy": 0.5057,
-  "bars_used": 25825,
+  "trained_at": "2026-04-16T07:45:50.716574+00:00",
+  "accuracy": 0.5101,
+  "bars_used": 25861,
   "trading_type": "day_trading",
   "timeframe": "H1",
   "ensemble_size": 3,
+  "input_size": 12,
   "member_accuracies": [
-    0.4941,
-    0.5127,
-    0.5104
+    0.4942,
+    0.524,
+    0.512
   ]
 }
