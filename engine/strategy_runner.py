@@ -199,15 +199,17 @@ _PRIMARY_TF: dict[str, str] = {
 # the single biggest P&L drag at -15% total across paper trading history).
 _REGIME_STRATEGIES: dict[str, set[str]] = {
     # Trending: allow trend-following AND Fib/weekly-breakout (retracements within trends)
+    # rsi_divergence catches trend exhaustion / reversal setups — most useful in trending markets
     "trending_bull":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze",
-                          "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout"},
+                          "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout", "rsi_divergence"},
     "trending_bear":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze",
-                          "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout"},
+                          "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout", "rsi_divergence"},
     "ranging_low_vol":   {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
     "ranging_high_vol":  {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
     # Volatile breakout: allow breakout + trend-confirmation strategies
+    # rsi_divergence included to catch false breakouts / exhaustion reversals
     "volatile_breakout": {"sr_breakout", "weekly_breakout", "bb_squeeze",
-                          "macd_ema_trend", "ema_trend_rider", "fibonacci_rsi"},
+                          "macd_ema_trend", "ema_trend_rider", "fibonacci_rsi", "rsi_divergence"},
     "quiet":             set(),   # no trades in quiet / undefined market
 }
 
