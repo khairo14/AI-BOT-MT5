@@ -16,7 +16,7 @@ DEFAULT_PARAMS = {
     "bb_period": 20,
     "bb_std": 2.0,
     "roc_period": 5,
-    "min_squeeze_bars": 5,
+    "min_squeeze_bars": 3,
     "sl_atr_mult": 1.5,
     "tp1_atr_mult": 1.5,    # partial close at 1.5×ATR
     "tp_atr_mult": 2.5,     # tp2 (full close) at 2.5×ATR

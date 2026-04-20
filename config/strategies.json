@@ -1,6 +1,6 @@
 {
   "scalping": {
-    "active_strategies": ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+    "active_strategies": ["ema_scalp", "bb_squeeze", "vwap_reversion", "stoch_rsi_pullback"],
     "symbol_strategy_override": {
       "US100Cash": ["bb_squeeze", "vwap_reversion"],
       "US30Cash":  ["bb_squeeze", "vwap_reversion"],
@@ -14,14 +14,14 @@
         "ema_bias_timeframe": "M5",
         "rsi_period": 7,
         "rsi_min": 40,
-        "rsi_max": 65,
+        "rsi_max": 72,
         "max_spread_pips": 1.5
       },
       "bb_squeeze": {
         "bb_period": 20,
         "bb_std": 2.0,
         "roc_period": 5,
-        "min_squeeze_bars": 5
+        "min_squeeze_bars": 3
       },
       "vwap_reversion": {
         "sigma_entry": 1.5,
@@ -30,6 +30,21 @@
         "stoch_k": 5,
         "stoch_d": 3,
         "stoch_smooth": 3
+      },
+      "stoch_rsi_pullback": {
+        "ema_fast": 21,
+        "ema_mid": 50,
+        "ema_slow": 200,
+        "stochrsi_period": 14,
+        "stochrsi_smooth_k": 3,
+        "stochrsi_smooth_d": 3,
+        "stochrsi_oversold": 20,
+        "stochrsi_overbought": 80,
+        "atr_period": 14,
+        "sl_atr_mult": 1.5,
+        "tp1_rr": 1.5,
+        "rr": 2.5,
+        "max_spread_pips": 2.0
       }
     }
   },

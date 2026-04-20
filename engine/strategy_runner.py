@@ -30,6 +30,7 @@ from engine.strategies.base_strategy import StrategyResult
 from engine.strategies.scalping.ema_scalp import EMAScalp
 from engine.strategies.scalping.bb_squeeze import BBSqueeze
 from engine.strategies.scalping.vwap_reversion import VWAPReversion
+from engine.strategies.scalping.stoch_rsi_pullback import StochRSIPullback
 from engine.strategies.day_trading.macd_ema_trend import MACDEMATrend
 from engine.strategies.day_trading.sr_breakout import SRBreakout
 from engine.strategies.day_trading.rsi_divergence import RSIDivergence
@@ -144,15 +145,16 @@ def _asset_group_direction(symbol: str, direction: str) -> str | None:
     return f"{base}_SHORT"
 
 STRATEGY_MAP = {
-    "ema_scalp":        EMAScalp,
-    "bb_squeeze":       BBSqueeze,
-    "vwap_reversion":   VWAPReversion,
-    "macd_ema_trend":   MACDEMATrend,
-    "sr_breakout":      SRBreakout,
-    "rsi_divergence":   RSIDivergence,
-    "ema_trend_rider":  EMATrendRider,
-    "fibonacci_rsi":    FibonacciRSI,
-    "weekly_breakout":  WeeklyBreakout,
+    "ema_scalp":            EMAScalp,
+    "bb_squeeze":           BBSqueeze,
+    "vwap_reversion":       VWAPReversion,
+    "stoch_rsi_pullback":   StochRSIPullback,
+    "macd_ema_trend":       MACDEMATrend,
+    "sr_breakout":          SRBreakout,
+    "rsi_divergence":       RSIDivergence,
+    "ema_trend_rider":      EMATrendRider,
+    "fibonacci_rsi":        FibonacciRSI,
+    "weekly_breakout":      WeeklyBreakout,
 }
 
 # Timeframes required per strategy (primary timeframe → bars to fetch).
@@ -160,9 +162,10 @@ STRATEGY_MAP = {
 # EMA200 = 200 bars minimum) always has enough data to return a real label.
 TIMEFRAME_BARS: dict[str, dict[str, int]] = {
     # H1 added to scalping strategies for MTF confirmation (higher TF trend check)
-    "ema_scalp":       {"M1": 250, "M5": 250, "H1": 250},
-    "bb_squeeze":      {"M5": 250, "H1": 250},
-    "vwap_reversion":  {"M5": 250, "H1": 250},
+    "ema_scalp":             {"M1": 250, "M5": 250, "H1": 250},
+    "bb_squeeze":            {"M5": 250, "H1": 250},
+    "vwap_reversion":        {"M5": 250, "H1": 250},
+    "stoch_rsi_pullback":    {"M5": 250, "H1": 250},
     # D1 added to day_trading strategies for MTF confirmation
     "macd_ema_trend":  {"H1": 250, "M15": 250, "D1": 60},
     "sr_breakout":     {"H1": 250, "D1": 60},
@@ -176,15 +179,16 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
 # Primary timeframe per strategy — used for regime classification and LSTM scoring.
 # Kept at module level so both _run_strategy and the scorer share one definition.
 _PRIMARY_TF: dict[str, str] = {
-    "ema_scalp":       "M5",
-    "bb_squeeze":      "M5",
-    "vwap_reversion":  "M5",
-    "macd_ema_trend":  "H1",
-    "sr_breakout":     "H1",
-    "rsi_divergence":  "H1",  # LSTM trained on H1; M30 data passed to strategy via _dispatch()
-    "ema_trend_rider": "H1",
-    "fibonacci_rsi":   "H4",
-    "weekly_breakout": "H4",
+    "ema_scalp":           "M5",
+    "bb_squeeze":          "M5",
+    "vwap_reversion":      "M5",
+    "stoch_rsi_pullback":  "M5",
+    "macd_ema_trend":      "H1",
+    "sr_breakout":         "H1",
+    "rsi_divergence":      "H1",  # LSTM trained on H1; M30 data passed to strategy via _dispatch()
+    "ema_trend_rider":     "H1",
+    "fibonacci_rsi":       "H4",
+    "weekly_breakout":     "H4",
 }
 
 # ── Regime gating ─────────────────────────────────────────────────────────────
@@ -194,8 +198,8 @@ _PRIMARY_TF: dict[str, str] = {
 # structurally losing trades (e.g. vwap_reversion in trending markets was
 # the single biggest P&L drag at -15% total across paper trading history).
 _REGIME_STRATEGIES: dict[str, set[str]] = {
-    "trending_bull":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze"},
-    "trending_bear":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze"},
+    "trending_bull":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze", "stoch_rsi_pullback"},
+    "trending_bear":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze", "stoch_rsi_pullback"},
     "ranging_low_vol":   {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
     "ranging_high_vol":  {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
     "volatile_breakout": {"sr_breakout", "weekly_breakout", "bb_squeeze"},
@@ -836,6 +840,8 @@ class StrategyRunner:
         """Call each strategy's calculate() with the right keyword arguments."""
         if strat_name == "ema_scalp":
             return strategy.calculate(tf_data["M1"], df_m5=tf_data.get("M5"))
+        if strat_name == "stoch_rsi_pullback":
+            return strategy.calculate(tf_data["M5"])
         if strat_name == "macd_ema_trend":
             # M15 is the primary entry TF; H1 is bias/signal confirmation
             return strategy.calculate(tf_data["M15"], df_h1=tf_data.get("H1"))

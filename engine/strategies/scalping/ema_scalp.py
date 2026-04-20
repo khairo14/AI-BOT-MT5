@@ -16,8 +16,8 @@ DEFAULT_PARAMS = {
     "ema_slow": 21,
     "ema_bias_period": 50,
     "rsi_period": 7,
-    "rsi_min": 52,
-    "rsi_max": 65,
+    "rsi_min": 40,
+    "rsi_max": 72,
     "max_spread_pips": 1.5,
     "sl_pips": 4,
     "tp1_rr": 1.2,          # partial close at 1.2R
