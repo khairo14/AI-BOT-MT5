@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { fetchOHLCV, fetchPositions, fetchExecutionMode, setExecutionMode, fetchScannerConfig, patchScannerConfig } from "@/lib/api";
+import { fetchOHLCV, fetchPositions, fetchExecutionMode, setExecutionMode, fetchScannerConfig, patchScannerConfig, fetchAvailableSymbols } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import AccountSummary from "@/components/dashboard/AccountSummary";
 import TradePanel from "@/components/trading/TradePanel";
@@ -56,6 +56,8 @@ export default function TradingModePage({
   const [scannerSymbols, setScannerSymbols] = useState<string[]>([]);
   const [scannerSaving, setScannerSaving] = useState(false);
   const [scannerSaved, setScannerSaved] = useState(false);
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
+  const [symbolSearch, setSymbolSearch] = useState("");
 
   const [ind, setInd] = useState<Record<AllKey, boolean>>(IND_DEFAULTS);
   const [indPanelOpen, setIndPanelOpen] = useState(false);
@@ -183,6 +185,10 @@ export default function TradingModePage({
         setScannerEnabled(m.enabled ?? false);
         setScannerSymbols(m.symbols ?? []);
       })
+      .catch(() => {});
+    // Load live broker symbols once on mount
+    fetchAvailableSymbols()
+      .then((res) => setAvailableSymbols(res.symbols))
       .catch(() => {});
   }, [mode]);
 
@@ -361,16 +367,28 @@ export default function TradingModePage({
           </div>
         )}
 
-        {/* Available Symbols to Add */}
+        {/* Available Symbols to Add — searchable live list from broker */}
         <div className="mb-4">
           <p className="text-xs font-medium text-gray-400 mb-2">
             {scannerSymbols.length === 0 ? "Select symbols to scan" : "Add more symbols"}
           </p>
-          <div className="flex flex-wrap gap-2">
-            {allSymbols.map((sym) => {
-              const selected = scannerSymbols.includes(sym);
-              const atMax = !selected && scannerSymbols.length >= (SCANNER_MAX[mode] ?? 5);
-              if (selected) return null; // Don't show already selected
+          <input
+            type="text"
+            placeholder="Search symbols (e.g. EURUSD, GOLD, BTC)…"
+            value={symbolSearch}
+            onChange={(e) => setSymbolSearch(e.target.value)}
+            className="w-full px-3 py-2 mb-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+          />
+          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+            {(symbolSearch.trim().length > 0
+              ? availableSymbols.filter(
+                  (s) =>
+                    !scannerSymbols.includes(s) &&
+                    s.toLowerCase().includes(symbolSearch.trim().toLowerCase())
+                )
+              : allSymbols.filter((s) => !scannerSymbols.includes(s))
+            ).map((sym) => {
+              const atMax = scannerSymbols.length >= (SCANNER_MAX[mode] ?? 5);
               return (
                 <button
                   key={sym}
@@ -386,6 +404,14 @@ export default function TradingModePage({
                 </button>
               );
             })}
+            {symbolSearch.trim().length > 0 &&
+              availableSymbols.filter(
+                (s) =>
+                  !scannerSymbols.includes(s) &&
+                  s.toLowerCase().includes(symbolSearch.trim().toLowerCase())
+              ).length === 0 && (
+                <p className="text-xs text-gray-600 italic">No matching symbols found</p>
+              )}
           </div>
         </div>
 

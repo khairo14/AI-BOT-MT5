@@ -9,8 +9,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from api.dependencies import get_client
+from engine.mt5_client import MT5Client
 
 router = APIRouter()
 
@@ -258,6 +261,62 @@ def update_symbols_config(body: PatchRequest):
     _deep_merge(current, body.data)
     _save("symbols.json", current)
     return current
+
+
+@router.get("/available-symbols")
+def get_available_symbols(client: MT5Client = Depends(get_client)):
+    """Return all symbols available on the connected broker (XM via MT5),
+    grouped by category. The list is live from mt5.symbols_get() so it only
+    contains instruments XM actually offers on this account type."""
+    raw = client.get_all_symbols()
+    if not raw:
+        return {"symbols": [], "grouped": {}}
+
+    # Category detection — ordered most-specific to least-specific
+    def _category(name: str) -> str:
+        u = name.upper()
+        forex_ccys = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
+                      "SGD", "HKD", "NOK", "SEK", "DKK", "MXN", "ZAR", "TRY",
+                      "PLN", "CZK", "HUF", "CNH"]
+        is_forex = (
+            len(name) == 6
+            and any(u.startswith(c) for c in forex_ccys)
+            and any(u.endswith(c) for c in forex_ccys)
+        )
+        if is_forex:
+            majors = {"EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"}
+            return "forex_major" if u in majors else "forex_minor"
+        crypto_tokens = ["BTC", "ETH", "XRP", "SOL", "ADA", "BNB", "DOGE",
+                         "MATIC", "DOT", "AVAX", "LINK", "LTC", "XLM", "UNI",
+                         "ATOM", "FIL", "TRX", "ALGO", "VET", "FTM"]
+        if any(tok in u for tok in crypto_tokens):
+            return "crypto"
+        if any(x in u for x in ["GOLD", "XAU", "SILVER", "XAG", "PLAT", "PALL"]):
+            return "precious_metals"
+        if any(x in u for x in ["OIL", "BRENT", "WTI", "NGAS", "GAS", "COCOA",
+                                  "COFFEE", "CORN", "WHEAT", "SUGAR", "COTTON"]):
+            return "commodities"
+        if any(x in u for x in ["US100", "US30", "US500", "SPX", "NAS", "DOW",
+                                  "GER", "UK100", "DAX", "CAC", "NIKKEI", "AUS",
+                                  "HK50", "JP225", "STOXX", "FTSE", "SPI"]):
+            return "indices"
+        # Everything else (stocks, ETFs, bonds)
+        return "stocks"
+
+    grouped: dict[str, list[str]] = {}
+    for sym in raw:
+        name = sym.name
+        cat = _category(name)
+        grouped.setdefault(cat, [])
+        if name not in grouped[cat]:
+            grouped[cat].append(name)
+
+    # Sort each category alphabetically
+    for cat in grouped:
+        grouped[cat].sort()
+
+    flat = sorted({sym.name for sym in raw})
+    return {"symbols": flat, "grouped": grouped}
 
 
 # ---------------------------------------------------------------------------

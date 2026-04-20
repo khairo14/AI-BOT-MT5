@@ -355,6 +355,14 @@ export const fetchScannerConfig = (): Promise<Record<string, ScannerModeConfig>>
 export const patchScannerConfig = (patch: Record<string, unknown>) =>
   api.patch("/config/scanner", { data: patch }).then((r) => r.data);
 
+export interface AvailableSymbolsResponse {
+  symbols: string[];
+  grouped: Record<string, string[]>;
+}
+
+export const fetchAvailableSymbols = (): Promise<AvailableSymbolsResponse> =>
+  api.get("/config/available-symbols").then((r) => r.data);
+
 // ── Market Scanner (New) ---------------------------------------------------
 export interface ScanResult {
   symbol: string;
