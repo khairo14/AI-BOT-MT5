@@ -162,7 +162,7 @@ STRATEGY_MAP = {
 # EMA200 = 200 bars minimum) always has enough data to return a real label.
 TIMEFRAME_BARS: dict[str, dict[str, int]] = {
     # H1 added to scalping strategies for MTF confirmation (higher TF trend check)
-    "ema_scalp":             {"M1": 250, "M5": 250, "H1": 250},
+    "ema_scalp":             {"M5": 250, "M15": 250, "H1": 250},
     "bb_squeeze":            {"M5": 250, "H1": 250},
     "vwap_reversion":        {"M5": 250, "H1": 250},
     "stoch_rsi_pullback":    {"M5": 250, "H1": 250},
@@ -846,7 +846,7 @@ class StrategyRunner:
     ) -> StrategyResult:
         """Call each strategy's calculate() with the right keyword arguments."""
         if strat_name == "ema_scalp":
-            return strategy.calculate(tf_data["M1"], df_m5=tf_data.get("M5"))
+            return strategy.calculate(tf_data["M5"], df_m15=tf_data.get("M15"))
         if strat_name == "stoch_rsi_pullback":
             return strategy.calculate(tf_data["M5"])
         if strat_name == "macd_ema_trend":

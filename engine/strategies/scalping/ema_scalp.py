@@ -1,6 +1,6 @@
 """
 S1 — EMA Scalp (Trend Following)
-Timeframe: M1/M2 entry, M5 bias filter
+Timeframe: M5 entry, M15 bias filter
 Symbols: EURUSD, GBPUSD, USDJPY, EURJPY, USDCHF
 """
 
@@ -30,9 +30,9 @@ class EMAScalp(BaseStrategy):
 
     name = "ema_scalp"
     trading_type = "scalping"
-    timeframe = "M1"
+    timeframe = "M5"
 
-    def calculate(self, df: pd.DataFrame, df_m5: pd.DataFrame | None = None) -> StrategyResult:
+    def calculate(self, df: pd.DataFrame, df_m15: pd.DataFrame | None = None) -> StrategyResult:
         p = {**DEFAULT_PARAMS, **self.params}
 
         if len(df) < p["ema_slow"] + 5:
@@ -45,15 +45,15 @@ class EMAScalp(BaseStrategy):
         ema_slow = ta.trend.EMAIndicator(close, window=p["ema_slow"]).ema_indicator()
         rsi = ta.momentum.RSIIndicator(close, window=p["rsi_period"]).rsi()
 
-        # M5 bias: price above/below EMA 50 on M5
+        # M15 bias: price above/below EMA 50 on M15
         bias = "NONE"
-        if df_m5 is not None and len(df_m5) >= p["ema_bias_period"]:
+        if df_m15 is not None and len(df_m15) >= p["ema_bias_period"]:
             ema_bias = ta.trend.EMAIndicator(
-                df_m5["close"], window=p["ema_bias_period"]
+                df_m15["close"], window=p["ema_bias_period"]
             ).ema_indicator()
-            last_m5_close = df_m5["close"].iloc[-1]
-            last_m5_ema = ema_bias.iloc[-1]
-            bias = "BULL" if last_m5_close > last_m5_ema else "BEAR"
+            last_m15_close = df_m15["close"].iloc[-1]
+            last_m15_ema = ema_bias.iloc[-1]
+            bias = "BULL" if last_m15_close > last_m15_ema else "BEAR"
 
         prev_fast = ema_fast.iloc[-2]
         prev_slow = ema_slow.iloc[-2]
@@ -75,7 +75,7 @@ class EMAScalp(BaseStrategy):
             "ema_fast": round(curr_fast, 5),
             "ema_slow": round(curr_slow, 5),
             "rsi": round(curr_rsi, 2),
-            "m5_bias": bias,
+            "m15_bias": bias,
             "vol_ok": vol_ok,
         }
 
