@@ -107,7 +107,9 @@
         "h4_adx_min": 25,
         "h1_ema_entry": 21,
         "primary_timeframe": "H4",
-        "entry_timeframe": "H1"
+        "entry_timeframe": "H1",
+        "adx_threshold": 20,
+        "pullback_atr_tolerance": 0.8
       },
       "fibonacci_rsi": {
         "fib_levels": [0.382, 0.5, 0.618],

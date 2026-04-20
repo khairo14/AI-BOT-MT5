@@ -109,7 +109,7 @@ type OptimizerStatus = {
 const MODES = ["scalping", "day_trading", "swing"] as const;
 
 const STRATEGY_BY_MODE: Record<string, string[]> = {
-  scalping:    ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+  scalping:    ["ema_scalp", "bb_squeeze", "vwap_reversion", "stoch_rsi_pullback"],
   day_trading: ["sr_breakout", "macd_ema_trend", "rsi_divergence"],
   swing:       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
 };

@@ -91,7 +91,7 @@ const SYMBOL_GROUPS: Record<TradingType, SymbolGroup[]> = {
 // ── Helpers ───────────────────────────────────────────────────────────────
 const MODES: TradingType[] = ["scalping", "day_trading", "swing"];
 const DEFAULT_STRATEGIES: Record<TradingType, string[]> = {
-  scalping:    ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+  scalping:    ["ema_scalp", "bb_squeeze", "vwap_reversion", "stoch_rsi_pullback"],
   day_trading: ["macd_ema_trend", "sr_breakout", "rsi_divergence"],
   swing:       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
 };

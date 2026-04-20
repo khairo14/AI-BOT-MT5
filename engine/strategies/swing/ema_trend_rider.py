@@ -17,9 +17,9 @@ DEFAULT_PARAMS = {
     "ema_mid": 50,
     "ema_slow": 200,
     "adx_period": 14,
-    "adx_threshold": 25,
+    "adx_threshold": 20,
     "atr_period": 14,
-    "pullback_atr_tolerance": 0.5,
+    "pullback_atr_tolerance": 0.8,
     "sl_atr_mult": 1.5,
     "tp1_rr": 1.5,           # partial close at 1.5R
     "tp_rr": 2.5,            # tp2 (full close) at 2.5R

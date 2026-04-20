@@ -70,8 +70,10 @@ class MACDEMATrend(BaseStrategy):
             elif last_h1 < h1_ema200.iloc[-1] and h1_ema20.iloc[-1] < h1_ema50.iloc[-1]:
                 h1_trend = "BEAR"
 
-            h1_macd_bull = h1_hist.iloc[-1] > 0 and h1_hist.iloc[-1] > h1_hist.iloc[-2]
-            h1_macd_bear = h1_hist.iloc[-1] < 0 and h1_hist.iloc[-1] < h1_hist.iloc[-2]
+            # Require histogram positive/negative — remove the "growing" bar-over-bar
+            # requirement which was too strict and filtered valid entries in steady trends.
+            h1_macd_bull = h1_hist.iloc[-1] > 0
+            h1_macd_bear = h1_hist.iloc[-1] < 0
         else:
             # IMPROVE-5: log when H1 data is absent so systematic fetch failures are visible
             logger.debug(

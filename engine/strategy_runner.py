@@ -198,11 +198,16 @@ _PRIMARY_TF: dict[str, str] = {
 # structurally losing trades (e.g. vwap_reversion in trending markets was
 # the single biggest P&L drag at -15% total across paper trading history).
 _REGIME_STRATEGIES: dict[str, set[str]] = {
-    "trending_bull":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze", "stoch_rsi_pullback"},
-    "trending_bear":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze", "stoch_rsi_pullback"},
+    # Trending: allow trend-following AND Fib/weekly-breakout (retracements within trends)
+    "trending_bull":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze",
+                          "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout"},
+    "trending_bear":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze",
+                          "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout"},
     "ranging_low_vol":   {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
     "ranging_high_vol":  {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
-    "volatile_breakout": {"sr_breakout", "weekly_breakout", "bb_squeeze"},
+    # Volatile breakout: allow breakout + trend-confirmation strategies
+    "volatile_breakout": {"sr_breakout", "weekly_breakout", "bb_squeeze",
+                          "macd_ema_trend", "ema_trend_rider", "fibonacci_rsi"},
     "quiet":             set(),   # no trades in quiet / undefined market
 }
 

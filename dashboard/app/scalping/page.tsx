@@ -14,7 +14,7 @@ export default function ScalpingPage() {
       defaultSymbol="EURUSD"
       defaultTimeframe="M5"
       timeframes={["M1", "M5"]}
-      strategyNames={["EMA Scalp", "BB Squeeze", "VWAP Reversion"]}
+      strategyNames={["EMA Scalp", "BB Squeeze", "VWAP Reversion", "StochRSI Pullback"]}
     />
   );
 }
