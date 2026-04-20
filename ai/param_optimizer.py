@@ -183,15 +183,16 @@ _DISPATCH: dict[str, Callable] = {
     # Each lambda accepts (strategy, primary_df, extra_dfs) where extra_dfs is a
     # dict of secondary timeframe DataFrames keyed by kwarg name.
     # Defaults to {} so old single-TF call sites still work.
-    "ema_scalp":       lambda s, df, e={}: s.calculate(df, df_m5=e.get("df_m5")),
-    "bb_squeeze":      lambda s, df, e={}: s.calculate(df),
-    "vwap_reversion":  lambda s, df, e={}: s.calculate(df),
-    "macd_ema_trend":  lambda s, df, e={}: s.calculate(df, df_h1=e.get("df_h1")),
-    "rsi_divergence":  lambda s, df, e={}: s.calculate(df, df_h1=e.get("df_h1")),
-    "ema_trend_rider": lambda s, df, e={}: s.calculate(df, df_h4=e.get("df_h4"), df_d1=e.get("df_d1")),
-    "fibonacci_rsi":   lambda s, df, e={}: s.calculate(df),
-    "weekly_breakout": lambda s, df, e={}: s.calculate(df, df_daily=e.get("df_daily")),
-    "sr_breakout":     lambda s, df, e={}: s.calculate(df),
+    "ema_scalp":          lambda s, df, e={}: s.calculate(df, df_m15=e.get("df_m15")),  # BUG-BT-1: was df_m5
+    "bb_squeeze":         lambda s, df, e={}: s.calculate(df),
+    "vwap_reversion":     lambda s, df, e={}: s.calculate(df),
+    "stoch_rsi_pullback": lambda s, df, e={}: s.calculate(df),  # BUG-BT-2: was missing
+    "macd_ema_trend":     lambda s, df, e={}: s.calculate(df, df_h1=e.get("df_h1")),
+    "rsi_divergence":     lambda s, df, e={}: s.calculate(df, df_h1=e.get("df_h1")),
+    "ema_trend_rider":    lambda s, df, e={}: s.calculate(df, df_h4=e.get("df_h4"), df_d1=e.get("df_d1")),
+    "fibonacci_rsi":      lambda s, df, e={}: s.calculate(df),
+    "weekly_breakout":    lambda s, df, e={}: s.calculate(df, df_daily=e.get("df_daily")),
+    "sr_breakout":        lambda s, df, e={}: s.calculate(df),
 }
 
 _STRATEGY_MAP: Optional[dict] = None
@@ -200,25 +201,27 @@ _STRATEGY_MAP: Optional[dict] = None
 def _get_strategy_map() -> dict:
     global _STRATEGY_MAP
     if _STRATEGY_MAP is None:
-        from engine.strategies.scalping.ema_scalp       import EMAScalp
-        from engine.strategies.scalping.bb_squeeze      import BBSqueeze
-        from engine.strategies.scalping.vwap_reversion  import VWAPReversion
-        from engine.strategies.day_trading.macd_ema_trend import MACDEMATrend
-        from engine.strategies.day_trading.sr_breakout  import SRBreakout
-        from engine.strategies.day_trading.rsi_divergence import RSIDivergence
-        from engine.strategies.swing.ema_trend_rider    import EMATrendRider
-        from engine.strategies.swing.fibonacci_rsi      import FibonacciRSI
-        from engine.strategies.swing.weekly_breakout    import WeeklyBreakout
+        from engine.strategies.scalping.ema_scalp            import EMAScalp
+        from engine.strategies.scalping.bb_squeeze           import BBSqueeze
+        from engine.strategies.scalping.vwap_reversion       import VWAPReversion
+        from engine.strategies.scalping.stoch_rsi_pullback   import StochRSIPullback  # BUG-BT-2
+        from engine.strategies.day_trading.macd_ema_trend    import MACDEMATrend
+        from engine.strategies.day_trading.sr_breakout       import SRBreakout
+        from engine.strategies.day_trading.rsi_divergence    import RSIDivergence
+        from engine.strategies.swing.ema_trend_rider         import EMATrendRider
+        from engine.strategies.swing.fibonacci_rsi           import FibonacciRSI
+        from engine.strategies.swing.weekly_breakout         import WeeklyBreakout
         _STRATEGY_MAP = {
-            "ema_scalp":       EMAScalp,
-            "bb_squeeze":      BBSqueeze,
-            "vwap_reversion":  VWAPReversion,
-            "macd_ema_trend":  MACDEMATrend,
-            "sr_breakout":     SRBreakout,
-            "rsi_divergence":  RSIDivergence,
-            "ema_trend_rider": EMATrendRider,
-            "fibonacci_rsi":   FibonacciRSI,
-            "weekly_breakout": WeeklyBreakout,
+            "ema_scalp":          EMAScalp,
+            "bb_squeeze":         BBSqueeze,
+            "vwap_reversion":     VWAPReversion,
+            "stoch_rsi_pullback": StochRSIPullback,  # BUG-BT-2
+            "macd_ema_trend":     MACDEMATrend,
+            "sr_breakout":        SRBreakout,
+            "rsi_divergence":     RSIDivergence,
+            "ema_trend_rider":    EMATrendRider,
+            "fibonacci_rsi":      FibonacciRSI,
+            "weekly_breakout":    WeeklyBreakout,
         }
     return _STRATEGY_MAP
 

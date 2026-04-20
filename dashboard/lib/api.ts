@@ -323,6 +323,7 @@ export interface BacktestRequest {
   bars?:           number;
   initial_balance?: number;
   risk_pct?:       number;
+  use_ai_filters?: boolean;  // GAP-BT-2
 }
 
 export const fetchBacktestStrategies = () =>

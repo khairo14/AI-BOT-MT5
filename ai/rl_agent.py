@@ -508,7 +508,7 @@ class RLAgent:
 # Maps each trading type to the strategies that run under it.
 # Used by RLAgentManager to create one RLAgent per strategy (9 total).
 _ALL_STRATEGIES: dict[str, list[str]] = {
-    "scalping":    ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+    "scalping":    ["ema_scalp", "bb_squeeze", "vwap_reversion", "stoch_rsi_pullback"],
     "day_trading": ["macd_ema_trend", "sr_breakout", "rsi_divergence"],
     "swing":       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
 }

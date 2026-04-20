@@ -101,7 +101,7 @@ class TradeMemory:
             return {"total": 0}
         total   = len(outcomes)
         wins    = sum(1 for o in outcomes if o["profit"] > 0)
-        losses  = sum(1 for o in outcomes if o["profit"] <= 0)
+        losses  = sum(1 for o in outcomes if o["profit"] < 0)
         avg_pnl = sum(o["profit"] for o in outcomes) / total
         avg_conf= sum(o["confidence"] for o in outcomes) / total
         tp_hits = sum(1 for o in outcomes if o["outcome"] == "tp_hit")

@@ -27,7 +27,7 @@ router = APIRouter()
 TRADING_TYPE = Literal["scalping", "day_trading", "swing"]
 
 STRATEGIES_BY_TYPE: dict[str, list[str]] = {
-    "scalping":    ["ema_scalp", "bb_squeeze", "vwap_reversion"],
+    "scalping":    ["ema_scalp", "bb_squeeze", "vwap_reversion", "stoch_rsi_pullback"],
     "day_trading": ["macd_ema_trend", "sr_breakout", "rsi_divergence"],
     "swing":       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
 }
@@ -88,13 +88,18 @@ def _delete_run(run_id: str) -> bool:
 
 
 def _prune_history() -> None:
-    """Delete oldest runs when total exceeds _MAX_BACKTEST_RUNS."""
-    index = _read_index()
-    if len(index) <= _MAX_BACKTEST_RUNS:
-        return
-    index.sort(key=lambda e: e.get("run_at", ""), reverse=True)
-    for old in index[_MAX_BACKTEST_RUNS:]:
-        _delete_run(old["id"])
+    """Delete oldest runs when total exceeds _MAX_BACKTEST_RUNS, then compact the index."""
+    index = _read_index()  # already filters dead entries
+    if len(index) > _MAX_BACKTEST_RUNS:
+        index.sort(key=lambda e: e.get("run_at", ""), reverse=True)
+        for old in index[_MAX_BACKTEST_RUNS:]:
+            _delete_run(old["id"])
+        index = index[:_MAX_BACKTEST_RUNS]
+    # GAP-BT-1: always rewrite the index so dead entries are purged from the file.
+    # Without this _index.jsonl grows unbounded even as run files are deleted.
+    with open(_INDEX_FILE, "w", encoding="utf-8") as f:
+        for entry in index:
+            f.write(json.dumps(entry) + "\n")
 
 
 # ── Request model ─────────────────────────────────────────────────────────
@@ -103,7 +108,7 @@ class BacktestRequest(BaseModel):
     symbol:           str          = "EURUSD"
     strategy:         str          = "ema_scalp"
     trading_type:     TRADING_TYPE = "scalping"
-    bars:             int          = Field(default=2000, ge=200, le=10000)
+    bars:             int          = Field(default=2000, ge=200, le=50000)
     initial_balance:  float        = Field(default=10_000.0, gt=0)
     risk_pct:         float        = Field(default=1.0, gt=0, le=10)
     use_ai_filters:   bool         = True   # apply LSTM+RL gate to match live conditions
@@ -317,16 +322,8 @@ async def backtest_run(req: BacktestRequest):
     # ── Auto-trigger param optimizer if enough backtest data accumulated ──
     # Only re-optimize if this run had meaningful trade volume (≥ 30 trades).
     # Re-uses the same df already fetched above so no second MT5 call is needed.
-    if result.total_trades >= 30:
-        try:
-            from ai.param_optimizer import optimizer as _optimizer
-            _optimizer.optimize_async(
-                req.strategy,
-                req.symbol,
-                df,
-                req.trading_type,
-            )
-        except Exception:
-            pass  # optimizer trigger is best-effort
+    # NOTE: optimizer.optimize_async is intentionally NOT called here.
+    # Running a user backtest must not silently overwrite live strategy params.
+    # Re-optimization is triggered only by the live trading engine after real trades.
 
     return payload

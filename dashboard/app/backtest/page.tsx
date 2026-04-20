@@ -175,6 +175,178 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
   );
 }
 
+// ── Compare / Diff shared config ──────────────────────────────────────────
+type CompareEntry = BacktestResult | { error: string };
+
+const COMPARE_METRICS: {
+  key: string;
+  label: string;
+  fmt: (v: number) => string;
+  higherBetter: boolean;
+}[] = [
+  { key: "total_pnl_pct",    label: "Return",        fmt: pct,                                higherBetter: true  },
+  { key: "win_rate",         label: "Win Rate",       fmt: (v) => `${(v*100).toFixed(1)}%`,   higherBetter: true  },
+  { key: "profit_factor",    label: "Profit Factor",  fmt: (v) => v.toFixed(2),               higherBetter: true  },
+  { key: "max_drawdown_pct", label: "Max Drawdown",   fmt: (v) => `-${v.toFixed(2)}%`,        higherBetter: false },
+  { key: "sharpe_ratio",     label: "Sharpe Ratio",   fmt: (v) => v.toFixed(2),               higherBetter: true  },
+  { key: "avg_rr",           label: "Avg RR",         fmt: (v) => v.toFixed(2),               higherBetter: true  },
+  { key: "total_trades",     label: "Trades",         fmt: (v) => v.toString(),               higherBetter: true  },
+  { key: "expectancy_pct",   label: "Expectancy",     fmt: pct,                               higherBetter: true  },
+];
+
+// ── Strategy comparison table ─────────────────────────────────────────────
+function CompareTable({
+  results,
+  runningStrat,
+  onClear,
+}: {
+  results: Record<string, CompareEntry | null>;
+  runningStrat: string | null;
+  onClear?: () => void;  // GAP-BT-3
+}) {
+  const strats = Object.keys(results);
+  if (strats.length === 0) return null;
+  return (
+    <section className="bg-gray-900 border border-gray-800 rounded-xl p-5 overflow-x-auto">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-white">Strategy Comparison</h2>
+        {onClear && !runningStrat && (
+          <button onClick={onClear} className="text-xs text-gray-500 hover:text-white transition-colors">
+            ✕ Clear
+          </button>
+        )}
+      </div>
+      <table className="w-full text-xs border-collapse" style={{ minWidth: 480 }}>
+        <thead>
+          <tr className="border-b border-gray-800">
+            <th className="text-left text-gray-500 pb-2 pr-4 font-medium w-28">Metric</th>
+            {strats.map((s) => (
+              <th key={s} className="text-left text-gray-300 pb-2 pr-4 font-medium">
+                {s}
+                {runningStrat === s && <span className="ml-1 text-blue-400">●</span>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {COMPARE_METRICS.map((m) => {
+            const values = strats.map((s) => {
+              const r = results[s];
+              return r && !("error" in r) ? (r as unknown as Record<string, number>)[m.key] : null;
+            });
+            const valid = values.filter((v): v is number => v !== null);
+            const best = valid.length > 1
+              ? (m.higherBetter ? Math.max(...valid) : Math.min(...valid))
+              : null;
+            return (
+              <tr key={m.key} className="border-b border-gray-800/40">
+                <td className="py-2 pr-4 text-gray-500">{m.label}</td>
+                {strats.map((s) => {
+                  const r = results[s];
+                  if (!r) return (
+                    <td key={s} className="py-2 pr-4">
+                      {runningStrat === s
+                        ? <span className="text-blue-400">running…</span>
+                        : <span className="text-gray-700">—</span>}
+                    </td>
+                  );
+                  if ("error" in r) return (
+                    <td key={s} className="py-2 pr-4 text-red-400 text-[10px] max-w-30 truncate" title={r.error}>
+                      {r.error}
+                    </td>
+                  );
+                  const val = (r as unknown as Record<string, number>)[m.key];
+                  const isBest = best !== null && val === best;
+                  const color =
+                    (m.key === "total_pnl_pct" || m.key === "expectancy_pct")
+                      ? (val >= 0 ? "text-emerald-400" : "text-red-400")
+                      : m.key === "max_drawdown_pct" ? "text-red-400"
+                      : m.key === "win_rate" ? (val >= 0.5 ? "text-emerald-400" : "text-amber-400")
+                      : "text-white";
+                  return (
+                    <td key={s} className={`py-2 pr-4 font-medium ${color}`}>
+                      {m.fmt(val)}
+                      {isBest && <span className="ml-1 text-yellow-400">★</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+// ── Before / After diff panel ─────────────────────────────────────────────
+function DiffPanel({
+  current,
+  baseline,
+  onClear,
+}: {
+  current: BacktestResult;
+  baseline: BacktestResult & { _label?: string };
+  onClear?: () => void;  // GAP-BT-3
+}) {
+  const label = baseline._label ?? `${baseline.strategy} / ${baseline.symbol} / ${baseline.timeframe}`;
+
+  const fmtDelta = (key: string, delta: number): string => {
+    const sign = delta >= 0 ? "+" : "";
+    if (key === "total_trades")  return `${sign}${Math.round(delta)}`;
+    if (key === "win_rate")      return `${sign}${(delta * 100).toFixed(1)}pp`;
+    if (key === "total_pnl_pct" || key === "expectancy_pct") return `${sign}${delta.toFixed(2)}pp`;
+    return `${sign}${delta.toFixed(2)}`;
+  };
+
+  return (
+    <section className="bg-gray-900 border border-blue-900/40 rounded-xl p-5">
+      <div className="flex items-center gap-3 mb-4">
+        <h2 className="text-sm font-semibold text-white">Before / After Diff</h2>
+        <span className="text-xs text-gray-500">Baseline: {label}</span>
+        {onClear && (
+          <button onClick={onClear} className="ml-auto text-xs text-gray-500 hover:text-white transition-colors">
+            ✕ Clear Baseline
+          </button>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse" style={{ minWidth: 420 }}>
+          <thead>
+            <tr className="border-b border-gray-800">
+              <th className="text-left text-gray-500 pb-2 pr-4 font-medium">Metric</th>
+              <th className="text-left text-gray-500 pb-2 pr-4 font-medium">Baseline</th>
+              <th className="text-left text-gray-500 pb-2 pr-4 font-medium">Current</th>
+              <th className="text-left text-gray-500 pb-2 font-medium">Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            {COMPARE_METRICS.map((m) => {
+              const bVal = (baseline as unknown as Record<string, number>)[m.key];
+              const cVal = (current  as unknown as Record<string, number>)[m.key];
+              const delta = cVal - bVal;
+              const noChange = Math.abs(delta) < 0.0001;
+              const isImproved = !noChange && (m.higherBetter ? delta > 0 : delta < 0);
+              return (
+                <tr key={m.key} className="border-b border-gray-800/40">
+                  <td className="py-2 pr-4 text-gray-500">{m.label}</td>
+                  <td className="py-2 pr-4 text-gray-400">{m.fmt(bVal)}</td>
+                  <td className="py-2 pr-4 text-white font-medium">{m.fmt(cVal)}</td>
+                  <td className={`py-2 font-semibold ${
+                    noChange ? "text-gray-600" : isImproved ? "text-emerald-400" : "text-red-400"
+                  }`}>
+                    {noChange ? "—" : (isImproved ? "▲ " : "▼ ") + fmtDelta(m.key, Math.abs(delta))}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────
 export default function BacktestPage() {
   const [strategies, setStrategies] = useState<Record<TradingType, string[]>>(DEFAULT_STRATEGIES);
@@ -186,6 +358,7 @@ export default function BacktestPage() {
   const [bars,    setBars]    = useState(2000);
   const [balance, setBalance] = useState(10000);
   const [riskPct, setRiskPct] = useState(1.0);
+  const [useAiFilters, setUseAiFilters] = useState(true);  // GAP-BT-2
 
   const [running, setRunning] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
@@ -197,6 +370,12 @@ export default function BacktestPage() {
   const [histLoading, setHistLoading] = useState(false);
   const [deletingId,  setDeletingId]  = useState<string | null>(null);
   const [loadingId,   setLoadingId]   = useState<string | null>(null);
+
+  // Compare + diff state
+  const [compareResults,  setCompareResults]  = useState<Record<string, CompareEntry | null>>({});
+  const [comparing,       setComparing]       = useState(false);
+  const [comparingStrat,  setComparingStrat]  = useState<string | null>(null);
+  const [baseline,        setBaseline]        = useState<(BacktestResult & { _label?: string }) | null>(null);
 
   const loadHistory = useCallback(async (page = 1) => {
     setHistLoading(true);
@@ -220,6 +399,8 @@ export default function BacktestPage() {
     setMode(m);
     setSymbol(SYMBOL_GROUPS[m][0]?.symbols[0] ?? "EURUSD");
     setStrat(strategies[m]?.[0] ?? "");
+    setCompareResults({});  // BUG-BT-3: clear stale compare from previous mode
+    setBaseline(null);      // BUG-BT-3: clear stale baseline from previous mode
   };
 
   async function handleRun() {
@@ -227,13 +408,15 @@ export default function BacktestPage() {
     setError(null);
     setResult(null);
     try {
-      const req: BacktestRequest = { symbol, strategy: strat, trading_type: mode, bars, initial_balance: balance, risk_pct: riskPct };
+      const req: BacktestRequest = { symbol, strategy: strat, trading_type: mode, bars, initial_balance: balance, risk_pct: riskPct, use_ai_filters: useAiFilters };
       const data = await runBacktest(req);
       setResult(data as BacktestResult);
       loadHistory(1);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        ?? (e as { message?: string })?.message ?? "Unknown error";
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const msg = Array.isArray(detail)
+        ? detail.map((d: { msg?: string; loc?: string[] }) => `${d.loc?.slice(-1)[0] ?? "field"}: ${d.msg ?? d}`).join("; ")
+        : (typeof detail === "string" ? detail : (e as { message?: string })?.message ?? "Unknown error");
       setError(String(msg));
     } finally { setRunning(false); }
   }
@@ -256,6 +439,35 @@ export default function BacktestPage() {
       loadHistory(historyPage);
     } catch { /* ignore */ }
     finally { setDeletingId(null); }
+  }
+
+  async function handleCompare() {
+    const stratList = strategies[mode] ?? [];
+    if (stratList.length === 0) return;
+    setComparing(true);
+    setCompareResults(Object.fromEntries(stratList.map((s) => [s, null])));
+    for (const s of stratList) {
+      setComparingStrat(s);
+      try {
+        const req: BacktestRequest = { symbol, strategy: s, trading_type: mode, bars, initial_balance: balance, risk_pct: riskPct, use_ai_filters: useAiFilters };
+        const data = await runBacktest(req) as BacktestResult;
+        setCompareResults((prev) => ({ ...prev, [s]: data }));
+      } catch (e) {
+        const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+        const msg = Array.isArray(detail)
+          ? detail.map((d: { msg?: string }) => d.msg ?? "error").join("; ")
+          : typeof detail === "string" ? detail : (e as { message?: string })?.message ?? "Failed";
+        setCompareResults((prev) => ({ ...prev, [s]: { error: msg } }));
+      }
+    }
+    setComparingStrat(null);
+    setComparing(false);
+    loadHistory(1);
+  }
+
+  function handleSetBaseline() {
+    if (!result) return;
+    setBaseline({ ...result, _label: `${result.strategy} / ${result.symbol} / ${result.timeframe}` });
   }
 
   const outcomeColor = (o: string) =>
@@ -325,7 +537,7 @@ export default function BacktestPage() {
               type="number"
               value={bars}
               min={200}
-              max={10000}
+              max={50000}
               onChange={(e) => setBars(Number(e.target.value))}
               className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
             />
@@ -356,15 +568,42 @@ export default function BacktestPage() {
               className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
             />
           </div>
-        </div>
 
-        <button
-          disabled={running}
-          onClick={handleRun}
-          className="mt-5 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-sm font-semibold text-white transition-colors"
-        >
-          {running ? "Running simulation…" : "▶  Run Backtest"}
-        </button>
+          {/* AI Filters — GAP-BT-2 */}
+          <div className="flex flex-col gap-1 justify-end">
+            <label className="text-xs text-gray-500">AI Filters</label>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={useAiFilters}
+                onChange={(e) => setUseAiFilters(e.target.checked)}
+                className="w-4 h-4 accent-blue-500"
+              />
+              <span className="text-sm text-gray-300">LSTM + RL gate</span>
+            </label>
+          </div>
+        {!useAiFilters && (
+          <p className="mt-3 text-xs text-amber-500/80">
+            ⚠ AI filters off — all strategy signals will be simulated without LSTM or RL gate. Results will not match live execution.
+          </p>
+        )}
+          <button
+            disabled={running || comparing}
+            onClick={handleRun}
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg text-sm font-semibold text-white transition-colors"
+          >
+            {running ? "Running simulation…" : "▶  Run Backtest"}
+          </button>
+          <button
+            disabled={running || comparing}
+            onClick={handleCompare}
+            className="px-5 py-2.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded-lg text-sm font-semibold text-white transition-colors"
+          >
+            {comparing
+              ? `⊞  Comparing ${comparingStrat ?? ""}…`
+              : "⊞  Compare All Strategies"}
+          </button>
+        </div>
 
         {error && (
           <p className="mt-3 text-sm text-red-400 bg-red-950/40 border border-red-800 rounded px-3 py-2">
@@ -372,6 +611,15 @@ export default function BacktestPage() {
           </p>
         )}
       </section>
+
+      {/* ── Compare table ─────────────────────────────────────────────────── */}
+      {Object.keys(compareResults).length > 0 && (
+        <CompareTable
+          results={compareResults}
+          runningStrat={comparingStrat}
+          onClear={() => setCompareResults({})}  // GAP-BT-3
+        />
+      )}
 
       {result && (
         <>
@@ -385,8 +633,12 @@ export default function BacktestPage() {
             <span>{result.total_trades} trades</span>
             {(result as BacktestResult & { run_at?: string }).run_at && (
               <span className="text-gray-600 text-xs">• {relTime((result as BacktestResult & { run_at?: string }).run_at!)}</span>
-            )}
-          </div>
+            )}            <button
+              onClick={handleSetBaseline}
+              className="ml-auto text-xs px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-gray-400 hover:text-white transition-colors"
+            >
+              {baseline ? "↺ Update Baseline" : "📌 Pin as Baseline"}
+            </button>          </div>
 
           {/* ── Stat cards ─────────────────────────────────────────────── */}
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -425,7 +677,10 @@ export default function BacktestPage() {
               color={result.expectancy_pct >= 0 ? "text-emerald-400" : "text-red-400"}
             />
           </div>
-
+          {/* ── Before/After diff ─────────────────────────────────────────────────── */}
+          {baseline && (
+            <DiffPanel current={result} baseline={baseline} onClear={() => setBaseline(null)} />  // GAP-BT-3
+          )}
           {/* ── Equity curve ───────────────────────────────────────────── */}
           <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-white mb-3">Equity Curve</h2>

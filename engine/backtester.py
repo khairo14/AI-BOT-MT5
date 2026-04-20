@@ -41,7 +41,7 @@ BT_TIMEFRAME: dict[str, str] = {
 
 # Per-strategy primary TF override (strategies whose entry TF differs from BT_TIMEFRAME)
 BT_STRATEGY_TIMEFRAME: dict[str, str] = {
-    "ema_scalp":       "M1",   # entry on M1, trend on M5
+    "ema_scalp":       "M5",   # entry on M5, trend on M15
     "macd_ema_trend":  "M15",  # entry on M15, trend on H1
     "rsi_divergence":  "M30",  # entry on M30, trend on H1
     "ema_trend_rider": "H1",   # entry on H1, bias on H4 + D1
@@ -50,7 +50,7 @@ BT_STRATEGY_TIMEFRAME: dict[str, str] = {
 
 # Secondary timeframes required per strategy {kwarg_name: timeframe_string}
 BT_EXTRA_TIMEFRAMES: dict[str, dict[str, str]] = {
-    "ema_scalp":       {"df_m5":    "M5"},
+    "ema_scalp":       {"df_m15":   "M15"},
     "macd_ema_trend":  {"df_h1":    "H1"},
     "rsi_divergence":  {"df_h1":    "H1"},
     "ema_trend_rider": {"df_h4":    "H4", "df_d1": "D1"},
@@ -363,7 +363,7 @@ def run_backtest(
 
     pnls   = [t.pnl_pct for t in trades]
     wins   = [p for p in pnls if p > 0]
-    losses = [abs(p) for p in pnls if p <= 0]
+    losses = [abs(p) for p in pnls if p < 0]   # LOGIC-BT-1: was <= 0; break-even trades excluded
 
     win_rate      = len(wins) / n
     gross_win     = sum(wins)   if wins   else 0.0
