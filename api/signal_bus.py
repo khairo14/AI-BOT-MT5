@@ -286,31 +286,48 @@ class SignalBus:
 
         exec_mode = self._get_exec_mode(mode)
         if exec_mode == "auto" and self._order_manager is not None:
-            # Confidence floor for auto-execution — only enforced when
-            # confidence_filter_enabled=true in app.json so users who disable
-            # the confidence filter aren't silently blocked here too.
+            # ── RL gate — always active in auto mode, independent of the manual
+            # confidence_filter_enabled toggle.  The RL agent's per-strategy
+            # threshold (e.g. fibonacci_rsi swing = 55%) is the authoritative
+            # gate; the confidence_filter_enabled flag only controls the separate
+            # hard numeric floor used in strategy_runner.
             # IMPORTANT: check BEFORE adding to the queue so repeated scanner
             # ticks (every 30 s) don't flood the queue/archive with rejected
             # entries and don't generate any notification noise on the dashboard.
+            conf = float(signal.get("confidence") or 0.0)
             try:
-                _conf_filter_on = bool(_get_bus_app_cfg().get("ai", {}).get("confidence_filter_enabled", True))
+                from ai.rl_agent import rl_manager as _rl_bus
+                _strat_bus = signal.get("strategy") or None
+                _is_tradeable = _rl_bus.should_take_signal(_strat_bus, mode, conf)
             except Exception:
-                _conf_filter_on = True
+                _is_tradeable = conf >= 0.50
+            if not _is_tradeable:
+                logger.debug(
+                    f"SignalBus: RL gate dropped {signal.get('symbol')}/{signal.get('strategy')} "
+                    f"({mode}) conf={conf:.0%} — below RL threshold"
+                )
+                signal["rejection_reason"] = (
+                    f"Confidence {conf:.0%} below RL threshold for {mode}"
+                )
+                return signal
+
+            # ── Hard numeric floor — only when confidence_filter_enabled=true ─
+            try:
+                _conf_filter_on = bool(_get_bus_app_cfg().get("ai", {}).get("confidence_filter_enabled", False))
+            except Exception:
+                _conf_filter_on = False
             if _conf_filter_on:
-                conf = float(signal.get("confidence") or 0.0)
                 try:
-                    from ai.rl_agent import rl_manager as _rl_bus
-                    _strat_bus = signal.get("strategy") or None
-                    _is_tradeable = _rl_bus.should_take_signal(_strat_bus, mode, conf)
+                    _threshold = float(_get_bus_app_cfg().get("ai", {}).get("confidence_threshold", 60)) / 100.0
                 except Exception:
-                    _is_tradeable = conf >= 0.50
-                if not _is_tradeable:
+                    _threshold = 0.60
+                if conf < _threshold:
                     logger.debug(
-                        f"SignalBus: conf-drop {signal.get('symbol')}/{signal.get('strategy')} "
-                        f"({mode}) conf={conf:.0%} — not queued"
+                        f"SignalBus: conf-floor dropped {signal.get('symbol')}/{signal.get('strategy')} "
+                        f"({mode}) conf={conf:.0%} < floor {_threshold:.0%}"
                     )
                     signal["rejection_reason"] = (
-                        f"Confidence {conf:.0%} below RL threshold for {mode}"
+                        f"Confidence {conf:.0%} below floor {_threshold:.0%}"
                     )
                     return signal
                 
