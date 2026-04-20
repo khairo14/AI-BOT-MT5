@@ -23,6 +23,23 @@ limiter = Limiter(key_func=get_remote_address)
 _approve_lock = asyncio.Lock()
 
 
+def _sanitize_value(v):
+    """Convert numpy scalar types to native Python types for JSON serialization."""
+    if hasattr(v, "item"):  # numpy scalars expose .item()
+        return v.item()
+    if isinstance(v, dict):
+        return {k2: _sanitize_value(v2) for k2, v2 in v.items()}
+    return v
+
+
+def _sanitize_dict(signal: dict) -> dict:
+    return {k: _sanitize_value(v) for k, v in signal.items()}
+
+
+def _sanitize(signals: list) -> list:
+    return [_sanitize_dict(s) for s in signals]
+
+
 class Signal(BaseModel):
     symbol: str
     direction: str          # "BUY" or "SELL"
@@ -59,7 +76,7 @@ def list_signals(request: Request, trading_mode: Optional[str] = None, status: O
         signals = [s for s in signals if s.get("trading_mode") == trading_mode]
     if status:
         signals = [s for s in signals if s.get("status") == status]
-    return signals
+    return _sanitize(signals)
 
 
 @router.get("/{signal_id}")
@@ -69,7 +86,7 @@ def get_signal(request: Request, signal_id: str):
     signal = bus.queue.get(signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found")
-    return signal
+    return _sanitize_dict(signal)
 
 
 @router.post("/")

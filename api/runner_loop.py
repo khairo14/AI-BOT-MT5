@@ -280,6 +280,17 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                 _mode_tasks[mode] = _t
 
 
+def _sanitize_indicators(indicators: dict) -> dict:
+    """Convert numpy scalar types to native Python types so the dict is JSON-serializable."""
+    result = {}
+    for k, v in indicators.items():
+        if hasattr(v, "item"):  # numpy scalars expose .item() → native Python type
+            result[k] = v.item()
+        else:
+            result[k] = v
+    return result
+
+
 def _signal_to_dict(sig, mode: str) -> dict:
     # Compute R:R if entry, sl, tp are available
     from engine.account_store import current_mode as _acm
@@ -310,7 +321,7 @@ def _signal_to_dict(sig, mode: str) -> dict:
         "note":         sig.comment,
         "rr":           rr,
         "tp2":          sig.tp2_price if hasattr(sig, "tp2_price") else None,
-        "indicators":   sig.indicators if hasattr(sig, "indicators") else {},
+        "indicators":   _sanitize_indicators(sig.indicators) if hasattr(sig, "indicators") else {},
         "regime":       sig.regime if hasattr(sig, "regime") else None,
     }
 

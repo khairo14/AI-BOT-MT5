@@ -347,6 +347,14 @@ class SignalBus:
                 self._save_pending_swing_signals()
                 # Broadcast as pending so UI shows the card with full details
                 asyncio.create_task(broadcast_signal(dict(signal)))
+                # Notify user — swing signal queued for review window
+                notification_manager.add(
+                    type="signal_generated",
+                    title=f"New Swing Signal",
+                    message=f"{signal.get('direction', '').upper()} {signal.get('symbol')} via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%}) — auto-executes in {_review_secs}s",
+                    severity="info",
+                    metadata={"signal_id": signal["id"], "symbol": signal.get("symbol"), "trading_mode": mode}
+                )
                 logger.info(
                     f"Swing signal queued for review: {signal.get('symbol')}/{signal.get('strategy')} "
                     f"— auto-executes in {_review_secs}s unless rejected"
@@ -408,6 +416,14 @@ class SignalBus:
                 pass
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
+            # Notify user of new auto-executed signal
+            notification_manager.add(
+                type="signal_generated",
+                title=f"New {mode.replace('_', ' ').title()} Signal",
+                message=f"{signal.get('direction', '').upper()} {signal.get('symbol')} via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%})",
+                severity="info",
+                metadata={"signal_id": signal["id"], "symbol": signal.get("symbol"), "trading_mode": mode}
+            )
             _exec_task = asyncio.create_task(self._execute_async(signal))
             self._active_tasks.add(_exec_task)
             _exec_task.add_done_callback(self._active_tasks.discard)

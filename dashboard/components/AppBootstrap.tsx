@@ -28,10 +28,11 @@ export default function AppBootstrap() {
     fetchSignals().then(setSignals).catch(() => {});
     fetchPositions().then(setPositions).catch(() => {});
 
-    // poll account + positions every 5s
+    // poll account + positions every 5s; signals every 15s to catch any WS-missed updates
     const interval = setInterval(() => {
       fetchAccount().then(setAccount).catch(() => {});
       fetchPositions().then(setPositions).catch(() => {});
+      fetchSignals().then(setSignals).catch(() => {});
     }, 5000);
 
     return () => clearInterval(interval);
