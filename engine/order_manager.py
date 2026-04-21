@@ -161,15 +161,22 @@ class OrderManager:
         if req.direction == "SELL" and tp is not None and tp >= price:
             return OrderResult(success=False, error="SELL TP must be below entry price")
 
-        # Enforce broker minimum stop distance (stops_level * point)
+        # Enforce broker minimum stop distance.
+        # When stops_level > 0, use it directly.  When the broker reports 0
+        # (common for crypto / CFD instruments), the actual server-side minimum
+        # equals the current spread — use that as a fallback so we never send
+        # an order that will be rejected with "Invalid stops".
         stops_level = sym_info.trade_stops_level
         if stops_level > 0:
             min_dist = stops_level * sym_info.point
+        else:
+            min_dist = sym_info.spread * sym_info.point  # spread-based fallback
+        if min_dist > 0:
             sl_dist = abs(price - sl)
             if sl_dist < min_dist:
                 logger.warning(
                     f"SL too close for {req.symbol}: {sl_dist:.5f} < min {min_dist:.5f} "
-                    f"({stops_level} pts) — adjusting SL to minimum distance"
+                    f"(stops_level={stops_level}) — adjusting SL to minimum distance"
                 )
                 if req.direction == "BUY":
                     sl = round(price - min_dist, sym_info.digits)
@@ -291,12 +298,18 @@ class OrderManager:
         new_sl = sl if sl is not None else pos.sl
         new_tp = tp if tp is not None else pos.tp
 
-        # Validate stops against broker's minimum distance requirement
+        # Validate stops against broker's minimum distance requirement.
+        # Same spread-based fallback as place_market_order: when stops_level=0
+        # the broker still enforces a minimum equal to the current spread.
         sym_info = self._client.get_symbol_info(pos.symbol)
         if sym_info:
             stops_level = sym_info.get("stops_level", 0)
             point = sym_info.get("point", 0.00001)
-            min_distance = stops_level * point
+            if stops_level > 0:
+                min_distance = stops_level * point
+            else:
+                spread = sym_info.get("spread", 0)
+                min_distance = spread * point  # spread-based fallback
             
             # Get current price (BUY uses ASK to open, SELL uses BID to open)
             # For SL/TP validation, use the current quote
