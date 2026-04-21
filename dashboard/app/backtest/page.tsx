@@ -7,6 +7,7 @@ import {
   fetchBacktestHistory,
   fetchBacktestRun,
   deleteBacktestRun,
+  fetchAvailableSymbols,
   BacktestRequest,
 } from "@/lib/api";
 
@@ -63,30 +64,15 @@ interface BacktestResult {
   expectancy_pct:   number;
 }
 
-// ── Symbol groups per mode (mirrors chart pages) ─────────────────────────
-interface SymbolGroup { label: string; symbols: string[] }
-const SYMBOL_GROUPS: Record<TradingType, SymbolGroup[]> = {
-  scalping: [
-    { label: "Forex Majors", symbols: ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"] },
-    { label: "Forex Minors", symbols: ["EURJPY"] },
-    { label: "Indices",      symbols: ["US100Cash", "US30Cash"] },
-  ],
-  day_trading: [
-    { label: "Forex Majors", symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"] },
-    { label: "Forex Minors", symbols: ["GBPJPY"] },
-    { label: "Commodities",  symbols: ["GOLD", "OilCash"] },
-    { label: "Indices",      symbols: ["US100Cash", "US30Cash", "US500Cash", "GER40Cash", "UK100Cash"] },
-    { label: "Crypto",       symbols: ["BTCUSD", "ETHUSD"] },
-    { label: "Stocks",       symbols: ["Tesla", "Nvidia", "Apple", "Microsoft", "Amazon"] },
-  ],
-  swing: [
-    { label: "Forex Majors", symbols: ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD"] },
-    { label: "Commodities",  symbols: ["GOLD", "SILVER", "OilCash", "BRENTCash", "NGASCash"] },
-    { label: "Indices",      symbols: ["US100Cash", "US500Cash"] },
-    { label: "Crypto",       symbols: ["BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD"] },
-    { label: "Stocks",       symbols: ["Tesla", "Nvidia", "Google", "Facebook", "Netflix", "AdvMicroDev"] },
-  ],
-};
+// ── Symbol groups — static fallback used before API responds ─────────────
+const FALLBACK_SYMBOLS = [
+  "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
+  "EURJPY", "GBPJPY", "EURGBP",
+  "GOLD", "SILVER", "OilCash", "BRENTCash", "NGASCash",
+  "US100Cash", "US30Cash", "US500Cash", "GER40Cash", "UK100Cash",
+  "BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD",
+  "Tesla", "Nvidia", "Apple", "Microsoft", "Amazon", "Google", "Facebook",
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const MODES: TradingType[] = ["scalping", "day_trading", "swing"];
@@ -350,6 +336,8 @@ function DiffPanel({
 // ── Page ──────────────────────────────────────────────────────────────────
 export default function BacktestPage() {
   const [strategies, setStrategies] = useState<Record<TradingType, string[]>>(DEFAULT_STRATEGIES);
+  const [symbolOptions, setSymbolOptions] = useState<string[]>(FALLBACK_SYMBOLS);
+  const [symbolSearch,  setSymbolSearch]  = useState("");
 
   // Form state
   const [mode,    setMode]    = useState<TradingType>("scalping");
@@ -387,17 +375,21 @@ export default function BacktestPage() {
     finally { setHistLoading(false); }
   }, []);
 
-  // Load strategies + history on mount
+  // Load strategies, available symbols, and history on mount
   useEffect(() => {
     fetchBacktestStrategies()
       .then((data) => setStrategies(data as Record<TradingType, string[]>))
+      .catch(() => {});
+    fetchAvailableSymbols()
+      .then((data) => { if (data.symbols.length > 0) setSymbolOptions(data.symbols); })
       .catch(() => {});
     loadHistory(1);
   }, [loadHistory]);
 
   const handleModeChange = (m: TradingType) => {
     setMode(m);
-    setSymbol(SYMBOL_GROUPS[m][0]?.symbols[0] ?? "EURUSD");
+    setSymbol("EURUSD");
+    setSymbolSearch("");
     setStrat(strategies[m]?.[0] ?? "");
     setCompareResults({});  // BUG-BT-3: clear stale compare from previous mode
     setBaseline(null);      // BUG-BT-3: clear stale baseline from previous mode
@@ -500,20 +492,41 @@ export default function BacktestPage() {
             </select>
           </div>
 
-          {/* Symbol — grouped, matches chart page for selected mode */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-500">Symbol</label>
-            <select
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
+          {/* Symbol — searchable, all live MT5 symbols */}
+          <div className="flex flex-col gap-1 col-span-2 md:col-span-1">
+            <label className="text-xs text-gray-500">
+              Symbol
+              {symbolOptions.length > 0 && (
+                <span className="ml-1 text-gray-600">({symbolOptions.length} available)</span>
+              )}
+            </label>
+            <input
+              type="text"
+              value={symbolSearch || symbol}
+              onChange={(e) => {
+                const v = e.target.value.toUpperCase();
+                setSymbolSearch(v);
+                if (symbolOptions.includes(v)) {
+                  setSymbol(v);
+                  setSymbolSearch("");
+                }
+              }}
+              onBlur={() => {
+                if (symbolSearch && symbolOptions.includes(symbolSearch)) {
+                  setSymbol(symbolSearch);
+                }
+                setSymbolSearch("");
+              }}
+              list="bt-symbols-list"
+              placeholder="Search symbols…"
               className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-            >
-              {SYMBOL_GROUPS[mode].map((grp) => (
-                <optgroup key={grp.label} label={grp.label}>
-                  {grp.symbols.map((s) => <option key={s} value={s}>{s}</option>)}
-                </optgroup>
-              ))}
-            </select>
+            />
+            <datalist id="bt-symbols-list">
+              {(symbolSearch
+                ? symbolOptions.filter((s) => s.toUpperCase().includes(symbolSearch))
+                : symbolOptions
+              ).map((s) => <option key={s} value={s} />)}
+            </datalist>
           </div>
 
           {/* Strategy */}

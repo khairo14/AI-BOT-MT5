@@ -2202,6 +2202,38 @@
           "tp_rr": 2.0
         }
       }
+    },
+    "AdvMicroDev": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "ETHUSD": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        }
+      }
     }
   },
   "ema_scalp": {
@@ -2292,6 +2324,42 @@
           "rsi_max": 65,
           "sl_pips": 10,
           "rr": 3.0
+        }
+      }
+    },
+    "GBPCAD": {
+      "ema_fast": 13,
+      "ema_slow": 26,
+      "rsi_min": 40,
+      "rsi_max": 65,
+      "sl_pips": 4,
+      "rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 8,
+          "ema_slow": 21,
+          "rsi_min": 52,
+          "rsi_max": 65,
+          "sl_pips": 8,
+          "rr": 1.5
+        }
+      }
+    },
+    "AUDCAD": {
+      "ema_fast": 13,
+      "ema_slow": 26,
+      "rsi_min": 40,
+      "rsi_max": 70,
+      "sl_pips": 10,
+      "rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 21,
+          "rsi_min": 40,
+          "rsi_max": 60,
+          "sl_pips": 8,
+          "rr": 2.0
         }
       }
     }
@@ -2472,6 +2540,24 @@
       }
     },
     "AUDCAD": {
+      "bb_period": 15,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 5,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 1.5,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 15,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 5,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 1.5,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "GBPJPY": {
       "bb_period": 15,
       "bb_std": 2.5,
       "min_squeeze_bars": 5,
