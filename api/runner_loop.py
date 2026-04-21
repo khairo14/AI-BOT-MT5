@@ -33,14 +33,15 @@ from loguru import logger
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 INTERVALS: dict[str, int] = {
-    "scalping":    5,    # check every 5 s; bar-close guard fires only on new M1 bar
+    "scalping":    5,    # check every 5 s; bar-close guard fires only on new M5 bar
     "day_trading": 60,
     "swing":       300,
 }
 
 # Primary timeframe per mode — used by bar-close guard to detect new bar
 _MODE_PRIMARY_TF: dict[str, str] = {
-    "scalping":    "M1",
+    "scalping":    "M5",  # all scalping strategies run on M5; firing on M1 closes
+                          # evaluated partially-formed M5 bars 4 out of 5 ticks.
     "day_trading": "H1",
     "swing":       "H4",
 }

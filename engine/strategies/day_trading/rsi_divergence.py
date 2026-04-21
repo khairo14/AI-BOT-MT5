@@ -90,9 +90,12 @@ class RSIDivergence(BaseStrategy):
             and curr_close < curr_ema                 # trade toward mean (below EMA)
         )
 
-        # Confirmation: RSI crossing 50 in trade direction
-        rsi_cross_up   = prev_rsi < 50 <= curr_rsi
-        rsi_cross_down = prev_rsi > 50 >= curr_rsi
+        # Confirmation: RSI crossed 50 in trade direction within the last 2 bars.
+        # Requiring the cross on the exact current bar missed valid divergences where
+        # the RSI-50 cross completed one bar prior but divergence is still fresh.
+        prev2_rsi = rsi.iloc[-3] if len(rsi) >= 3 else prev_rsi
+        rsi_cross_up   = (prev_rsi < 50 <= curr_rsi) or (prev2_rsi < 50 <= prev_rsi)
+        rsi_cross_down = (prev_rsi > 50 >= curr_rsi) or (prev2_rsi > 50 >= prev_rsi)
 
         indicators = {
             "rsi": round(curr_rsi, 2),

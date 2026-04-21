@@ -83,14 +83,20 @@ class MACDEMATrend(BaseStrategy):
             )
 
         curr_close = close.iloc[-1]
-        prev_close = close.iloc[-2]
         curr_ema20_m15 = ema_fast_m15.iloc[-1]
-        prev_ema20_m15 = ema_fast_m15.iloc[-2]
         curr_atr = atr.iloc[-1]
 
-        # Pullback bounce on M15: price was at/below EMA20 last candle, now closes above it
-        bull_bounce = prev_close <= prev_ema20_m15 and curr_close > curr_ema20_m15
-        bear_bounce = prev_close >= prev_ema20_m15 and curr_close < curr_ema20_m15
+        # Pullback bounce on M15: price crossed EMA20 within the last 3 bars.
+        # Checking only the most recent candle misses valid bounces that completed
+        # on the 2nd or 3rd candle of the H1 bar, which is the most common case.
+        bull_bounce = any(
+            close.iloc[i - 1] <= ema_fast_m15.iloc[i - 1] and close.iloc[i] > ema_fast_m15.iloc[i]
+            for i in range(-3, 0)
+        )
+        bear_bounce = any(
+            close.iloc[i - 1] >= ema_fast_m15.iloc[i - 1] and close.iloc[i] < ema_fast_m15.iloc[i]
+            for i in range(-3, 0)
+        )
 
         indicators = {
             "h1_trend": h1_trend,
@@ -100,6 +106,7 @@ class MACDEMATrend(BaseStrategy):
             "atr": round(curr_atr, 5),
             "bull_bounce": bull_bounce,
             "bear_bounce": bear_bounce,
+            "curr_close": round(curr_close, 5),
         }
 
         # Volume confirmation on entry bar (M15 primary timeframe)
