@@ -303,14 +303,23 @@ class OrderManager:
         # the broker still enforces a minimum equal to the current spread.
         sym_info = self._client.get_symbol_info(pos.symbol)
         if sym_info:
+            digits = sym_info.get("digits", 5)
+            # Normalize sl/tp to symbol precision before validation and order send.
+            # Floating-point tails (e.g. 0.249856789...) cause MT5 "Invalid stops".
+            if new_sl > 0:
+                new_sl = round(new_sl, digits)
+            if new_tp > 0:
+                new_tp = round(new_tp, digits)
+
             stops_level = sym_info.get("stops_level", 0)
             point = sym_info.get("point", 0.00001)
             if stops_level > 0:
                 min_distance = stops_level * point
             else:
-                spread = sym_info.get("spread", 0)
-                min_distance = spread * point  # spread-based fallback
-            
+                # spread_pips is already spread_in_points * point (the actual distance).
+                # Do NOT multiply by point again — that was a bug producing min_distance≈0.
+                min_distance = sym_info.get("spread_pips", 0.0)
+
             # Get current price (BUY uses ASK to open, SELL uses BID to open)
             # For SL/TP validation, use the current quote
             bid = sym_info.get("bid")

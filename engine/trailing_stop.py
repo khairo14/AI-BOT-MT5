@@ -40,6 +40,7 @@ class TrailingState:
     highest_profit_price: float  # BUY: highest ask seen, SELL: lowest bid seen
     last_trail_at: Optional[datetime] = None
     pips_trailed: float = 0.0
+    consecutive_failures: int = 0  # suppress retry spam after repeated modify errors
 
 
 class TrailingStopManager:
@@ -213,9 +214,15 @@ class TrailingStopManager:
                     should_update = new_sl < current_sl
 
                 if should_update:
+                    # Back off for 12 ticks (~60 s) after 3 consecutive failures
+                    # to avoid spamming MT5 with the same rejected modification.
+                    if state.consecutive_failures >= 3:
+                        state.consecutive_failures -= 1  # countdown toward retry
+                        continue
                     # Modify position
                     success = self._om.modify_position(ticket, sl=new_sl, tp=pos["tp"])
                     if success:
+                        state.consecutive_failures = 0
                         pips_moved = abs(new_sl - current_sl) / pip_value
                         state.current_sl = new_sl
                         state.last_trail_at = datetime.now(tz=timezone.utc)
@@ -226,6 +233,8 @@ class TrailingStopManager:
                             f"Moved SL {current_sl:.5f} → {new_sl:.5f} "
                             f"({pips_moved:.1f} pips) | Total trailed: {state.pips_trailed:.1f} pips"
                         )
+                    else:
+                        state.consecutive_failures = min(state.consecutive_failures + 1, 15)
 
             except Exception as exc:
                 logger.warning(f"TrailingStop: error updating #{ticket}: {exc}")
