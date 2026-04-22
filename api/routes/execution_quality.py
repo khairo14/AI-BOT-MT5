@@ -23,8 +23,10 @@ from fastapi import APIRouter, Query
 router = APIRouter()
 
 
-def _pip_size(symbol: str) -> float:
-    """Return pip size for a symbol (used to convert legacy raw-price slippage to pips)."""
+def _pip_size(symbol: str) -> Optional[float]:
+    """Return pip size for a symbol (used to convert legacy raw-price slippage to pips).
+    Returns None for unrecognised instrument types (e.g. individual stocks) so
+    the caller can skip conversion rather than applying the wrong pip size."""
     s = symbol.upper()
     if any(x in s for x in ("JPY",)):
         return 0.01
@@ -32,9 +34,13 @@ def _pip_size(symbol: str) -> float:
         return 0.01
     if any(x in s for x in ("US30", "US100", "US500", "GER40", "UK100")):
         return 1.0
-    if any(x in s for x in ("BTC", "ETH", "SOL", "XRP", "BCH", "LTC", "XLM", "ADA")):
+    if any(x in s for x in ("BTC", "ETH", "SOL", "XRP", "BCH", "LTC", "XLM", "ADA", "BNB")):
         return 1.0
-    return 0.0001
+    # 6-char forex pairs (e.g. EURUSD, GBPJPY already caught above)
+    if len(s) == 6 and s.isalpha():
+        return 0.0001
+    # Unknown — likely a stock; return None to avoid misclassification
+    return None
 
 
 def _to_pips(slippage: float, symbol: str) -> float:
@@ -43,15 +49,17 @@ def _to_pips(slippage: float, symbol: str) -> float:
 
     Records written before the pip-conversion fix store a raw price diff
     (e.g. 0.00021 for GBPUSD).  Records written after store pips directly
-    (e.g. 2.1).  Heuristic: if the value is < 0.1 it must be a raw price
-    diff for any realistic instrument (max 50-pip raw for forex = 0.005,
-    for JPY = 0.50 — but JPY raw at 0.50 > 0.1, handled below).
-    Specifically:
-      - forex raw  < 0.01   → divide by 0.0001
-      - JPY raw    0.01–0.5 → divide by 0.01
-      - already pips >= 0.1 → return as-is (new format or JPY already pips)
+    (e.g. 2.1 for forex) or raw $ distance (e.g. 0.02 for stocks).
+
+    For unknown instruments (stocks) _pip_size returns None — in that case
+    return the stored value as-is; order_manager already stores stocks as
+    raw $ distance so no conversion is needed.
     """
     pip = _pip_size(symbol)
+    if pip is None:
+        # Unknown instrument type (e.g. stock) — value is already in the
+        # correct display unit (raw $ distance), return as-is.
+        return round(slippage, 2)
     # If stored value already looks pip-scale (>= 0.1) treat as pips
     if slippage >= 0.1:
         return round(slippage, 2)
