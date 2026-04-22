@@ -67,6 +67,7 @@
         "macd_fast": 12,
         "macd_slow": 26,
         "macd_signal": 9,
+        "vol_confirm_mult": 0,
         "primary_timeframe": "H1",
         "entry_timeframe": "M15"
       },
@@ -74,7 +75,7 @@
         "lookback_bars": 50,
         "atr_period": 14,
         "rsi_period": 14,
-        "retest_mode": true,
+        "retest_mode": false,
         "primary_timeframe": "H1"
       },
       "rsi_divergence": {
