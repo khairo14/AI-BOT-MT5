@@ -182,6 +182,20 @@ class OrderManager:
                     sl = round(price - min_dist, sym_info.digits)
                 else:
                     sl = round(price + min_dist, sym_info.digits)
+            # Also enforce minimum distance for TP — MT5 rejects the whole order if
+            # either stop is inside the freeze/stops zone (common on crypto CFDs where
+            # stops_level=0 but the broker still enforces a real server-side minimum).
+            if tp is not None:
+                tp_dist = abs(price - tp)
+                if tp_dist < min_dist:
+                    logger.warning(
+                        f"TP too close for {req.symbol}: {tp_dist:.5f} < min {min_dist:.5f} "
+                        f"(stops_level={stops_level}) — adjusting TP to minimum distance"
+                    )
+                    if req.direction == "BUY":
+                        tp = round(price + min_dist, sym_info.digits)
+                    else:
+                        tp = round(price - min_dist, sym_info.digits)
         # Live spread gate — block entry if current spread exceeds mode limit.
         # Uses real-time spread from MT5 (not hardcoded) so news spikes are caught.
         _captured_spread_pips: Optional[float] = None
@@ -242,15 +256,32 @@ class OrderManager:
             result = mt5.order_send(request)
         execution_time_ms = int(time.time() * 1000) - start_time_ms
 
-        # Calculate slippage in pips (if we have expected price from signal).
-        # Divide by pip size so the value is instrument-agnostic:
-        #   5-digit forex (EUR/USD): point=0.00001, digits=5 → pip = 0.0001
-        #   3-digit JPY   (AUD/JPY): point=0.001,   digits=3 → pip = 0.01
-        #   2-digit Gold  (XAU/USD): point=0.01,    digits=2 → pip = 0.01
+        # Calculate slippage for display. Unit depends on instrument type so the
+        # number is always meaningful:
+        #   Forex 5/3-digit : pip  (0.0001 / 0.01)  — e.g. 1.5 pips on EURUSD
+        #   Forex 4-digit   : point (0.0001)
+        #   Stocks          : raw $ distance         — e.g. 0.67 on ON-Semi
+        #   Crypto/Indices  : raw price distance     — e.g. 0.003 on XLMUSD
+        # Using digits in (3,5) → pip=10×point as the ONLY formula caused stock
+        # slippage to be reported as hundreds of "pips" (display bug).
         slippage = None
         if req.entry_price and result and result.retcode == mt5.TRADE_RETCODE_DONE:
             raw_slip = abs(result.price - req.entry_price)
-            pip_size = sym_info.point * (10 if sym_info.digits in (3, 5) else 1)
+            _sym_u = req.symbol.upper()
+            if sym_info.digits in (5, 3):
+                # Standard 5-digit forex (EURUSD) or 3-digit JPY (USDJPY)
+                pip_size = sym_info.point * 10
+            elif any(x in _sym_u for x in (
+                "US30", "US100", "US500", "GER40", "UK100",
+                "BTC", "ETH", "SOL", "XRP", "XLM", "BNB", "LTC", "ADA"
+            )):
+                # Indices and crypto — report raw price distance (no "pips")
+                pip_size = 1.0
+            elif sym_info.digits <= 2:
+                # Stocks (2-decimal) — report raw $ distance, not pip fractions
+                pip_size = 1.0
+            else:
+                pip_size = sym_info.point  # 4-digit forex, commodities
             slippage = round(raw_slip / pip_size, 2) if pip_size > 0 else raw_slip
 
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -316,14 +347,25 @@ class OrderManager:
             if stops_level > 0:
                 min_distance = stops_level * point
             else:
-                # spread_pips is already spread_in_points * point (the actual distance).
-                # Do NOT multiply by point again — that was a bug producing min_distance≈0.
-                min_distance = sym_info.get("spread_pips", 0.0)
+                # When stops_level=0 the broker still enforces a minimum equal to
+                # the current spread.  symbol_info() returns spread in POINTS (not
+                # price distance) so multiply by point to get actual price distance.
+                # "spread_pips" does NOT exist in the MT5 symbol_info dict — use
+                # sym_info["spread"] (raw spread in points) instead.
+                spread_pts = sym_info.get("spread", 0)
+                min_distance = spread_pts * point if spread_pts > 0 else 0.0
 
-            # Get current price (BUY uses ASK to open, SELL uses BID to open)
-            # For SL/TP validation, use the current quote
-            bid = sym_info.get("bid")
-            ask = sym_info.get("ask")
+            # Get LIVE bid/ask from symbol_info_tick() — symbol_info() only has
+            # static metadata (digits, point, spread, etc.), NOT live prices.
+            bid = ask = None
+            try:
+                with self._client._lock:
+                    _tick = mt5.symbol_info_tick(pos.symbol)
+                if _tick:
+                    bid = _tick.bid
+                    ask = _tick.ask
+            except Exception:
+                pass
             
             if bid and ask and min_distance > 0:
                 # For BUY positions: SL must be <= bid - min_distance, TP must be >= bid + min_distance

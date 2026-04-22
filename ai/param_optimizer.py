@@ -858,6 +858,18 @@ class ParamOptimizer:
             if regime_params:
                 existing_by_regime.update(regime_params)
             entry = dict(params)
+            # Safety: clamp any R:R parameters to a minimum of 1.0 so that a
+            # mis-configured grid or future code change cannot persist a negative
+            # or sub-minimum R:R value to optimized_params.json.
+            _RR_KEYS = {"rr", "tp_rr", "tp1_rr", "tp2_rr", "tp1_atr_mult", "tp_atr_mult"}
+            _MIN_RR  = 1.0
+            for _k in _RR_KEYS:
+                if _k in entry and isinstance(entry[_k], (int, float)) and entry[_k] < _MIN_RR:
+                    logger.warning(
+                        f"Optimizer: clamping {strategy_name}/{symbol} {_k}={entry[_k]:.3f} → {_MIN_RR} "
+                        f"(below minimum R:R)"
+                    )
+                    entry[_k] = _MIN_RR
             if existing_by_regime:
                 entry["by_regime"] = existing_by_regime
             data[strategy_name][symbol] = entry

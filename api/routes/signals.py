@@ -170,7 +170,15 @@ async def reject_signal(signal_id: str, body: RejectRequest = RejectRequest()):
         signal.get("symbol"), signal.get("strategy"),
         signal.get("direction"), signal.get("trading_mode"),
     )
-    bus._pending_keys.discard(_dk)
+    # Hold the dedup key for 60 s after rejection to prevent the strategy from
+    # immediately re-firing a duplicate signal on the next scanner tick (every
+    # 30 s). Without this hold, a rejection + re-fire within the same bar would
+    # bypass the duplicate guard. After 60 s the key is released so a genuine
+    # new signal on the next bar can be accepted.
+    async def _release_dedup_after_delay(dk: tuple, delay: float = 60.0) -> None:
+        await asyncio.sleep(delay)
+        bus._pending_keys.discard(dk)
+    asyncio.create_task(_release_dedup_after_delay(_dk))
     # GAP-1: sync persistent file when a swing auto-execute signal is rejected
     if signal.get("auto_execute_at"):
         bus._save_pending_swing_signals()

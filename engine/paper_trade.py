@@ -165,7 +165,16 @@ class PaperTradeEngine:
                     if deals:
                         close_deals = [d for d in deals if d.entry == _mt5.DEAL_ENTRY_OUT]
                         if close_deals:
-                            actual_close = close_deals[-1].price
+                            # Blend multiple partial exits (e.g. TP1 + SL) by volume
+                            # so close_price reflects the true average, not just the last deal.
+                            _total_vol = sum(getattr(d, 'volume', 0) for d in close_deals)
+                            if _total_vol > 0:
+                                actual_close = sum(
+                                    getattr(d, 'price', 0) * getattr(d, 'volume', 0)
+                                    for d in close_deals
+                                ) / _total_vol
+                            else:
+                                actual_close = close_deals[-1].price
                 except Exception:
                     pass
                 pos.closed      = True
@@ -216,7 +225,10 @@ class PaperTradeEngine:
                     # floating P&L from the previous sync cycle, which may be stale
                     # (e.g. price briefly went positive then reversed and hit SL).
                     _pip_val_pt = 0.01 if "JPY" in (pos.symbol or "") else 0.0001
-                    _tol_pt = max(abs(pos.close_price) * 0.0001, _pip_val_pt * 2)
+                    # Tight tolerance: 0.005% of close price OR 1 pip — whichever is larger.
+                    # Prior value (0.01% / 2 pips) was too loose for high-priced assets
+                    # (GOLD $2000 → $0.20 tolerance, could misclassify outcome near TP/SL).
+                    _tol_pt = max(abs(pos.close_price) * 0.00005, _pip_val_pt)
                     _dir_up = pos.direction.upper() == "BUY"
                     if _dir_up:
                         if pos.tp_price and pos.close_price >= pos.tp_price - _tol_pt:

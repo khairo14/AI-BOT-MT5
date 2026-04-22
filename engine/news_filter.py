@@ -94,6 +94,11 @@ _SYMBOL_CURRENCIES: dict[str, list[str]] = {
     "MICROSOFT": ["USD"], "GOOGLE": ["USD"],  "FACEBOOK": ["USD"],
     "NETFLIX": ["USD"], "NVIDIA": ["USD"],    "ADVMICRODEV": ["USD"],
     "META": ["USD"],    "ALPHABET": ["USD"],  "ALIBABA": ["USD"],
+    # ── Additional US equities (scanner symbols) ──────────────────────────────
+    "ON-SEMICONDUCTOR": ["USD"], "CISCO": ["USD"],
+    "PAYPAL": ["USD"],           "AT&T": ["USD"],
+    "NETFLIX_TURBO": ["USD"],    "APPLE_TURBO": ["USD"],
+    "AMAZON_TURBO": ["USD"],
     # ── US indices (USD macro-driven) ─────────────────────────────────────────
     "US30CASH": ["USD"], "US100CASH": ["USD"], "US500CASH": ["USD"],
     # ── EU / UK indices ───────────────────────────────────────────────────────
@@ -188,6 +193,12 @@ def _currencies_for(symbol: str) -> list[str]:
             return [_base, _quote]
 
     # Step 4: fallback — most unlisted instruments are USD-denominated
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "news_filter: symbol %r not in _SYMBOL_CURRENCIES — defaulting to USD. "
+        "Add it to _SYMBOL_CURRENCIES for accurate news filtering.",
+        symbol,
+    )
     return ["USD"]
 
 

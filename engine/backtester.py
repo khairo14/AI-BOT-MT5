@@ -144,8 +144,14 @@ def _sim_trade(
             if tp_touched: return "tp_hit", tp, j
             if sl_touched: return "sl_hit", sl, j
 
-    # Max hold reached — exit at close of last bar
+    # Max hold reached — check if the bar's close is beyond SL before calling timeout.
+    # A gap/news candle in the last bar could close well past the SL; if we return
+    # "timeout" the caller uses the close price, overstating the actual exit level.
     exit_price = float(df.iloc[end - 1]["close"])
+    if direction == "BUY" and exit_price <= sl:
+        return "sl_hit", sl, end - 1
+    if direction == "SELL" and exit_price >= sl:
+        return "sl_hit", sl, end - 1
     return "timeout", exit_price, end - 1
 
 
