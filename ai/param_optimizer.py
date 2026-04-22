@@ -54,7 +54,7 @@ MIN_BACKTEST_SIGNALS: dict[str, int] = {
 MAX_GRID_COMBOS           = 64   # cap to keep backtest fast
 BACKTEST_COOLDOWN_HOURS   = 24   # min hours between automatic re-backtests
 LIVE_REFINE_WIN_THRESH    = 0.45 # re-optimize when win_rate drops below this
-MAX_CONCURRENT_OPT        = 2    # max simultaneous optimizer jobs (prevents CPU starvation / MT5 disconnect)
+MAX_CONCURRENT_OPT        = 3    # max simultaneous optimizer jobs (prevents CPU starvation / MT5 disconnect)
 
 # Spread cost in R-units (round-trip bid/ask spread + typical slippage per mode).
 # This is subtracted from each simulated trade so unrealistic tight-spread combos
