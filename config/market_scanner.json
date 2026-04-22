@@ -2,7 +2,7 @@
   "enabled": true,
   "scan_interval_minutes": 60,
   "max_results_per_type": 20,
-  "auto_update_scanner": true,
+  "auto_update_scanner": false,
   "max_symbols_per_mode": {
     "scalping": 10,
     "day_trading": 12,

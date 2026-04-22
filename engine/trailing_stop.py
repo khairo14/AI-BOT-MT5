@@ -189,22 +189,48 @@ class TrailingStopManager:
                     if current_price < state.highest_profit_price:
                         state.highest_profit_price = current_price
 
-                # Symbol-level overrides (per-symbol price distances take priority over pips)
+                # Symbol-level overrides (per-symbol price distances take priority over everything)
                 sym_override = mode_cfg.get("symbol_overrides", {}).get(symbol, {})
+
+                # Detect whether this is a forex pair (pip-based distances are meaningful)
+                # Non-forex instruments: stocks (digits≤2), crypto, indices, futures.
+                # For those, use % of entry price so any symbol works without manual config.
+                _sym_u = symbol.upper()
+                _is_forex = (
+                    pip_value < 1.0  # indices/crypto return 1.0 from _get_pip_value
+                    and not any(x in _sym_u for x in (
+                        "BTC", "ETH", "SOL", "XRP", "XLM", "BNB", "LTC",
+                        "US30", "US100", "US500", "GER40", "UK100",
+                    ))
+                )
+                try:
+                    _sym_info_ts = self._client.get_symbol_info(symbol)
+                    if _sym_info_ts and _sym_info_ts.get("digits", 5) <= 2:
+                        _is_forex = False  # stocks always have digits ≤ 2
+                except Exception:
+                    pass
 
                 # Activation distance in price units
                 if "activation_price" in sym_override:
                     activation_distance = float(sym_override["activation_price"])
-                else:
+                elif _is_forex:
                     a_pips = sym_override.get("activation_pips", mode_cfg.get("activation_pips", 10))
                     activation_distance = a_pips * pip_value
+                else:
+                    # Dynamic % of entry price — works for any stock, crypto, index or futures
+                    # Default 0.5 % activation, 0.35 % trail (overridable per mode in app.json)
+                    a_pct = mode_cfg.get("activation_pct", 0.005)
+                    activation_distance = entry_price * a_pct
 
                 # Trail distance in price units
                 if "trail_price" in sym_override:
                     trail_distance = float(sym_override["trail_price"])
-                else:
+                elif _is_forex:
                     t_pips = sym_override.get("trail_distance_pips", mode_cfg.get("trail_distance_pips", 8))
                     trail_distance = t_pips * pip_value
+                else:
+                    t_pct = mode_cfg.get("trail_pct", 0.0035)
+                    trail_distance = entry_price * t_pct
 
                 # Profit measured in price units (direction-aware)
                 if direction == "BUY":

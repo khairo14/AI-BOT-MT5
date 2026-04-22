@@ -115,6 +115,8 @@
       "enabled": true,
       "activation_pips": 20,
       "trail_distance_pips": 15,
+      "activation_pct": 0.005,
+      "trail_pct": 0.0035,
       "symbol_overrides": {
         "GBPJPY":    { "activation_pips": 25,  "trail_distance_pips": 20 },
         "GOLD":      { "activation_price": 3.00,   "trail_price": 2.00 },
@@ -137,6 +139,8 @@
       "enabled": true,
       "activation_pips": 50,
       "trail_distance_pips": 40,
+      "activation_pct": 0.008,
+      "trail_pct": 0.005,
       "symbol_overrides": {
         "GBPJPY":      { "activation_pips": 60,    "trail_distance_pips": 45 },
         "GOLD":        { "activation_price": 8.00,    "trail_price": 5.00 },
