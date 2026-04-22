@@ -114,12 +114,49 @@
     "day_trading": {
       "enabled": true,
       "activation_pips": 20,
-      "trail_distance_pips": 15
+      "trail_distance_pips": 15,
+      "symbol_overrides": {
+        "GBPJPY":    { "activation_pips": 25,  "trail_distance_pips": 20 },
+        "GOLD":      { "activation_price": 3.00,   "trail_price": 2.00 },
+        "OILCash":   { "activation_price": 0.80,   "trail_price": 0.60 },
+        "US100Cash": { "activation_price": 25.0,   "trail_price": 15.0 },
+        "US30Cash":  { "activation_price": 80.0,   "trail_price": 50.0 },
+        "US500Cash": { "activation_price": 8.00,   "trail_price": 5.00 },
+        "GER40Cash": { "activation_price": 25.0,   "trail_price": 15.0 },
+        "UK100Cash": { "activation_price": 20.0,   "trail_price": 12.0 },
+        "BTCUSD":    { "activation_price": 500.0,  "trail_price": 300.0 },
+        "ETHUSD":    { "activation_price": 30.0,   "trail_price": 20.0 },
+        "Tesla":     { "activation_price": 2.00,   "trail_price": 1.20 },
+        "Nvidia":    { "activation_price": 4.00,   "trail_price": 2.50 },
+        "Apple":     { "activation_price": 1.50,   "trail_price": 1.00 },
+        "Microsoft": { "activation_price": 2.00,   "trail_price": 1.20 },
+        "Amazon":    { "activation_price": 3.00,   "trail_price": 2.00 }
+      }
     },
     "swing": {
       "enabled": true,
       "activation_pips": 50,
-      "trail_distance_pips": 40
+      "trail_distance_pips": 40,
+      "symbol_overrides": {
+        "GBPJPY":      { "activation_pips": 60,    "trail_distance_pips": 45 },
+        "GOLD":        { "activation_price": 8.00,    "trail_price": 5.00 },
+        "SILVER":      { "activation_price": 0.30,    "trail_price": 0.20 },
+        "OILCash":     { "activation_price": 1.50,    "trail_price": 1.00 },
+        "BRENTCash":   { "activation_price": 1.50,    "trail_price": 1.00 },
+        "NGASCash":    { "activation_price": 0.15,    "trail_price": 0.10 },
+        "US100Cash":   { "activation_price": 80.0,    "trail_price": 50.0 },
+        "US500Cash":   { "activation_price": 25.0,    "trail_price": 15.0 },
+        "BTCUSD":      { "activation_price": 2000.0,  "trail_price": 1500.0 },
+        "ETHUSD":      { "activation_price": 100.0,   "trail_price": 70.0 },
+        "XRPUSD":      { "activation_price": 0.10,    "trail_price": 0.07 },
+        "SOLUSD":      { "activation_price": 5.00,    "trail_price": 3.00 },
+        "Tesla":       { "activation_price": 4.00,    "trail_price": 2.50 },
+        "Nvidia":      { "activation_price": 8.00,    "trail_price": 5.00 },
+        "Google":      { "activation_price": 3.00,    "trail_price": 2.00 },
+        "Facebook":    { "activation_price": 4.00,    "trail_price": 2.50 },
+        "Netflix":     { "activation_price": 6.00,    "trail_price": 4.00 },
+        "AdvMicroDev": { "activation_price": 4.00,    "trail_price": 2.50 }
+      }
     }
   },
   "signal_expiry_seconds": {

@@ -64,30 +64,43 @@ class TrailingStopManager:
 
     def _get_pip_value(self, symbol: str) -> float:
         """
-        Get the pip/point size for a symbol from MT5 symbol info.
+        Get the pip size for a symbol from MT5 symbol info.
         Falls back to forex defaults if symbol info is unavailable.
         - Forex non-JPY: 0.0001
         - Forex JPY: 0.01
         - Commodities (BRENT, OIL, GOLD, SILVER): 0.01
         - Indices (US30, US100): 1.0
         - Crypto (BTCUSD): 1.0
+
+        NOTE: MT5 `info.point` is the smallest price increment, NOT a pip.
+        On 5-digit forex (EURUSD, digits=5) and 3-digit JPY (USDJPY, digits=3),
+        1 pip = 10 points. We normalise here so trail_distance_pips is always
+        in real pips, not MT5 micro-points.
         """
-        try:
-            info = self._client.get_symbol_info(symbol)
-            if info and info.get("point"):
-                return info["point"]
-        except Exception:
-            pass
-        # Fallback: classify by symbol name
         sym = symbol.upper()
-        if any(x in sym for x in ("JPY",)):
-            return 0.01
-        if any(x in sym for x in ("GOLD", "XAUUSD", "SILVER", "XAGUSD", "OIL", "BRENT", "NGAS")):
-            return 0.01
+        # Indices and crypto have no meaningful "pip" — use 1.0 (index point / $1)
+        # regardless of what MT5 reports for digits/point on this broker.
         if any(x in sym for x in ("US30", "US100", "US500", "GER40", "UK100")):
             return 1.0
         if any(x in sym for x in ("BTC", "ETH", "SOL", "XRP")):
             return 1.0
+        try:
+            info = self._client.get_symbol_info(symbol)
+            if info and info.get("point"):
+                point  = info["point"]
+                digits = info.get("digits", 5)
+                # On odd-digit symbols (5-decimal forex, 3-decimal JPY) one pip
+                # is 10 MT5 points. On even-digit symbols the pip == point.
+                if digits in (5, 3):
+                    return point * 10
+                return point
+        except Exception:
+            pass
+        # Fallback: classify by symbol name
+        if "JPY" in sym:
+            return 0.01
+        if any(x in sym for x in ("GOLD", "XAUUSD", "SILVER", "XAGUSD", "OIL", "BRENT", "NGAS")):
+            return 0.01
         return 0.0001
 
     def _extract_mode_from_comment(self, comment: str) -> Optional[str]:
@@ -176,11 +189,28 @@ class TrailingStopManager:
                     if current_price < state.highest_profit_price:
                         state.highest_profit_price = current_price
 
-                # Calculate profit in pips
-                if direction == "BUY":
-                    profit_pips = (current_price - entry_price) / pip_value
+                # Symbol-level overrides (per-symbol price distances take priority over pips)
+                sym_override = mode_cfg.get("symbol_overrides", {}).get(symbol, {})
+
+                # Activation distance in price units
+                if "activation_price" in sym_override:
+                    activation_distance = float(sym_override["activation_price"])
                 else:
-                    profit_pips = (entry_price - current_price) / pip_value
+                    a_pips = sym_override.get("activation_pips", mode_cfg.get("activation_pips", 10))
+                    activation_distance = a_pips * pip_value
+
+                # Trail distance in price units
+                if "trail_price" in sym_override:
+                    trail_distance = float(sym_override["trail_price"])
+                else:
+                    t_pips = sym_override.get("trail_distance_pips", mode_cfg.get("trail_distance_pips", 8))
+                    trail_distance = t_pips * pip_value
+
+                # Profit measured in price units (direction-aware)
+                if direction == "BUY":
+                    profit_distance = current_price - entry_price
+                else:
+                    profit_distance = entry_price - current_price
 
                 # GAP-2: skip positions where _poll_outcome's ATR trail has already
                 # moved SL to breakeven or better — let that system own them.
@@ -190,14 +220,9 @@ class TrailingStopManager:
                     if direction == "SELL" and current_sl <= entry_price:
                         continue
 
-                # Check if we've reached activation threshold
-                activation_pips = mode_cfg.get("activation_pips", 10)
-                if profit_pips < activation_pips:
+                # Check activation threshold
+                if profit_distance < activation_distance:
                     continue
-
-                # Calculate new SL based on trail distance
-                trail_distance_pips = mode_cfg.get("trail_distance_pips", 8)
-                trail_distance = trail_distance_pips * pip_value
 
                 if direction == "BUY":
                     new_sl = state.highest_profit_price - trail_distance

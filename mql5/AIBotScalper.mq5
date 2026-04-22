@@ -294,6 +294,41 @@ void _ExecuteOpen(
 }
 
 //==========================================================================
+//  TRAILING STOP MANAGEMENT — helpers
+//==========================================================================
+
+// Returns the effective pip/point size for a symbol.
+// Indices have no meaningful "pip" concept; use 1.0 (1 index point = $1).
+// 5/3-digit forex: 10 × MT5 point. Commodities/stocks: raw point.
+double _GetEffectivePipSize(string symbol, int digits, double point)
+{
+    if(StringFind(symbol, "US100") >= 0 || StringFind(symbol, "US30")  >= 0 ||
+       StringFind(symbol, "US500") >= 0 || StringFind(symbol, "GER40") >= 0 ||
+       StringFind(symbol, "UK100") >= 0)
+        return 1.0;
+    if(digits == 5 || digits == 3)
+        return point * 10.0;
+    return point;
+}
+
+// Per-symbol trailing distance (in pip_size units).
+// For index symbols pip_size=1.0, so these are literal $ distances.
+double _GetSymbolTrailPips(string symbol)
+{
+    if(StringFind(symbol, "US100") >= 0) return 15.0;   // $15 trail on Nasdaq
+    if(StringFind(symbol, "US30")  >= 0) return 50.0;   // $50 trail on Dow
+    return InpTrailingStopPips;                          // default for forex
+}
+
+// Per-symbol breakeven distance (same unit convention as _GetSymbolTrailPips).
+double _GetSymbolBEPips(string symbol)
+{
+    if(StringFind(symbol, "US100") >= 0) return 25.0;   // $25 to breakeven on Nasdaq
+    if(StringFind(symbol, "US30")  >= 0) return 80.0;   // $80 to breakeven on Dow
+    return InpBreakevenPips;
+}
+
+//==========================================================================
 //  TRAILING STOP MANAGEMENT
 //==========================================================================
 
@@ -326,10 +361,10 @@ void _ManageTrailingStops()
 
         int    digits      = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
         double point       = SymbolInfoDouble(symbol, SYMBOL_POINT);
-        // Pip size: 5-digit brokers use 10× point for 1 pip; JPY pairs are 3-digit
-        double pip_size    = (digits == 3 || digits == 5) ? point * 10.0 : point;
-        double trail_dist  = InpTrailingStopPips * pip_size;
-        double be_dist     = InpBreakevenPips    * pip_size;
+        // Pip size: indices use 1.0; 5/3-digit forex = 10×point; others = raw point
+        double pip_size    = _GetEffectivePipSize(symbol, digits, point);
+        double trail_dist  = _GetSymbolTrailPips(symbol) * pip_size;
+        double be_dist     = _GetSymbolBEPips(symbol)    * pip_size;
 
         MqlTick tick;
         if(!SymbolInfoTick(symbol, tick)) continue;
