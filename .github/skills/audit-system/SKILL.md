@@ -138,27 +138,34 @@ For each new issue found, write an entry in this format:
 | Medium | Degraded accuracy, stale data, or misleading metrics |
 | Low | Minor logic inconsistency or technical debt |
 | Very Low | Cosmetic, theoretical, or extremely rare edge case |
+### H. Strategy Parameter Integrity (NEW — learned April 2026)
 
+This is **the most common source of silent breakage**. Run this checklist on every audit.
+
+**Param merge chain:**  `code DEFAULT_PARAMS` → overridden by `config/strategies.json` → overridden by `config/optimized_params.json` (last wins). Errors at any layer silently cascade.
+
+- [ ] **Dead keys in `strategies.json`** — every key in each strategy's `params` block must exist in that strategy's `DEFAULT_PARAMS`. Dead keys (e.g. `ema_bias_timeframe` — hardcoded in caller, never read by strategy) waste JSON space and mislead readers.
+- [ ] **Dead keys in `optimized_params.json`** — same rule, plus renamed keys (e.g. `fib_lookback` → `impulse_lookback`). If a key was renamed in code but not in the optimizer output, the old value silently takes no effect.
+- [ ] **Dead keys in `PARAM_GRIDS`** in `ai/param_optimizer.py` — if the optimizer tunes dead keys, those runs produce no improvement and corrupt the saved params file with keys the code ignores.
+- [ ] **R:R minimum compliance** — compare every `tp1_rr`, `tp_rr`, `rr`, `tp2_rr` value (in DEFAULT_PARAMS, strategies.json, optimized_params.json, AND PARAM_GRIDS) against `config/risk.json` → `risk_reward_min_by_mode`. Minimums: `scalping=1.0`, `day_trading=1.5`, `swing=1.5`. A value below minimum means `validate_sl_tp()` will reject every signal from that strategy silently.
+- [ ] **PARAM_GRIDS lower bound ≥ risk minimum** — if a PARAM_GRID range starts below the minimum (e.g. `tp_rr: [1.2, 1.5, 2.0]`), the optimizer may pick and persist a sub-minimum value, re-breaking `optimized_params.json` on the next optimizer run even after a manual fix.
+- [ ] **Regime label correctness** — every key inside `by_regime` in `optimized_params.json` must match a label that `regime_classifier.py` actually emits. Valid labels: `quiet`, `volatile_breakout`, `trending_bull`, `trending_bear`, `ranging_high_vol`, `ranging_low_vol`.
+- [ ] **`symbol_sl_override` is a valid key for `ema_scalp`** — code reads it at `engine/strategies/scalping/ema_scalp.py:111`. Do NOT flag as dead.
+
+**Automated check** — run `python _audit_check.py` from the project root. This script encodes all the above checks plus the 10 known gap verifications. It reports ERRORS (must fix) and WARNINGS (manual review). Target: 0 errors, 0 warnings before any production switch.
 ---
 
 ## Step 4 — Known Open Gaps (from prior audits, not yet fixed)
 
 Cross-reference against these before creating duplicates:
 
-| ID | File | Issue | Risk |
-|---|---|---|---|
-| NEW-1 | `engine/risk_manager.py` | `_day_start_balance` is `None` on fresh start — drawdown guard skipped until first `update_balance()` | Low |
-| NEW-2 | `engine/risk_manager.py` | `check_concurrent_limit()` reads `_mode_switch_ts` without `_lock` | Very Low |
-| NEW-3 | `engine/order_manager.py` | `partial_close` applies `volume_min` clamp before floor-round (could over-close on tiny lots) | Low |
-| NEW-4 | `engine/paper_trade.py` | `self._history` list grows unbounded — no eviction or size cap | Low |
-| NEW-5 | `api/signal_bus.py` | `_poll_outcome` exits after 7 days; swing trades > 7 days silently miss their close record | Medium |
-| NEW-6 | `api/signal_bus.py` | `_execute_async` tasks are fire-and-forget; ungraceful shutdown can lose journal write for in-flight orders | Low |
-| NEW-7 | `api/runner_loop.py` | `_run_one_mode` tasks accumulate if MT5 is slow — no cancellation or backpressure | Low |
-| NEW-8 | `ai/trade_memory.py` | Single corrupt JSONL line drops all subsequent entries — no per-line resilience in `_load()` | Low |
-| NEW-9 | `ai/rl_agent.py` | Up to 9 Q-table updates lost on ungraceful shutdown | Very Low |
-| NEW-10 | `engine/news_filter.py` | `_SYMBOL_CURRENCIES` hardcoded and incomplete — stocks/crypto/commodities only check USD news | Low |
-| LOGIC-2 | `api/signal_bus.py` | 5 s race window in dedup guard between same-symbol signals | Accepted |
-| L-8 | `ai/param_optimizer.py` | Strategy map never invalidated across optimizer restarts | Accepted |
+| ID | File | Issue | Risk | Status |
+|---|---|---|---|---|
+| NEW-2 | `engine/risk_manager.py` | `check_concurrent_limit()` reads `_mode_switch_ts` without `_lock` | Very Low | Open |
+| LOGIC-2 | `api/signal_bus.py` | 5 s race window in dedup guard between same-symbol signals | Accepted | Accepted |
+| L-8 | `ai/param_optimizer.py` | Strategy map never invalidated across optimizer restarts | Accepted | Accepted |
+
+**All other gaps from prior rounds (NEW-1, NEW-3 through NEW-10, APR-1 through APR-11) are ✅ Fixed** — see `docs/21-audit-findings.md` for details.
 
 ---
 

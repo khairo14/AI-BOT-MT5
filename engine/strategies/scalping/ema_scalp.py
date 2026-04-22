@@ -23,6 +23,7 @@ DEFAULT_PARAMS = {
     "tp1_rr": 1.2,          # partial close at 1.2R
     "rr": 2.0,              # tp2 (full close) at 2.0R
     "vol_confirm_mult": 1.2, # volume must exceed 20-bar avg × this (0 = disabled)
+    "crossover_window": 3,  # look back N bars for a valid crossover (default 3 = 15 min)
 }
 
 
@@ -62,6 +63,29 @@ class EMAScalp(BaseStrategy):
         curr_rsi = rsi.iloc[-1]
         curr_close = close.iloc[-1]
 
+        # Crossover detection over a rolling window (crossover_window bars).
+        # Checking only the exact current bar misses crossovers that completed on
+        # bar N-1 when the runner was delayed by a slow MT5 call or task queue.
+        # With a 3-bar window (15 min at M5), we catch any crossover within the
+        # current M5 run cycle while the EMA alignment is still fresh.
+        # We also require price is still on the correct side of both EMAs at [-1]
+        # so stale crossovers from hours ago are not re-triggered.
+        window = max(1, int(p.get("crossover_window", 3)))
+        bull_cross = False
+        bear_cross = False
+        for _i in range(-window, 0):
+            _pf = ema_fast.iloc[_i - 1]
+            _ps = ema_slow.iloc[_i - 1]
+            _cf = ema_fast.iloc[_i]
+            _cs = ema_slow.iloc[_i]
+            if _pf <= _ps and _cf > _cs:
+                bull_cross = True
+            if _pf >= _ps and _cf < _cs:
+                bear_cross = True
+        # Price must still be above/below both EMAs at the current bar
+        bull_cross = bull_cross and curr_fast > curr_slow
+        bear_cross = bear_cross and curr_fast < curr_slow
+
         # Volume confirmation on signal bar (M1 primary timeframe)
         vol_ok = True
         vol_mult = p.get("vol_confirm_mult", 1.2)
@@ -81,17 +105,21 @@ class EMAScalp(BaseStrategy):
 
         pip = self._pip_size()
 
-        # --- BUY: EMA fast crosses above slow, bias bullish, RSI in range ---
+        # Per-symbol SL override — exotic pairs (e.g. AUDCAD, NZDCAD, AUDCHF) have
+        # wider average spreads and require more breathing room than majors.
+        # symbol_sl_override in params takes precedence over the default sl_pips.
+        sl_pips = p.get("symbol_sl_override", {}).get(self.symbol.upper(), p["sl_pips"])
+
+        # --- BUY: crossover within window, price still above EMAs, bias bullish, RSI in range ---
         if (
-            prev_fast <= prev_slow
-            and curr_fast > curr_slow
+            bull_cross
             and bias == "BULL"
             and p["rsi_min"] <= curr_rsi <= p["rsi_max"]
             and vol_ok
         ):
-            sl  = round(curr_close - p["sl_pips"] * pip, 5)
-            tp1 = round(curr_close + p["sl_pips"] * p["tp1_rr"] * pip, 5)
-            tp2 = round(curr_close + p["sl_pips"] * p["rr"] * pip, 5)
+            sl  = round(curr_close - sl_pips * pip, 5)
+            tp1 = round(curr_close + sl_pips * p["tp1_rr"] * pip, 5)
+            tp2 = round(curr_close + sl_pips * p["rr"] * pip, 5)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -107,19 +135,18 @@ class EMAScalp(BaseStrategy):
                 indicators=indicators,
             )
 
-        # --- SELL: EMA fast crosses below slow, bias bearish, RSI in range ---
+        # --- SELL: crossover within window, price still below EMAs, bias bearish, RSI in range ---
         sell_rsi_min = 100 - p["rsi_max"]
         sell_rsi_max = 100 - p["rsi_min"]
         if (
-            prev_fast >= prev_slow
-            and curr_fast < curr_slow
+            bear_cross
             and bias == "BEAR"
             and sell_rsi_min <= curr_rsi <= sell_rsi_max
             and vol_ok
         ):
-            sl  = round(curr_close + p["sl_pips"] * pip, 5)
-            tp1 = round(curr_close - p["sl_pips"] * p["tp1_rr"] * pip, 5)
-            tp2 = round(curr_close - p["sl_pips"] * p["rr"] * pip, 5)
+            sl  = round(curr_close + sl_pips * pip, 5)
+            tp1 = round(curr_close - sl_pips * p["tp1_rr"] * pip, 5)
+            tp2 = round(curr_close - sl_pips * p["rr"] * pip, 5)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",

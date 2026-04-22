@@ -11,17 +11,29 @@
         "ema_fast": 8,
         "ema_slow": 21,
         "ema_bias_period": 50,
-        "ema_bias_timeframe": "M15",
         "rsi_period": 7,
         "rsi_min": 40,
         "rsi_max": 72,
-        "max_spread_pips": 1.5
+        "max_spread_pips": 1.5,
+        "crossover_window": 3,
+        "vol_confirm_mult": 0,
+        "symbol_sl_override": {
+          "AUDCAD": 7,
+          "NZDCAD": 7,
+          "AUDCHF": 7,
+          "GBPAUD": 6
+        }
       },
       "bb_squeeze": {
         "bb_period": 20,
         "bb_std": 2.0,
         "roc_period": 5,
-        "min_squeeze_bars": 3
+        "min_squeeze_bars": 3,
+        "sl_atr_mult": 1.5,
+        "tp1_atr_mult": 1.5,
+        "tp_atr_mult": 2.5,
+        "max_spread_pips": 2.0,
+        "vol_confirm_mult": 0
       },
       "vwap_reversion": {
         "sigma_entry": 1.5,
@@ -29,7 +41,10 @@
         "rsi_period": 14,
         "stoch_k": 5,
         "stoch_d": 3,
-        "stoch_smooth": 3
+        "stoch_smooth": 3,
+        "rsi_oversold": 28,
+        "rsi_overbought": 72,
+        "max_spread_pips": 2.5
       },
       "stoch_rsi_pullback": {
         "ema_fast": 21,
@@ -44,7 +59,8 @@
         "sl_atr_mult": 1.5,
         "tp1_rr": 1.5,
         "rr": 2.5,
-        "max_spread_pips": 2.0
+        "max_spread_pips": 2.0,
+        "vol_confirm_mult": 0
       }
     }
   },
@@ -67,23 +83,30 @@
         "macd_fast": 12,
         "macd_slow": 26,
         "macd_signal": 9,
-        "vol_confirm_mult": 0,
-        "primary_timeframe": "H1",
-        "entry_timeframe": "M15"
+        "atr_period": 14,
+        "tp1_rr": 1.5,
+        "tp2_rr": 2.0,
+        "vol_confirm_mult": 0
       },
       "sr_breakout": {
         "lookback_bars": 50,
         "atr_period": 14,
         "rsi_period": 14,
         "retest_mode": false,
-        "primary_timeframe": "H1"
+        "sl_buffer_atr": 0.3,
+        "tp1_rr": 1.5,
+        "tp_rr": 2.0,
+        "min_touches": 2,
+        "level_tolerance": 0.0015,
+        "vol_confirm_mult": 0
       },
       "rsi_divergence": {
         "rsi_period": 14,
         "ema_bias_period": 50,
-        "session_window_hours": 2,
-        "primary_timeframe": "H1",
-        "entry_timeframe": "M30"
+        "divergence_lookback": 20,
+        "atr_period": 14,
+        "tp_rr": 1.5,
+        "tp2_rr": 2.5
       }
     }
   },
@@ -101,35 +124,45 @@
     },
     "params": {
       "ema_trend_rider": {
-        "d1_ema_fast": 50,
-        "d1_ema_slow": 200,
-        "h4_ema_fast": 21,
-        "h4_ema_slow": 50,
-        "h4_adx_min": 25,
-        "h1_ema_entry": 21,
-        "primary_timeframe": "H4",
-        "entry_timeframe": "H1",
+        "ema_fast": 21,
+        "ema_mid": 50,
+        "ema_slow": 200,
+        "adx_period": 14,
         "adx_threshold": 20,
-        "pullback_atr_tolerance": 0.8
+        "atr_period": 14,
+        "pullback_atr_tolerance": 0.8,
+        "sl_atr_mult": 1.5,
+        "tp1_rr": 1.5,
+        "tp_rr": 2.5,
+        "vol_confirm_mult": 0
       },
       "fibonacci_rsi": {
-        "fib_levels": [0.382, 0.5, 0.618],
-        "golden_zone_min": 0.5,
-        "golden_zone_max": 0.618,
+        "impulse_lookback": 50,
+        "fib_entry_low": 0.5,
+        "fib_entry_high": 0.618,
+        "fib_tp": 1.0,
+        "tp1_rr": 1.5,
         "rsi_period": 14,
-        "rsi_zone_min": 35,
-        "rsi_zone_max": 65,
-        "candle_confirm": true,
-        "primary_timeframe": "H4"
+        "rsi_bull_min": 35,
+        "rsi_bull_max": 65,
+        "rsi_bear_min": 35,
+        "rsi_bear_max": 65,
+        "atr_period": 14,
+        "sl_atr_mult": 1.5,
+        "candle_confirm": true
       },
       "weekly_breakout": {
-        "atr_period": 14,
-        "atr_multiplier": 0.5,
+        "atr_break_mult": 0.5,
         "macd_fast": 12,
         "macd_slow": 26,
         "macd_signal": 9,
-        "adx_min": 20,
-        "primary_timeframe": "D1"
+        "adx_period": 14,
+        "adx_threshold": 20,
+        "tp1_rr": 1.5,
+        "tp_rr": 2.0,
+        "sl_atr_mult": 1.0,
+        "entry_buffer_pips": 2,
+        "vol_confirm_mult": 0
       }
     }
   }

@@ -18,7 +18,7 @@ DEFAULT_PARAMS = {
     "rsi_period": 14,
     "retest_mode": False,
     "sl_buffer_atr": 0.3,
-    "tp1_rr": 1.2,   # fast partial close at 1.2R
+    "tp1_rr": 1.5,   # partial close at 1.5R (minimum for day_trading risk_reward_min)
     "tp_rr": 1.8,    # tp2 at next structural level (or 1.8R fallback)
     "min_touches": 2,          # minimum touches to qualify a level
     "level_tolerance": 0.0015, # price tolerance for touch counting (0.15%)

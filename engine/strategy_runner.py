@@ -178,11 +178,17 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
 
 # Primary timeframe per strategy — used for regime classification and LSTM scoring.
 # Kept at module level so both _run_strategy and the scorer share one definition.
+#
+# IMPORTANT for scalping strategies: regime classification uses H1 data (not M5).
+# M5 ADX(14) covers only 70 minutes of history and flips every few bars — it labels
+# the market as "ranging" or "quiet" mid-trend, blocking valid trend-following signals.
+# H1 ADX(14) covers 14 hours and gives a stable, meaningful regime label that reflects
+# the actual intraday structure the scalp is trading within.
 _PRIMARY_TF: dict[str, str] = {
-    "ema_scalp":           "M5",
-    "bb_squeeze":          "M5",
-    "vwap_reversion":      "M5",
-    "stoch_rsi_pullback":  "M5",
+    "ema_scalp":           "H1",   # regime from H1; strategy still executes on M5 data
+    "bb_squeeze":          "H1",   # regime from H1; strategy still executes on M5 data
+    "vwap_reversion":      "H1",   # regime from H1; strategy still executes on M5 data
+    "stoch_rsi_pullback":  "H1",   # regime from H1; strategy still executes on M5 data
     "macd_ema_trend":      "H1",
     "sr_breakout":         "H1",
     "rsi_divergence":      "H1",  # LSTM trained on H1; M30 data passed to strategy via _dispatch()
@@ -204,13 +210,20 @@ _REGIME_STRATEGIES: dict[str, set[str]] = {
                           "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout", "rsi_divergence"},
     "trending_bear":     {"macd_ema_trend", "ema_trend_rider", "sr_breakout", "ema_scalp", "bb_squeeze",
                           "stoch_rsi_pullback", "fibonacci_rsi", "weekly_breakout", "rsi_divergence"},
-    "ranging_low_vol":   {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
-    "ranging_high_vol":  {"vwap_reversion", "bb_squeeze", "fibonacci_rsi", "rsi_divergence"},
+    # ranging: add stoch_rsi_pullback — it trades mean-reversion pullbacks within a structured
+    # EMA stack, which is exactly how ranging markets behave. Also add ema_scalp for
+    # ranging_high_vol where price moves enough to trigger crossovers.
+    "ranging_low_vol":   {"vwap_reversion", "bb_squeeze", "stoch_rsi_pullback", "fibonacci_rsi", "rsi_divergence"},
+    "ranging_high_vol":  {"vwap_reversion", "bb_squeeze", "stoch_rsi_pullback", "ema_scalp",
+                          "fibonacci_rsi", "rsi_divergence"},
     # Volatile breakout: allow breakout + trend-confirmation strategies
     # rsi_divergence included to catch false breakouts / exhaustion reversals
     "volatile_breakout": {"sr_breakout", "weekly_breakout", "bb_squeeze",
                           "macd_ema_trend", "ema_trend_rider", "fibonacci_rsi", "rsi_divergence"},
-    "quiet":             set(),   # no trades in quiet / undefined market
+    # quiet: allow bb_squeeze (waits for squeeze to form then signals breakout) and
+    # vwap_reversion (VWAP mean-reversion works best when price is hugging VWAP).
+    # All other strategies blocked — quiet markets have no directional opportunity.
+    "quiet":             {"bb_squeeze", "vwap_reversion"},
 }
 
 # Dynamic regime gate thresholds.
@@ -316,9 +329,21 @@ class StrategyRunner:
         trading_type: str,
         symbol: str,
         strat_name: str,
+        *,
+        _account: dict | None = None,   # pre-fetched by run_mode() — avoids 28x API calls per bar
     ) -> StrategySignal | None:
         if strat_name not in STRATEGY_MAP:
             logger.warning(f"Unknown strategy: {strat_name}")
+            return None
+
+        # ── Circuit-breaker check FIRST (before any expensive data fetch) ─────
+        # is_trading_allowed checks daily loss limit, max open trades, and
+        # global/mode-specific circuit breakers.  If trading is blocked for this
+        # mode, every symbol×strategy combination in the loop will fail —
+        # checking here avoids up to 28 OHLCV fetches per blocked bar.
+        risk_allowed, risk_reason = self.risk_manager.is_trading_allowed(trading_type)
+        if not risk_allowed:
+            logger.info(f"Trading halted for {trading_type} — {risk_reason} ({symbol})")
             return None
 
         strat_cls = STRATEGY_MAP[strat_name]
@@ -392,8 +417,9 @@ class StrategyRunner:
 
         sig = result.signal
 
-        # Risk validation
-        account = self.client.get_account_info()
+        # Risk validation — use pre-fetched account when available (cached by run_mode)
+        # to avoid one MT5 API call per symbol×strategy (up to 28× per bar).
+        account = _account or self.client.get_account_info()
         if account is None:
             return None
 
@@ -411,10 +437,7 @@ class StrategyRunner:
             logger.debug(f"{strat_name}/{symbol}: R:R validation failed — signal skipped")
             return None
 
-        risk_allowed, risk_reason = self.risk_manager.is_trading_allowed(trading_type)
-        if not risk_allowed:
-            logger.info(f"Trading halted for {trading_type} — {risk_reason} ({symbol})")
-            return None
+        # (is_trading_allowed already checked at the top of this method)
 
         # News filter gate
         news_blocked, news_reason = news_filter.is_blocked(symbol, trading_type)
@@ -653,11 +676,22 @@ class StrategyRunner:
         new_signals: list[StrategySignal] = []
         symbols = symbols_override if symbols_override is not None else self._enabled_symbols(trading_type)
         active_strategies = self._active_strategies(trading_type)
+
+        # Fetch account info ONCE per mode run and pass it down to every
+        # _run_strategy call — avoids up to N_symbols × N_strategies MT5 API
+        # round-trips per bar (e.g. 7 symbols × 4 scalping strategies = 28 calls
+        # collapsed to 1).  Falls back to a per-call fetch if this fails.
+        _mode_account: dict | None = None
+        try:
+            _mode_account = self.client.get_account_info()
+        except Exception as _acct_exc:
+            logger.warning(f"run_mode [{trading_type}]: account pre-fetch failed: {_acct_exc}")
+
         for symbol in symbols:
             per_symbol_strats = self._per_symbol_overrides(trading_type, symbol) or active_strategies
             candidates: list[StrategySignal] = []
             for strat_name in per_symbol_strats:
-                sig = self._run_strategy(trading_type, symbol, strat_name)
+                sig = self._run_strategy(trading_type, symbol, strat_name, _account=_mode_account)
                 if sig:
                     candidates.append(sig)
                 else:

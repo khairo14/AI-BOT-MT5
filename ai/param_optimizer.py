@@ -141,40 +141,41 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "macd_signal": [6, 9],
         "ema_fast":    [15, 20],
         "ema_slow":    [45, 50],
-        "tp1_rr":      [0.8, 1.0, 1.2],
-        "tp2_rr":      [1.5, 2.0, 2.5],
+        "tp1_rr":      [1.5, 1.8, 2.0],   # must be ≥ risk_reward_min 1.5 (day_trading)
+        "tp2_rr":      [2.0, 2.5, 3.0],
     },
     "sr_breakout": {
         "lookback_bars":  [30, 50, 70],
         "atr_period":     [10, 14, 20],
         "sl_buffer_atr":  [0.2, 0.3, 0.5],
-        "tp1_rr":         [0.8, 1.0, 1.2],    # partial close level
-        "tp_rr":          [1.5, 1.8, 2.2],    # tp2 (full close)
+        "tp1_rr":         [1.5, 1.8, 2.0],   # must be ≥ risk_reward_min 1.5 (day_trading)
+        "tp_rr":          [2.0, 2.2, 2.5],   # tp2 (full close)
     },
     "rsi_divergence": {
         "rsi_period":      [10, 14, 18],
         "ema_bias_period": [40, 50, 65],
-        "tp_rr":           [1.2, 1.5, 2.0],   # tp1 (partial close)
+        "tp_rr":           [1.5, 1.8, 2.0],   # tp1 (partial close) — must be ≥ risk_reward_min 1.5 (day_trading)
         "tp2_rr":          [2.0, 2.5, 3.0],   # tp2 (full close)
     },
     "ema_trend_rider": {
         "ema_fast":     [13, 20, 25],
         "ema_slow":     [50, 60, 75],
         "sl_atr_mult":  [1.0, 1.5, 2.0],
-        "tp1_rr":       [1.0, 1.5, 2.0],      # partial close level
-        "tp_rr":        [2.0, 2.5, 3.0],      # tp2 (full close)
+        "tp1_rr":       [1.5, 2.0, 2.5],      # must be ≥ risk_reward_min 1.5 (swing)
+        "tp_rr":        [2.5, 3.0, 3.5],      # tp2 (full close)
     },
     "fibonacci_rsi": {
-        "rsi_period":   [10, 14, 18],
-        "fib_lookback": [30, 50, 70],
-        "sl_atr_mult":  [1.0, 1.5, 2.0],
-        "tp1_rr":       [1.2, 1.5, 2.0],      # partial close level (tp2 = swing extension, not a param)
+        "rsi_period":      [10, 14, 18],
+        "impulse_lookback": [30, 50, 70],     # was fib_lookback (dead key — code reads impulse_lookback)
+        "sl_atr_mult":     [1.0, 1.5, 2.0],
+        "tp1_rr":          [1.5, 2.0, 2.5],  # must be ≥ risk_reward_min 1.5 (swing)
     },
     "weekly_breakout": {
-        "lookback_bars": [50, 80, 100],
-        "sl_atr_mult":   [1.0, 1.5, 2.0, 2.5],
-        "tp1_rr":        [1.0, 1.5, 2.0],     # partial close level
-        "tp_rr":         [1.5, 2.0, 2.5],     # tp2 (full close)
+        "atr_break_mult": [0.3, 0.5, 0.7],    # was lookback_bars (dead key — code reads atr_break_mult)
+        "adx_threshold":  [18, 20, 25],       # key that code actually reads
+        "sl_atr_mult":    [1.0, 1.5, 2.0, 2.5],
+        "tp1_rr":         [1.5, 2.0, 2.5],   # must be ≥ risk_reward_min 1.5 (swing)
+        "tp_rr":          [2.0, 2.5, 3.0],   # tp2 (full close)
     },
 }
 

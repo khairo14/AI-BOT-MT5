@@ -1234,6 +1234,20 @@
       "fib_lookback": 30,
       "sl_atr_mult": 1.5,
       "tp1_rr": 2.0
+    },
+    "ADAUSD": {
+      "rsi_period": 10,
+      "fib_lookback": 30,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 10,
+          "fib_lookback": 30,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0
+        }
+      }
     }
   },
   "weekly_breakout": {
@@ -2326,6 +2340,42 @@
           "rr": 3.0
         }
       }
+    },
+    "GBPCAD": {
+      "ema_fast": 13,
+      "ema_slow": 26,
+      "rsi_min": 40,
+      "rsi_max": 65,
+      "sl_pips": 4,
+      "rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 8,
+          "ema_slow": 21,
+          "rsi_min": 52,
+          "rsi_max": 65,
+          "sl_pips": 8,
+          "rr": 1.5
+        }
+      }
+    },
+    "AUDCAD": {
+      "ema_fast": 13,
+      "ema_slow": 26,
+      "rsi_min": 40,
+      "rsi_max": 70,
+      "sl_pips": 10,
+      "rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 21,
+          "rsi_min": 40,
+          "rsi_max": 60,
+          "sl_pips": 8,
+          "rr": 2.0
+        }
+      }
     }
   },
   "bb_squeeze": {
@@ -2470,20 +2520,20 @@
       }
     },
     "EURUSD": {
-      "bb_period": 25,
-      "bb_std": 1.5,
-      "min_squeeze_bars": 3,
+      "bb_period": 20,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 5,
       "sl_atr_mult": 1.0,
-      "tp1_atr_mult": 1.0,
-      "tp_atr_mult": 2.5,
+      "tp1_atr_mult": 1.5,
+      "tp_atr_mult": 3.0,
       "by_regime": {
         "quiet": {
-          "bb_period": 25,
-          "bb_std": 1.5,
-          "min_squeeze_bars": 3,
+          "bb_period": 20,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 5,
           "sl_atr_mult": 1.0,
-          "tp1_atr_mult": 1.0,
-          "tp_atr_mult": 2.5
+          "tp1_atr_mult": 1.5,
+          "tp_atr_mult": 3.0
         }
       }
     },
@@ -2504,6 +2554,24 @@
       }
     },
     "AUDCAD": {
+      "bb_period": 20,
+      "bb_std": 1.5,
+      "min_squeeze_bars": 5,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 2.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 20,
+          "bb_std": 1.5,
+          "min_squeeze_bars": 5,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 2.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "GBPJPY": {
       "bb_period": 15,
       "bb_std": 2.5,
       "min_squeeze_bars": 5,

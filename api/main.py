@@ -175,30 +175,117 @@ async def _rl_idle_decay_loop() -> None:
         except Exception as _exc:
             logger.debug(f"RL idle decay loop error: {_exc}")
 
+_SCANNER_JSON_PATH = Path("config/scanner.json")
+_MARKET_SCANNER_CFG_PATH = Path("config/market_scanner.json")
+
+# Mode key mapping: scan summary key -> scanner.json key (they are the same, but explicit)
+_SCAN_MODE_MAP = {
+    "scalping":    {"timeframe": "M1/M5"},
+    "day_trading": {"timeframe": "M15/H1"},
+    "swing":       {"timeframe": "H4/D1"},
+}
+
+
+def _update_scanner_json(summary) -> None:
+    """
+    Write the top-ranked symbols from an auto-scan back to scanner.json so that
+    runner_loop picks them up on the next bar.  Preserves the enabled flag for
+    each mode and only replaces the symbols list.  Skipped if
+    auto_update_scanner is false in market_scanner.json.
+    """
+    try:
+        with open(_MARKET_SCANNER_CFG_PATH, "r", encoding="utf-8") as _f:
+            scan_cfg = json.load(_f)
+    except Exception as exc:
+        logger.warning(f"Market scanner write-back: cannot read market_scanner.json: {exc}")
+        return
+
+    if not scan_cfg.get("auto_update_scanner", False):
+        return
+
+    max_per_mode: dict = scan_cfg.get("max_symbols_per_mode", {})
+
+    # Load existing scanner.json to preserve the enabled flags and timeframe strings
+    existing: dict = {}
+    try:
+        if _SCANNER_JSON_PATH.exists():
+            existing = json.loads(_SCANNER_JSON_PATH.read_text(encoding="utf-8-sig"))
+    except Exception:
+        pass
+
+    updated_any = False
+    for mode, defaults in _SCAN_MODE_MAP.items():
+        results = summary.trading_types.get(mode, [])
+        if not results:
+            continue
+
+        mode_entry = existing.get(mode, {})
+
+        # Respect manual_override: if the user has set this flag in scanner.json,
+        # the auto-scan result is logged but the symbols list is NOT replaced.
+        # Set manual_override=false in scanner.json to re-enable auto-update.
+        if mode_entry.get("manual_override", False):
+            logger.info(
+                f"Market scanner write-back [{mode}]: manual_override=true — "
+                f"keeping existing symbols, ignoring {len(results)} scan results"
+            )
+            continue
+
+        limit = max_per_mode.get(mode, 15)
+        top_symbols = [r.symbol for r in results[:limit]]
+
+        old_symbols = mode_entry.get("symbols", [])
+
+        existing[mode] = {
+            "enabled":         mode_entry.get("enabled", True),
+            "manual_override": mode_entry.get("manual_override", False),
+            "symbols":         top_symbols,
+            "timeframe":       mode_entry.get("timeframe", defaults["timeframe"]),
+        }
+
+        logger.info(
+            f"Market scanner write-back [{mode}]: "
+            f"{len(old_symbols)} → {len(top_symbols)} symbols | {top_symbols}"
+        )
+        updated_any = True
+
+    if not updated_any:
+        return
+
+    # Atomic write: write to .tmp then rename so runner_loop never reads a partial file
+    try:
+        tmp = _SCANNER_JSON_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        tmp.replace(_SCANNER_JSON_PATH)
+        logger.info("Market scanner write-back: scanner.json updated")
+    except Exception as exc:
+        logger.warning(f"Market scanner write-back: failed to write scanner.json: {exc}")
+
+
 async def _market_scanner_loop() -> None:
     """
     Background task that runs market scanner every 60 minutes.
-    Discovers new trading opportunities and updates cached results.
+    Discovers new trading opportunities and updates scanner.json via write-back.
     """
     # Wait 2 minutes after startup before first scan (let system stabilize)
     await asyncio.sleep(120)
-    
+
     while True:
         try:
             if mt5_client is None or not mt5_client.is_connected():
                 logger.debug("Market scanner: MT5 not connected, skipping scan")
                 await asyncio.sleep(600)  # check again in 10 minutes
                 continue
-            
+
             logger.info("Market scanner: Starting automatic scan...")
             start_time = datetime.now(timezone.utc)
-            
+
             from engine.market_scanner import MarketScanner
             scanner = MarketScanner(mt5_client)
             summary = await asyncio.to_thread(scanner.scan_all, force_refresh=True)
-            
+
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
-            
+
             logger.info(
                 f"Market scanner: Complete | "
                 f"Scanned: {summary.total_scanned} | "
@@ -208,10 +295,13 @@ async def _market_scanner_loop() -> None:
                 f"Day: {len(summary.trading_types.get('day_trading', []))} | "
                 f"Swing: {len(summary.trading_types.get('swing', []))}"
             )
-            
+
+            # Write top symbols back to scanner.json so runner_loop uses them next bar
+            _update_scanner_json(summary)
+
         except Exception as _exc:
             logger.warning(f"Market scanner loop error: {_exc}")
-        
+
         # Wait 60 minutes before next scan
         await asyncio.sleep(3600)
 

@@ -250,7 +250,12 @@ class MarketScanner:
             cat_cfg = self.cfg["categories"].get(category)
             if not cat_cfg or not cat_cfg.get("enabled"):
                 continue
-            
+
+            # Enforce allowed_categories for this trading type (strategy compatibility)
+            allowed = type_cfg.get("allowed_categories")
+            if allowed and category not in allowed:
+                continue
+
             # Calculate all metrics
             metrics = self._calculate_metrics(
                 symbol, 

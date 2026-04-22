@@ -1234,6 +1234,20 @@
       "fib_lookback": 30,
       "sl_atr_mult": 1.5,
       "tp1_rr": 2.0
+    },
+    "ADAUSD": {
+      "rsi_period": 10,
+      "fib_lookback": 30,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 10,
+          "fib_lookback": 30,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0
+        }
+      }
     }
   },
   "weekly_breakout": {
