@@ -364,6 +364,13 @@ class OrderManager:
                 if _tick:
                     bid = _tick.bid
                     ask = _tick.ask
+                    # stops_level=0: broker enforces live spread as minimum distance.
+                    # sym_info["spread"] is stale cached metadata; use live ask-bid
+                    # instead to match what MT5 will actually enforce at order_send().
+                    if stops_level == 0 and bid > 0 and ask > 0:
+                        live_spread = ask - bid
+                        if live_spread > min_distance:
+                            min_distance = live_spread
             except Exception:
                 pass
             
