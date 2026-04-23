@@ -24,6 +24,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Response
 from loguru import logger
+from engine.account_store import current_mode as _cur_mode
 
 router = APIRouter()
 
@@ -190,7 +191,7 @@ def prometheus_metrics():
         from datetime import datetime, timezone
         today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
         
-        all_trades = trade_journal.get(account="all", event="open", limit=1000)
+        all_trades = trade_journal.get(account=_cur_mode(), event="open", limit=1000)
         trades_today = [t for t in all_trades if t.get("logged_at", "")[:10] == today]
         
         lines.append("# HELP aibot_trades_today Number of trades opened today")

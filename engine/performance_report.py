@@ -19,8 +19,8 @@ class PerformanceReporter:
     def __init__(self, journal_path: str = "data/trade_journal.jsonl"):
         self.journal_path = Path(journal_path)
         
-    def load_trades(self, days: int = None) -> List[Dict[str, Any]]:
-        """Load all trades, optionally filtered by date"""
+    def load_trades(self, days: int = None, mode: str = None) -> List[Dict[str, Any]]:
+        """Load all trades, optionally filtered by date and account mode."""
         if not self.journal_path.exists():
             return []
             
@@ -33,6 +33,9 @@ class PerformanceReporter:
                     trade = json.loads(line.strip())
                     # Only count closed trades with a real profit value
                     if trade.get("event") != "close" or trade.get("profit") is None:
+                        continue
+                    # Filter by account mode when specified
+                    if mode and trade.get("account_mode") != mode:
                         continue
                     if cutoff:
                         close_time_raw = trade.get("close_time")
@@ -133,9 +136,9 @@ class PerformanceReporter:
             ),
         }
     
-    def generate_report(self, days: int = None) -> Dict[str, Any]:
+    def generate_report(self, days: int = None, mode: str = None) -> Dict[str, Any]:
         """Generate full performance report"""
-        trades = self.load_trades(days)
+        trades = self.load_trades(days, mode=mode)
         overall_metrics = self.calculate_metrics(trades)
         by_symbol = self.breakdown_by_symbol(trades)
         by_type = self.breakdown_by_trading_type(trades)

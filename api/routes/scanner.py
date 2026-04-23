@@ -14,6 +14,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from api.dependencies import get_client
+from engine.account_store import current_mode as _cur_mode
 from engine.mt5_client import MT5Client
 from engine.market_scanner import MarketScanner, ScanSummary, summary_to_dict
 
@@ -350,6 +351,7 @@ async def get_scanner_performance(request: Request):
         
         # Load trade journal for stats
         journal_path = "data/trade_journal.jsonl"
+        _mode = _cur_mode()
         pair_stats = defaultdict(lambda: {
             "signals": 0, "trades": 0, "wins": 0, 
             "losses": 0, "total_profit": 0.0, "last_signal": None
@@ -362,6 +364,9 @@ async def get_scanner_performance(request: Request):
                         trade = json.loads(line)
                         symbol = trade.get("symbol")
                         if not symbol:
+                            continue
+                        # Only count trades for the current account mode
+                        if trade.get("account_mode") != _mode:
                             continue
                         
                         trade_type = trade.get("trading_type", "")

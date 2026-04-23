@@ -32,6 +32,20 @@
 | APR-9 | is_trading_allowed checked after OHLCV fetch | 🟡 Medium | ✅ Fixed |
 | APR-10 | account_info fetched N×M times per bar | 🟡 Medium | ✅ Fixed |
 | APR-11 | swing vol_confirm_mult missing in strategies.json | 🟠 High | ✅ Fixed |
+| SEG-1 | `/ai/lstm/calibration` mixes paper+live trades | 🟠 High | ✅ Fixed |
+| SEG-2 | `/ai/lstm/accuracy` mixes paper+live trades | 🟠 High | ✅ Fixed |
+| SEG-3 | `snapshot_accuracy()` snapshots lack mode field | 🟠 High | ✅ Fixed |
+| SEG-4 | `/ai/lstm/confidence-distribution` mixes paper+live | 🟡 Medium | ✅ Fixed |
+| SEG-5 | `/ai/memory/stats` no mode filter at all | 🟡 Medium | ✅ Fixed |
+| SEG-6 | `/ai/memory/recent` no mode filter | 🟡 Medium | ✅ Fixed |
+| SEG-7 | WS performance monitor alerts mix paper+live | 🟠 High | ✅ Fixed |
+| SEG-8 | param_optimizer re-trigger mixes paper+live win rate | 🟠 High | ✅ Fixed |
+| SEG-9 | `predictor.calibrate()` Platt scaling mixes paper+live | 🟠 High | ✅ Fixed |
+| SEG-10 | `snapshot_accuracy()` call in signal_bus missing mode | 🟡 Medium | ✅ Fixed |
+| SEG-11 | `/profitability/` report mixes paper+live trades | 🟠 High | ✅ Fixed |
+| SEG-12 | `/scanner/performance` stats mix paper+live trades | 🟠 High | ✅ Fixed |
+| SEG-13 | Prometheus metrics hardcoded `account="all"` | 🟡 Medium | ✅ Fixed |
+| SEG-14 | `/trades/journal` paired-open fallback uses `account="all"` | 🟡 Medium | ✅ Fixed |
 
 All findings resolved.
 

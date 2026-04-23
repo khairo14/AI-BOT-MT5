@@ -361,7 +361,7 @@ def get_journal(
         close_tickets = {e["ticket"] for e in entries if e.get("event") == "close"}
         missing = close_tickets - open_tickets
         if missing:
-            all_opens = trade_journal.get(account="all", event="open", limit=10_000)
+            all_opens = trade_journal.get(account=account, event="open", limit=10_000)
             paired = [e for e in all_opens if e["ticket"] in missing]
             entries = list(entries) + paired
             entries.sort(key=lambda x: x.get("logged_at", ""), reverse=True)
