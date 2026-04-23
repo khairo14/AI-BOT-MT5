@@ -174,6 +174,9 @@ export const trainAllSymbols = (bars = 0) =>
 export const calibrateAllModels = () =>
   api.post("/ai/models/calibrate/all").then((r) => r.data);
 
+export const resetCalibration = () =>
+  api.delete("/ai/models/calibrate/reset").then((r) => r.data);
+
 export const runOptimizer = (strategy: string, symbol: string, tradingType: string, bars = 0) =>
   api.post(`/ai/optimizer/run/${strategy}/${symbol}`, { trading_type: tradingType, bars }).then((r) => r.data);
 

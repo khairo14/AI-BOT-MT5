@@ -230,7 +230,13 @@ def _get_strategy_map() -> dict:
 # ── Helper functions ─────────────────────────────────────────────────────────
 
 def _grid_combos(strategy_name: str) -> list[dict]:
-    """Return all valid param combos for a strategy, capped at MAX_GRID_COMBOS."""
+    """Return parameter combos for a strategy, capped at MAX_GRID_COMBOS.
+
+    For grids that fit within the cap, all valid combos are returned.
+    For larger grids, Latin Hypercube Sampling is used: each parameter value
+    appears roughly equally often across the sample, providing better coverage
+    than pure random selection which can cluster around similar values.
+    """
     grid = PARAM_GRIDS.get(strategy_name, {})
     if not grid:
         return [{}]
@@ -241,21 +247,74 @@ def _grid_combos(strategy_name: str) -> list[dict]:
         for combo in itertools.product(*values)
         if _valid_combo(strategy_name, dict(zip(keys, combo)))
     ]
-    if len(all_combos) > MAX_GRID_COMBOS:
-        rng = np.random.default_rng(42)
-        idx = rng.choice(len(all_combos), MAX_GRID_COMBOS, replace=False)
-        all_combos = [all_combos[int(i)] for i in sorted(idx)]
-    return all_combos
+    if len(all_combos) <= MAX_GRID_COMBOS:
+        return all_combos
+
+    # Latin Hypercube Sampling: build MAX_GRID_COMBOS slots where every
+    # parameter value appears roughly n/k times (n=slots, k=values per param),
+    # then shuffle each dimension independently before zipping.
+    # This guarantees coverage across all parameter axes instead of random clustering.
+    rng = np.random.default_rng(42)
+    n = MAX_GRID_COMBOS
+    columns: list[list] = []
+    for vals in values:
+        k = len(vals)
+        repeats = (n + k - 1) // k           # ceil(n/k) repetitions
+        col = (list(vals) * repeats)[:n]     # trim to exactly n slots
+        perm = rng.permutation(n)
+        col  = [col[int(i)] for i in perm]   # shuffle this dimension independently
+        columns.append(col)
+
+    # Zip dimensions into combos, dedup and filter invalid combinations
+    seen: set = set()
+    candidates: list[dict] = []
+    for row in zip(*columns):
+        combo = dict(zip(keys, row))
+        key   = tuple(combo[k] for k in keys)
+        if key not in seen and _valid_combo(strategy_name, combo):
+            seen.add(key)
+            candidates.append(combo)
+
+    # Top up with random valid combos if filtering reduced the count below cap
+    if len(candidates) < n:
+        used   = {tuple(c[k] for k in keys) for c in candidates}
+        extras = [c for c in all_combos if tuple(c[k] for k in keys) not in used]
+        perm2  = rng.permutation(len(extras))
+        extras = [extras[int(i)] for i in perm2]
+        candidates += extras[: n - len(candidates)]
+
+    return candidates
 
 
 def _valid_combo(strategy_name: str, combo: dict) -> bool:
-    """Filter logically invalid combinations."""
+    """Filter logically invalid parameter combinations."""
+    # EMA fast must be strictly less than slow
     fast = combo.get("ema_fast", 0)
     slow = combo.get("ema_slow", 0)
     if fast and slow and fast >= slow:
         return False
+    # MACD fast must be strictly less than slow
     if strategy_name == "macd_ema_trend":
         if combo.get("macd_fast", 0) >= combo.get("macd_slow", 0):
+            return False
+        # TP1 (partial close) must be less than TP2 (full close)
+        if combo.get("tp1_rr", 0) >= combo.get("tp2_rr", float("inf")):
+            return False
+    # Strategies with tp1_rr / tp_rr naming: tp1 must be less than tp2
+    if strategy_name in ("sr_breakout", "ema_trend_rider", "weekly_breakout"):
+        if combo.get("tp1_rr", 0) >= combo.get("tp_rr", float("inf")):
+            return False
+    # rsi_divergence: tp_rr is tp1 (partial close), tp2_rr is tp2 (full close)
+    if strategy_name == "rsi_divergence":
+        if combo.get("tp_rr", 0) >= combo.get("tp2_rr", float("inf")):
+            return False
+    # bb_squeeze: tp1_atr_mult (partial close) must be less than tp_atr_mult (full close)
+    if strategy_name == "bb_squeeze":
+        if combo.get("tp1_atr_mult", 0) >= combo.get("tp_atr_mult", float("inf")):
+            return False
+    # vwap_reversion: stop-loss band must be wider than entry band
+    if strategy_name == "vwap_reversion":
+        if combo.get("sigma_entry", 0) >= combo.get("sigma_sl", float("inf")):
             return False
     return True
 
@@ -697,8 +756,8 @@ class ParamOptimizer:
             # pass the same df as df_h1.
             _extra_dfs = {"df_h1": df}
         elif strategy_name == "ema_scalp":
-            # ema_scalp wants M5 bias; optimizer provides M5 for scalping.
-            _extra_dfs = {"df_m5": df}
+            # ema_scalp wants M15 bias; optimizer provides M5 for scalping (reused as M15 approximation).
+            _extra_dfs = {"df_m15": df}
         elif strategy_name == "ema_trend_rider":
             _extra_dfs = {"df_h4": df, "df_d1": df}
         elif strategy_name == "weekly_breakout":

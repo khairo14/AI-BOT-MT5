@@ -630,6 +630,7 @@ class StrategyRunner:
                 trading_type=trading_type,
                 regime=_regime,
                 df_higher=_df_higher,
+                strategy_name=strat_name,
             )
             # Capture raw LSTM probability from the predictor's cache for accurate
             # lstm_predicted_direction tracking in trade memory and Platt calibration.

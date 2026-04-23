@@ -313,6 +313,23 @@ async def calibrate_all_models():
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return results
+
+
+@router.delete("/models/calibrate/reset")
+async def reset_calibration():
+    """
+    Clear all Platt scaling calibration data.
+    Resets every model to raw sigmoid output (identity: a=1, b=0).
+    Use this when calibration data is known to be contaminated
+    (e.g. after fixing bugs, retraining with new architecture, etc.)
+    and you want to start accumulating clean trade data from scratch.
+    """
+    predictor._calibration.clear()
+    try:
+        predictor._CALIBRATION_FILE.write_text("{}", encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to clear calibration file: {exc}")
+    return {"status": "reset", "message": "All calibration data cleared. Models now use raw sigmoid output."}
 # ───────────────────────────────────
 # RL Agent endpoints
 # ───────────────────────────────────

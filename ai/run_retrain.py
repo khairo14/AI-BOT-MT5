@@ -326,6 +326,34 @@ def main() -> None:
     )
     logger.info("=" * 70)
 
+    # ── Phase 4: re-fit Platt scaling calibration ─────────────────────────────
+    # Now that models are retrained the old calibration params are stale.
+    # Re-fit using live trade outcomes stored in trade_memory (requires ≥30 trades
+    # per symbol+type). Runs in-process — fast (seconds per model).
+    logger.info("\nPhase 4 — Re-fitting Platt scaling calibration …")
+    try:
+        cal_results: list[str] = []
+        for symbol, trading_type in jobs:
+            result = global_predictor.calibrate(symbol, trading_type)
+            status = result.get("status", "unknown")
+            if status == "calibrated":
+                cal_results.append(
+                    f"  ✓ {symbol}/{trading_type}  a={result['a']}  b={result['b']}  "
+                    f"n={result['samples']}"
+                )
+            elif status == "insufficient_data":
+                cal_results.append(
+                    f"  – {symbol}/{trading_type}  skipped ({result['samples']}/{result['needed']} trades)"
+                )
+            else:
+                cal_results.append(f"  ✗ {symbol}/{trading_type}  {status}")
+        for line in cal_results:
+            logger.info(line)
+        calibrated = sum(1 for r in cal_results if r.startswith("  ✓"))
+        logger.info(f"Calibration complete — {calibrated}/{len(jobs)} models re-fitted")
+    except Exception as exc:
+        logger.warning(f"Calibration phase failed: {exc}")
+
 
 if __name__ == "__main__":
     main()

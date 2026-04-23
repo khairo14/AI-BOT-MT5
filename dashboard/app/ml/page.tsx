@@ -18,6 +18,7 @@ import {
   fetchLstmAccuracyHistory,
   fetchLstmConfidenceDistribution,
   calibrateAllModels,
+  resetCalibration,
 } from "@/lib/api";
 
 //  helpers 
@@ -97,6 +98,7 @@ type OptimizerJob = {  strategy?: string;
   best_score?: number;
   n_signals?: number;
   last_optimized_at?: string;
+  last_attempted_at?: string;
   best_params?: Record<string, unknown>;
   bars_used?: number;
   running?: boolean;
@@ -168,6 +170,17 @@ export default function MLPage() {
   const [optSearch, setOptSearch] = useState("");
   type OptSortKey = "strategy" | "symbol" | "score" | "signals" | "last_run";
   const [optSort, setOptSort] = useState<{ key: OptSortKey; dir: "asc" | "desc" }>({ key: "symbol", dir: "asc" });
+
+  // Toast notifications
+  const [toasts, setToasts] = useState<Array<{ id: number; msg: string; type: "success" | "error" | "warn" }>>([]);
+  function showToast(msg: string, type: "success" | "error" | "warn" = "success") {
+    const id = Date.now();
+    setToasts((t) => [...t, { id, msg, type }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+  }
+
+  // Reset calibration confirm state
+  const [resetCalPending, setResetCalPending] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -242,9 +255,14 @@ export default function MLPage() {
     return () => clearInterval(id);
   }, [load]);
 
-  async function doAction(key: string, fn: () => Promise<unknown>) {
+  async function doAction(key: string, fn: () => Promise<unknown>, successMsg?: string) {
     setBusy((b) => ({ ...b, [key]: true }));
-    try { await fn(); } catch (_) {/* ignore */}
+    try {
+      await fn();
+      if (successMsg) showToast(successMsg, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Action failed", "error");
+    }
     setBusy((b) => ({ ...b, [key]: false }));
     await load();
   }
@@ -609,13 +627,43 @@ export default function MLPage() {
             <h2 className="text-lg font-semibold text-white">Model Calibration &amp; Performance</h2>
             <p className="text-xs text-gray-500 mt-0.5">LSTM prediction quality — compares predicted confidence against actual win rate, tracks accuracy over time, and shows confidence distribution.</p>
           </div>
-          <button
-            disabled={busy["calibrate_all"]}
-            onClick={() => doAction("calibrate_all", () => calibrateAllModels())}
-            className="px-3 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded font-medium"
-          >
-            {busy["calibrate_all"] ? "Calibrating..." : "Calibrate All"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={busy["calibrate_all"]}
+              onClick={() => doAction("calibrate_all", () => calibrateAllModels(), "Calibration complete")}
+              className="px-3 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded font-medium"
+            >
+              {busy["calibrate_all"] ? "Calibrating..." : "Calibrate All"}
+            </button>
+            {resetCalPending ? (
+              <span className="flex items-center gap-1.5">
+                <span className="text-xs text-rose-400">Clear all calibration data?</span>
+                <button
+                  disabled={busy["reset_calibration"]}
+                  onClick={() => {
+                    setResetCalPending(false);
+                    doAction("reset_calibration", () => resetCalibration(), "Calibration data cleared — models now use raw sigmoid output");
+                  }}
+                  className="px-2 py-1 text-xs bg-rose-800 hover:bg-rose-700 disabled:opacity-50 rounded text-rose-200 font-medium"
+                >
+                  {busy["reset_calibration"] ? "Resetting..." : "Yes, reset"}
+                </button>
+                <button
+                  onClick={() => setResetCalPending(false)}
+                  className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => setResetCalPending(true)}
+                className="px-3 py-1.5 text-xs bg-rose-900 hover:bg-rose-800 rounded font-medium text-rose-300"
+              >
+                Reset Calibration
+              </button>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -871,15 +919,21 @@ export default function MLPage() {
                               <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-900 text-amber-300 animate-pulse">Running...</span>
                             ) : job.queued ? (
                               <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-900 text-blue-300">Queued</span>
+                            ) : (job.best_score === 0 && !job.best_params) ? (
+                              <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-rose-950 text-rose-400">No edge</span>
                             ) : (
                               job.best_score != null ? job.best_score.toFixed(3) : "—"
                             )}
                           </td>
                           <td className="py-2 pr-4">{job.n_signals ?? "—"}</td>
                           <td className="py-2 pr-4 text-gray-500">{job.bars_used ?? "—"}</td>
-                          <td className="py-2 pr-4 text-gray-400">{relTime(job.last_optimized_at)}</td>
-                          <td className="py-2 pr-4 text-gray-400 text-xs max-w-48 truncate">
-                            {job.best_params ? JSON.stringify(job.best_params) : "—"}
+                          <td className="py-2 pr-4 text-gray-400">{relTime(job.last_optimized_at ?? job.last_attempted_at)}</td>
+                          <td className="py-2 pr-4 text-xs max-w-48 truncate">
+                            {job.best_params ? (
+                              <span className="text-gray-400">{JSON.stringify(job.best_params)}</span>
+                            ) : (job.best_score === 0) ? (
+                              <span className="text-rose-500">No params found</span>
+                            ) : "—"}
                           </td>
                           <td className="py-2">
                             <button
@@ -1241,6 +1295,24 @@ export default function MLPage() {
           </div>
         </div>
       </section>
+
+      {/* Toast notifications */}
+      <div className="fixed bottom-5 right-5 flex flex-col gap-2 z-50 pointer-events-none">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`px-4 py-2.5 rounded-lg text-sm font-medium shadow-xl border ${
+              t.type === "success"
+                ? "bg-emerald-950 text-emerald-200 border-emerald-700"
+                : t.type === "error"
+                ? "bg-rose-950 text-rose-200 border-rose-700"
+                : "bg-amber-950 text-amber-200 border-amber-700"
+            }`}
+          >
+            {t.msg}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

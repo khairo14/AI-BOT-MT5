@@ -134,15 +134,16 @@ class SignalScorer:
     
     def score(
         self,
-        symbol:       str,
-        direction:    str,        # "BUY" or "SELL"
-        entry:        float,
-        sl:           float,
-        tp:           float,
-        df:           pd.DataFrame,   # primary timeframe OHLCV, most-recent bar last
-        trading_type: str = "day_trading",
-        regime:       str | None = None,  # market regime label from RegimeClassifier
-        df_higher:    pd.DataFrame | None = None,  # higher timeframe for MTF confirmation
+        symbol:        str,
+        direction:     str,        # "BUY" or "SELL"
+        entry:         float,
+        sl:            float,
+        tp:            float,
+        df:            pd.DataFrame,   # primary timeframe OHLCV, most-recent bar last
+        trading_type:  str = "day_trading",
+        regime:        str | None = None,  # market regime label from RegimeClassifier
+        df_higher:     pd.DataFrame | None = None,  # higher timeframe for MTF confirmation
+        strategy_name: str | None = None,  # strategy name for optimizer no-edge penalty
     ) -> float:
         """
         Return a 0–1 confidence score for a pending signal.
@@ -177,6 +178,27 @@ class SignalScorer:
                     score *= 0.95  # neutral — slight penalty
                 else:
                     score *= 0.85  # conflicted — meaningful penalty
+
+            # Optimizer no-edge penalty: if the optimizer explicitly ran for this
+            # strategy+symbol and found zero valid parameter combinations (best_score=0
+            # and no best_params saved), reduce confidence by 30%.
+            # This discourages trading pairs where the strategy has no proven edge
+            # without hard-blocking them (they may recover after retrain+re-optimize).
+            if strategy_name:
+                try:
+                    from ai.param_optimizer import optimizer as _opt
+                    _opt_key = f"{strategy_name}__{symbol}"
+                    _opt_info = _opt._status.get(_opt_key, {})
+                    _ran = "last_attempted_at" in _opt_info or "last_optimized_at" in _opt_info
+                    _no_edge = _ran and _opt_info.get("best_score", -1) == 0.0 and not _opt_info.get("best_params")
+                    if _no_edge:
+                        score *= 0.85
+                        logger.debug(
+                            f"SignalScorer: no-edge penalty applied for {strategy_name}/{symbol} "
+                            f"(optimizer found 0 valid combos)"
+                        )
+                except Exception:
+                    pass
 
             return round(float(np.clip(score, 0.0, 1.0)), 4)
         
