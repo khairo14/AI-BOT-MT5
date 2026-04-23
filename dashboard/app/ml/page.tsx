@@ -17,6 +17,7 @@ import {
   fetchLstmCalibration,
   fetchLstmAccuracyHistory,
   fetchLstmConfidenceDistribution,
+  calibrateAllModels,
 } from "@/lib/api";
 
 //  helpers 
@@ -603,10 +604,19 @@ export default function MLPage() {
 
       {/*  2b. Model Calibration  */}
       <section>
-        <SectionHeader
-          title="Model Calibration &amp; Performance"
-          sub="LSTM prediction quality — compares predicted confidence against actual win rate, tracks accuracy over time, and shows confidence distribution."
-        />
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Model Calibration &amp; Performance</h2>
+            <p className="text-xs text-gray-500 mt-0.5">LSTM prediction quality — compares predicted confidence against actual win rate, tracks accuracy over time, and shows confidence distribution.</p>
+          </div>
+          <button
+            disabled={busy["calibrate_all"]}
+            onClick={() => doAction("calibrate_all", () => calibrateAllModels())}
+            className="px-3 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 disabled:opacity-50 rounded font-medium"
+          >
+            {busy["calibrate_all"] ? "Calibrating..." : "Calibrate All"}
+          </button>
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Calibration Curve */}

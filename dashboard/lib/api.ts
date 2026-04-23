@@ -171,6 +171,9 @@ export const trainSymbol = (symbol: string, tradingType: string, bars = 0) =>
 export const trainAllSymbols = (bars = 0) =>
   api.post("/ai/train/all", { bars }).then((r) => r.data);
 
+export const calibrateAllModels = () =>
+  api.post("/ai/models/calibrate/all").then((r) => r.data);
+
 export const runOptimizer = (strategy: string, symbol: string, tradingType: string, bars = 0) =>
   api.post(`/ai/optimizer/run/${strategy}/${symbol}`, { trading_type: tradingType, bars }).then((r) => r.data);
 
