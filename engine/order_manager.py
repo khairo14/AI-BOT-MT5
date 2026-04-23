@@ -170,7 +170,12 @@ class OrderManager:
         if stops_level > 0:
             min_dist = stops_level * sym_info.point
         else:
-            min_dist = sym_info.spread * sym_info.point  # spread-based fallback
+            # stops_level=0: broker enforces no fixed minimum, but MT5 still
+            # rejects if SL lands exactly on the bid/ask (SL = ask - spread = bid
+            # for a BUY is still "Invalid stops" on most brokers).  Add 1 pip of
+            # safety margin above the raw spread so SL is strictly inside the book.
+            _pip_pts = 10 if sym_info.digits in (3, 5) else 1
+            min_dist = (sym_info.spread + _pip_pts) * sym_info.point
         if min_dist > 0:
             sl_dist = abs(price - sl)
             if sl_dist < min_dist:
