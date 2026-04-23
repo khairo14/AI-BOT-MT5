@@ -725,8 +725,9 @@ class PricePredictor:
 
         try:
             from ai.trade_memory import memory as _mem
+            from engine.account_store import current_mode as _cur_mode_cal
             outcomes = [
-                o for o in _mem.recent(n=500, live_only=True)
+                o for o in _mem.recent(n=500, live_only=True, mode=_cur_mode_cal())
                 if o.get("symbol") == symbol
                 and o.get("trading_type") == trading_type
                 and o.get("lstm_predicted_direction") is not None

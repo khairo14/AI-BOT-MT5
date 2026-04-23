@@ -5,8 +5,8 @@
   "auto_update_scanner": false,
   "max_symbols_per_mode": {
     "scalping": 10,
-    "day_trading": 12,
-    "swing": 15
+    "day_trading": 20,
+    "swing": 25
   },
   "exclude_symbols": [
     "XAUAUD", "XAUEUR", "XAGGBP", "XAGEUR",
@@ -42,7 +42,7 @@
     "day_trading": {
       "enabled": true,
       "description": "Intraday position trading (M15/H1 timeframes)",
-      "allowed_categories": ["forex", "us_index", "eu_index", "commodity"],
+      "allowed_categories": ["forex", "us_index", "eu_index", "commodity", "stock"],
       "criteria": {
         "atr_min_pips": 10.0,
         "atr_max_pips": 150.0,

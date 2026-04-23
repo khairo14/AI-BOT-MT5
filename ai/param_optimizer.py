@@ -555,8 +555,9 @@ class ParamOptimizer:
 
         # Check if live win_rate has fallen — if so, re-optimize despite cooldown
         from ai.trade_memory import memory
+        from engine.account_store import current_mode as _cur_mode_opt
         outcomes = [
-            o for o in memory.recent(n=50, live_only=True)
+            o for o in memory.recent(n=50, live_only=True, mode=_cur_mode_opt())
             if o.get("strategy") == strategy_name and o.get("symbol") == symbol
         ]
         # Count trades that closed AFTER the last optimization

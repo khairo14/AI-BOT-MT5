@@ -19,9 +19,9 @@ import MarketAnalysisTab from "@/components/dashboard/MarketAnalysisTab";
 
 // Mode capacity limits
 const MODE_LIMITS: Record<string, number> = {
-  scalping: 7,
-  day_trading: 15,
-  swing: 18,
+  scalping: 10,
+  day_trading: 20,
+  swing: 25,
 };
 
 // ── helpers ────────────────────────────────────────────────────────────────

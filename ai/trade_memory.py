@@ -135,6 +135,7 @@ class TradeMemory:
         trading_type: Optional[str] = None,
         min_samples: int = 20,
         live_only: bool = True,
+        mode: Optional[str] = None,
     ) -> dict:
         """
         Compute live LSTM prediction accuracy by comparing lstm_predicted_direction
@@ -146,11 +147,13 @@ class TradeMemory:
 
         Returns dict with accuracy per symbol and overall, or empty if insufficient data.
         Requires lstm_predicted_direction to be populated in TradeOutcome.extra or field.
+        mode: if set, restricts to trades from that account mode ("live" or "paper").
         """
         outcomes = self.recent(
             n=self.MAX_BUFFER,
             trading_type=trading_type,
             live_only=live_only,
+            mode=mode,
         )
         # Only consider trades where LSTM prediction was recorded
         tracked = [
@@ -217,17 +220,20 @@ class TradeMemory:
         trading_type: Optional[str] = None,
         min_samples: int = 10,
         live_only: bool = True,
+        mode: Optional[str] = None,
     ) -> None:
         """
         Append a daily accuracy snapshot to history file.
         
         Logs overall LSTM accuracy for time-series tracking and auto-retrain triggers.
         Call this via a scheduled task or after every N closed trades.
+        mode: if set, restricts to trades from that account mode ("live" or "paper").
         """
         acc = self.lstm_accuracy(
             trading_type=trading_type,
             min_samples=min_samples,
             live_only=live_only,
+            mode=mode,
         )
         
         if not acc.get("sufficient_data"):
@@ -238,6 +244,7 @@ class TradeMemory:
         snapshot = {
             "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "trading_type": trading_type or "all",
+            "mode": mode or "all",
             "overall_accuracy": acc["overall_accuracy"],
             "correct": acc["correct"],
             "total": acc["total"],
@@ -317,6 +324,7 @@ class TradeMemory:
         delta: float = 0.005,
         lambda_threshold: float = 10.0,
         live_only: bool = True,
+        mode: Optional[str] = None,
     ) -> dict:
         """
         Page-Hinkley drift detection on rolling win rate.
@@ -329,11 +337,13 @@ class TradeMemory:
           - lambda_threshold: sensitivity (lower = more sensitive)
 
         Returns drift detected flag and severity.
+        mode: if set, restricts to trades from that account mode (\"live\" or \"paper\").
         """
         outcomes = self.recent(
             n=max(window * 3, 100),
             trading_type=trading_type,
             live_only=live_only,
+            mode=mode,
         )
         if len(outcomes) < window:
             return {
@@ -399,6 +409,7 @@ class TradeMemory:
         window: int = 20,
         min_windows: int = 3,
         live_only: bool = True,
+        mode: Optional[str] = None,
     ) -> dict:
         """
         Track EV stability across rolling windows.
@@ -407,11 +418,13 @@ class TradeMemory:
 
         Returns rolling EV per window and a stability assessment.
         Requires at least min_windows × window trades to compute.
+        mode: if set, restricts to trades from that account mode ("live" or "paper").
         """
         outcomes = self.recent(
             n=self.MAX_BUFFER,
             trading_type=trading_type,
             live_only=live_only,
+            mode=mode,
         )
         needed = window * min_windows
         if len(outcomes) < needed:

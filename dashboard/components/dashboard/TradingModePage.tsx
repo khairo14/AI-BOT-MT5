@@ -193,7 +193,7 @@ export default function TradingModePage({
   }, [mode]);
 
   const SCANNER_TF: Record<string, string> = { scalping: "M1/M5", day_trading: "M15/H1", swing: "H4/D1" };
-  const SCANNER_MAX: Record<string, number> = { scalping: 7, day_trading: 15, swing: 18 };
+  const SCANNER_MAX: Record<string, number> = { scalping: 10, day_trading: 20, swing: 25 };
 
   const toggleScannerSymbol = (sym: string) => {
     setScannerSymbols((prev) => {

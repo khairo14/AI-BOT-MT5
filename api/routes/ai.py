@@ -340,10 +340,12 @@ def get_lstm_accuracy(
 ):
     """Return live LSTM prediction accuracy vs actual trade outcomes."""
     from ai.trade_memory import memory
+    from engine.account_store import current_mode
     return memory.lstm_accuracy(
         trading_type=trading_type,
         min_samples=min_samples,
         live_only=True,
+        mode=current_mode(),
     )
 
 
@@ -367,12 +369,15 @@ def get_lstm_calibration(
     - is_well_calibrated: True if calibration error < 0.10 (10%)
     """
     from ai.trade_memory import memory
+    from engine.account_store import current_mode
+    _mode = current_mode()
     
-    # Get trades with confidence predictions
+    # Get trades with confidence predictions — scoped to current account mode
     outcomes = memory.recent(
         n=memory.MAX_BUFFER,
         trading_type=trading_type,
         live_only=True,
+        mode=_mode,
     )
     
     # Filter for trades with confidence > 0 (some old trades may not have it)
@@ -435,11 +440,12 @@ def get_lstm_calibration(
     mean_calibration_error = total_error / bins_with_data if bins_with_data > 0 else 0.0
     is_well_calibrated = mean_calibration_error < 0.10
     
-    # Overall accuracy (from existing endpoint)
+    # Overall accuracy (from existing endpoint) — same mode filter
     accuracy_data = memory.lstm_accuracy(
         trading_type=trading_type,
         min_samples=min_samples,
         live_only=True,
+        mode=_mode,
     )
     
     return {
@@ -479,11 +485,13 @@ def get_accuracy_history(
     import json
     
     _history_path = Path("ai/data") / "lstm_accuracy_history.jsonl"
+    from engine.account_store import current_mode as _cur_mode
+    _mode = _cur_mode()
     
     if not _history_path.exists():
         # No history yet — create first snapshot
         from ai.trade_memory import memory
-        memory.snapshot_accuracy(trading_type=trading_type, min_samples=10)
+        memory.snapshot_accuracy(trading_type=trading_type, min_samples=10, mode=_mode)
         
         # Check again
         if not _history_path.exists():
@@ -505,6 +513,12 @@ def get_accuracy_history(
             
             # Filter by trading_type if specified
             if trading_type and entry.get("trading_type") != trading_type and entry.get("trading_type") != "all":
+                continue
+            
+            # Filter by account mode — skip snapshots from the other mode.
+            # Snapshots without a "mode" field (legacy) are included for backward compat.
+            entry_mode = entry.get("mode", "all")
+            if entry_mode not in ("all", _mode):
                 continue
             
             # Parse timestamp (strip trailing Z, already has timezone offset)
@@ -585,12 +599,14 @@ def get_confidence_distribution(
     - balance: Check if predictions are concentrated in narrow range
     """
     from ai.trade_memory import memory
+    from engine.account_store import current_mode
     
-    # Get trades with confidence predictions
+    # Get trades with confidence predictions — scoped to current account mode
     outcomes = memory.recent(
         n=memory.MAX_BUFFER,
         trading_type=trading_type,
         live_only=True,
+        mode=current_mode(),
     )
     
     # Filter for trades with confidence > 0
@@ -819,11 +835,13 @@ def get_win_rate_by_state(
     """
     from ai.trade_memory import memory
     
-    # Get trades for this trading type
+    # Get trades for this trading type — scoped to current account mode
+    from engine.account_store import current_mode as _cur_mode_rl
     outcomes = memory.recent(
         n=memory.MAX_BUFFER,
         trading_type=trading_type,
         live_only=True,
+        mode=_cur_mode_rl(),
     )
     
     # Filter by strategy if requested (trade_memory uses "strategy" field)
@@ -1033,10 +1051,12 @@ def memory_drift_detection(
     window: int = Query(30),
 ):
     """Detect win rate drift using Page-Hinkley test."""
+    from engine.account_store import current_mode
     return memory.detect_drift(
         trading_type=trading_type,
         window=window,
         live_only=True,
+        mode=current_mode(),
     )
 
 @router.get("/memory/stability")
@@ -1045,16 +1065,19 @@ def memory_ev_stability(
     window: int = Query(20),
 ):
     """Return rolling EV stability trend across time windows."""
+    from engine.account_store import current_mode
     return memory.rolling_ev_stability(
         trading_type=trading_type,
         window=window,
         live_only=True,
+        mode=current_mode(),
     )
 
 @router.get("/memory/stats")
 def memory_stats(trading_type: Optional[TRADING_TYPE] = None):
     """Return aggregate win rate, avg P&L, SL/TP hit counts."""
-    return memory.stats(trading_type=trading_type)
+    from engine.account_store import current_mode
+    return memory.stats(trading_type=trading_type, live_only=True, mode=current_mode())
 
 @router.post("/memory/reload")
 def reload_trade_memory():
@@ -1069,16 +1092,19 @@ def memory_stats_by_regime(
     min_samples: int = Query(5),
 ):
     """Return win rate and avg PnL broken down by market regime."""
+    from engine.account_store import current_mode
     return memory.stats_by_regime(
         trading_type=trading_type,
         min_samples=min_samples,
         live_only=True,
+        mode=current_mode(),
     )
 
 @router.get("/memory/recent")
 def memory_recent(n: int = 50, trading_type: Optional[TRADING_TYPE] = None):
     """Return the last N trade outcomes, newest last."""
-    return memory.recent(n=min(n, 500), trading_type=trading_type)
+    from engine.account_store import current_mode
+    return memory.recent(n=min(n, 500), trading_type=trading_type, mode=current_mode())
 
 
 # ── LSTM Prediction Cache ───────────────────────────────────────────────────

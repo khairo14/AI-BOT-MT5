@@ -1685,7 +1685,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             _snapshot_every = 10
             if stats.get("total", 0) > 0 and stats.get("total", 0) % _snapshot_every == 0:
                 try:
-                    memory.snapshot_accuracy(trading_type=trading_type, min_samples=10, live_only=True)
+                    memory.snapshot_accuracy(trading_type=trading_type, min_samples=10, live_only=True, mode=_poll_mode)
                     logger.debug(f"LSTM accuracy snapshot taken for {trading_type} at {stats.get('total')} trades")
                 except Exception as _snap_exc:
                     logger.warning(f"Accuracy snapshot failed: {_snap_exc}")

@@ -179,12 +179,14 @@ async def _performance_monitor():
         try:
             from ai.trade_memory import memory
             from ai.rl_agent import rl_manager
+            from engine.account_store import current_mode as _cur_mode
 
             now_ts = _time.monotonic()
+            _mode = _cur_mode()
 
             # ── Alert 1: overall win rate < 40% with 10+ recent trades ──────
             for trading_type in ("scalping", "day_trading", "swing"):
-                stats = memory.stats(trading_type=trading_type, live_only=True)
+                stats = memory.stats(trading_type=trading_type, live_only=True, mode=_mode)
                 total = stats.get("total", 0)
                 wr    = stats.get("win_rate", 1.0)
                 if total >= 10 and wr < 0.40:
@@ -220,7 +222,7 @@ async def _performance_monitor():
                         })
 
             # ── Alert 3: LSTM degraded symbols ───────────────────────────────
-            lstm_acc = memory.lstm_accuracy(min_samples=15, live_only=True)
+            lstm_acc = memory.lstm_accuracy(min_samples=15, live_only=True, mode=_mode)
             degraded = lstm_acc.get("degraded_symbols", [])
             if degraded:
                 _key = "degraded_lstm"
@@ -234,7 +236,7 @@ async def _performance_monitor():
                     })
             # ── Alert 3b: drift detection per trading type ───────────────────
             for trading_type in ("scalping", "day_trading", "swing"):
-                drift = memory.detect_drift(trading_type=trading_type, window=30)
+                drift = memory.detect_drift(trading_type=trading_type, window=30, mode=_mode)
                 if drift.get("drift_detected") and drift.get("severity") in ("medium", "high"):
                     _key = f"drift_{trading_type}"
                     if now_ts - _last_alert_ts.get(_key, 0) > _ALERT_COOLDOWN_SECS:
@@ -289,7 +291,7 @@ async def _performance_monitor():
                 logger.debug(f"Anchor comparison error: {_anc_exc}")
 
             # ── Alert 4: symbol consistently losing ──────────────────────────
-            recent = memory.recent(n=50, live_only=True)
+            recent = memory.recent(n=50, live_only=True, mode=_mode)
             sym_pnl: dict[str, list[float]] = {}
             for o in recent:
                 sym = o.get("symbol", "")
