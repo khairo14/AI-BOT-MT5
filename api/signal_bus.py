@@ -1282,7 +1282,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
     # G-6: tp2 partial-close state — set to True after tp1 partial-close fires
     _tp1_triggered = False
-    # Swing: set to True once SL has been moved to breakeven
+    # Day trading: set to True once SL has been moved to breakeven at halfway
+    _day_be_triggered = False
+    # Swing: set to True once price reached 50% of TP1 and SL moved to entry (pre-TP1 BE)
+    _swing_pre_tp1_be_triggered = False
+    # Swing: set to True once SL has been moved to breakeven (legacy path for tp2=0 recovered positions)
     _swing_be_triggered = False
     # ATR cache: keyed by timeframe string → (atr_value, monotonic_timestamp)
     # Refreshed at most once every 5 minutes — ATR on H1/H4 changes per candle close
@@ -1297,11 +1301,12 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             # instead of calling mt5.positions_get() directly (consistent with NEW-11 fix).
             pos = await asyncio.to_thread(client.get_position_by_ticket, ticket)
             if pos:
-                direction = signal.get("direction", "").upper()
-                entry_px  = float(signal.get("fill_price") or signal.get("entry_price", 0))
-                orig_sl   = float(signal.get("sl", 0))
-                tp2       = float(signal.get("tp2") or 0)
-                tp1       = float(signal.get("tp") or 0)
+                direction    = signal.get("direction", "").upper()
+                entry_px     = float(signal.get("fill_price") or signal.get("entry_price", 0))
+                orig_sl      = float(signal.get("sl", 0))
+                tp2          = float(signal.get("tp2") or 0)
+                tp1          = float(signal.get("tp") or 0)
+                trading_mode = signal.get("trading_mode", signal.get("trading_type", ""))
 
                 def _get_om():
                     from api.main import get_mt5_client as _gmc
@@ -1361,7 +1366,9 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         return 0.0
 
                 # ── Day trading: TP1 partial-close + move SL to breakeven ────
-                if tp2 and tp1 and not _tp1_triggered:
+                # Scalping also has tp2 set but must not use H1-ATR trailing —
+                # its positions close within minutes via MT5 TP fills.
+                if tp2 and tp1 and not _tp1_triggered and trading_mode != "scalping":
                     hit_tp1 = (
                         (direction == "BUY"  and pos.price_current >= tp1) or
                         (direction == "SELL" and pos.price_current <= tp1)
@@ -1380,21 +1387,90 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         except Exception as _pce:
                             logger.warning(f"TP1 partial-close failed #{ticket}: {_pce}")
 
-                # ── Day trading: ATR trail on remainder after TP1 ────────────
-                # Trail distance = ATR(14, H1) × 1.5 — adapts to current intraday
-                # volatility so wide candles don't stop out the runner prematurely.
+                # ── Day trading: halfway breakeven (fires before TP1) ────────
+                # BUG FIX: when tp2>0 the swing elif was completely skipped, leaving
+                # zero SL protection between open and full TP1 hit. This block fires
+                # at 50% of tp1 distance for ALL day_trading modes regardless of tp2.
+                if (trading_mode not in ("scalping", "swing")
+                        and tp1 and entry_px and orig_sl
+                        and not _tp1_triggered and not _day_be_triggered):
+                    _dt_halfway = (
+                        entry_px + (tp1 - entry_px) * 0.5 if direction == "BUY"
+                        else entry_px - (entry_px - tp1) * 0.5
+                    )
+                    _hit_dt_halfway = (
+                        (direction == "BUY"  and pos.price_current >= _dt_halfway) or
+                        (direction == "SELL" and pos.price_current <= _dt_halfway)
+                    )
+                    if _hit_dt_halfway:
+                        _day_be_triggered = True
+                        try:
+                            om = _get_om()
+                            if om and entry_px:
+                                _be_improves = (
+                                    (direction == "BUY"  and entry_px > pos.sl + 1e-9) or
+                                    (direction == "SELL" and (pos.sl == 0 or entry_px < pos.sl - 1e-9))
+                                )
+                                if _be_improves:
+                                    await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                    logger.info(
+                                        f"Day BE fired: #{ticket} {signal.get('symbol')} "
+                                        f"SL → entry {entry_px}"
+                                    )
+                        except Exception as _be_e:
+                            logger.warning(f"Day BE failed #{ticket}: {_be_e}")
+
+                # ── Swing: pre-TP1 halfway breakeven ─────────────────────────
+                # Swing strategies have both tp1 and tp2.  Before TP1 partial-close
+                # fires, protect the position by moving SL to entry at 50% of TP1.
+                # Only fires when entry_px genuinely improves the current stop.
+                if (trading_mode == "swing" and tp1 and tp2 and entry_px and orig_sl
+                        and not _tp1_triggered and not _swing_pre_tp1_be_triggered):
+                    _sw_pre_halfway = (
+                        entry_px + (tp1 - entry_px) * 0.5 if direction == "BUY"
+                        else entry_px - (entry_px - tp1) * 0.5
+                    )
+                    _hit_sw_pre_halfway = (
+                        (direction == "BUY"  and pos.price_current >= _sw_pre_halfway) or
+                        (direction == "SELL" and pos.price_current <= _sw_pre_halfway)
+                    )
+                    if _hit_sw_pre_halfway:
+                        _swing_pre_tp1_be_triggered = True
+                        try:
+                            om = _get_om()
+                            if om and entry_px:
+                                _be_improves = (
+                                    (direction == "BUY"  and entry_px > pos.sl + 1e-9) or
+                                    (direction == "SELL" and (pos.sl == 0 or entry_px < pos.sl - 1e-9))
+                                )
+                                if _be_improves:
+                                    await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                    logger.info(
+                                        f"Swing pre-TP1 BE fired: #{ticket} {signal.get('symbol')} "
+                                        f"SL → entry {entry_px}"
+                                    )
+                        except Exception as _be_e:
+                            logger.warning(f"Swing pre-TP1 BE failed #{ticket}: {_be_e}")
+
+                # ── ATR trail — after TP1, day-BE, or swing pre-TP1 BE ────────
+                # Day trading: ATR(14, H1) × 1.5 — adapts to current intraday volatility.
+                # Swing:       ATR(14, H4) × 2.0 — wider buffer for multi-day pullbacks.
                 # Falls back to 50% original-SL distance if MT5 data is unavailable.
-                if _tp1_triggered and entry_px and orig_sl:
+                if (_tp1_triggered or _day_be_triggered or _swing_pre_tp1_be_triggered) and entry_px and orig_sl and trading_mode != "scalping":
                     try:
-                        _atr = await _get_atr("H1", 14)
-                        _trail_dist = (_atr * 1.5) if _atr > 0 else abs(entry_px - orig_sl) * 0.5
+                        if trading_mode == "swing":
+                            _atr = await _get_atr("H4", 14)
+                            _trail_dist = (_atr * 2.0) if _atr > 0 else abs(entry_px - orig_sl) * 0.5
+                        else:
+                            _atr = await _get_atr("H1", 14)
+                            _trail_dist = (_atr * 1.5) if _atr > 0 else abs(entry_px - orig_sl) * 0.5
                         _new_sl = (
                             max(pos.price_current - _trail_dist, entry_px) if direction == "BUY"
                             else min(pos.price_current + _trail_dist, entry_px)
                         )
                         await _try_trail(_new_sl)
                     except Exception as _te:
-                        logger.debug(f"Day trail failed #{ticket}: {_te}")
+                        logger.debug(f"{'Swing' if trading_mode == 'swing' else 'Day'} trail failed #{ticket}: {_te}")
 
                 # ── Swing: BE at halfway then ATR trail (H4 ATR × 2.0) ───────
                 # Swing signals have tp2=None so tp2==0 here.
@@ -1417,11 +1493,16 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                             try:
                                 om = _get_om()
                                 if om and entry_px:
-                                    await asyncio.to_thread(om.modify_position, ticket, entry_px)
-                                    logger.info(
-                                        f"Swing BE fired: #{ticket} {signal.get('symbol')} "
-                                        f"SL → entry {entry_px}"
+                                    _be_improves = (
+                                        (direction == "BUY"  and entry_px > pos.sl + 1e-9) or
+                                        (direction == "SELL" and (pos.sl == 0 or entry_px < pos.sl - 1e-9))
                                     )
+                                    if _be_improves:
+                                        await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                        logger.info(
+                                            f"Swing BE fired: #{ticket} {signal.get('symbol')} "
+                                            f"SL → entry {entry_px}"
+                                        )
                             except Exception as _be_e:
                                 logger.warning(f"Swing BE failed #{ticket}: {_be_e}")
                     if _swing_be_triggered:

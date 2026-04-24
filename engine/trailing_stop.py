@@ -189,48 +189,69 @@ class TrailingStopManager:
                     if current_price < state.highest_profit_price:
                         state.highest_profit_price = current_price
 
-                # Symbol-level overrides (per-symbol price distances take priority over everything)
+                # Symbol-level overrides — escape hatch for truly exceptional setups.
+                # activation_price / trail_price still accepted if explicitly set.
                 sym_override = mode_cfg.get("symbol_overrides", {}).get(symbol, {})
 
-                # Detect whether this is a forex pair (pip-based distances are meaningful)
-                # Non-forex instruments: stocks (digits≤2), crypto, indices, futures.
-                # For those, use % of entry price so any symbol works without manual config.
-                _sym_u = symbol.upper()
-                _is_forex = (
-                    pip_value < 1.0  # indices/crypto return 1.0 from _get_pip_value
-                    and not any(x in _sym_u for x in (
-                        "BTC", "ETH", "SOL", "XRP", "XLM", "BNB", "LTC",
-                        "US30", "US100", "US500", "GER40", "UK100",
-                    ))
-                )
+                # ── R-factor based distances (fully dynamic, per-trade SL) ────────
+                # Activation and trail are expressed as fractions of this trade's
+                # actual SL distance — not fixed pips, not % of price.  This works
+                # for every symbol and every setup without any per-symbol config:
+                #
+                #   activation = sl_dist × activation_r_factor  (default 0.5)
+                #     → "activate when profit = 50% of what was risked"
+                #   trail      = sl_dist × trail_r_factor        (default 0.35 day / 0.4 swing)
+                #     → "trail keeping SL at 35% of original risk from highest price"
+                #
+                # AUDCAD  SL=6.7 pips  → activation=3.35 pips  (fires before TP)
+                # AMD     SL=$20       → trail=$7.00           (well above $2 broker min)
+                # BTC     SL=$1 500    → trail=$525            (appropriate for crypto)
+                # New symbol added to scanner? Works automatically. No config needed.
+                _sl_dist = abs(entry_price - current_sl) if current_sl > 0 else 0.0
+
+                _sym_info_ts = None
                 try:
                     _sym_info_ts = self._client.get_symbol_info(symbol)
-                    if _sym_info_ts and _sym_info_ts.get("digits", 5) <= 2:
-                        _is_forex = False  # stocks always have digits ≤ 2
                 except Exception:
                     pass
 
-                # Activation distance in price units
+                # Activation distance
                 if "activation_price" in sym_override:
                     activation_distance = float(sym_override["activation_price"])
-                elif _is_forex:
-                    a_pips = sym_override.get("activation_pips", mode_cfg.get("activation_pips", 10))
-                    activation_distance = a_pips * pip_value
+                elif _sl_dist > 0:
+                    a_r = float(sym_override.get(
+                        "activation_r_factor",
+                        mode_cfg.get("activation_r_factor", 0.5)
+                    ))
+                    activation_distance = _sl_dist * a_r
                 else:
-                    # Dynamic % of entry price — works for any stock, crypto, index or futures
-                    # Default 0.5 % activation, 0.35 % trail (overridable per mode in app.json)
-                    a_pct = mode_cfg.get("activation_pct", 0.005)
-                    activation_distance = entry_price * a_pct
+                    # SL is 0: safety fallback (should never reach normal trades)
+                    activation_distance = entry_price * 0.005
 
-                # Trail distance in price units
+                # Trail distance
                 if "trail_price" in sym_override:
                     trail_distance = float(sym_override["trail_price"])
-                elif _is_forex:
-                    t_pips = sym_override.get("trail_distance_pips", mode_cfg.get("trail_distance_pips", 8))
-                    trail_distance = t_pips * pip_value
+                elif _sl_dist > 0:
+                    t_r = float(sym_override.get(
+                        "trail_r_factor",
+                        mode_cfg.get("trail_r_factor", 0.35)
+                    ))
+                    trail_distance = _sl_dist * t_r
                 else:
-                    t_pct = mode_cfg.get("trail_pct", 0.0035)
-                    trail_distance = entry_price * t_pct
+                    trail_distance = entry_price * 0.003
+
+                # Enforce broker minimum stop distance so modify_position never
+                # silently fails on stocks/CFDs with a hard stops_level minimum.
+                try:
+                    if _sym_info_ts:
+                        _sl_lvl     = _sym_info_ts.get("stops_level", 0)
+                        _pt         = _sym_info_ts.get("point", 0.00001)
+                        _sp         = _sym_info_ts.get("spread", 0)
+                        _broker_min = (_sl_lvl * _pt) if _sl_lvl > 0 else (_sp * _pt * 2)
+                        if _broker_min > 0 and trail_distance < _broker_min * 1.2:
+                            trail_distance = _broker_min * 1.2
+                except Exception:
+                    pass
 
                 # Profit measured in price units (direction-aware)
                 if direction == "BUY":
