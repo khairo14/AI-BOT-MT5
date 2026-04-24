@@ -668,6 +668,45 @@ class SignalBus:
             # Read both so SL/TP reanchoring fires regardless of origin.
             _ep_raw = signal.get("entry_price") or signal.get("entry")
 
+            # Stale-entry guard: reject orders when current price has already moved
+            # too close to TP (or beyond it). This commonly happens right after API
+            # restart if a strategy re-evaluates an already-closed bar.
+            try:
+                _tp_guard = float(signal.get("tp") or 0)
+                _entry_guard = float(_ep_raw) if _ep_raw else 0.0
+                if _tp_guard and _entry_guard and self._client is not None:
+                    _px = self._client.get_current_price(signal["symbol"]) or {}
+                    _dir = str(signal.get("direction", "")).upper()
+                    _cur = _px.get("bid") if _dir == "BUY" else _px.get("ask")
+                    if _cur is not None:
+                        _tp_span = abs(_tp_guard - _entry_guard)
+                        if _tp_span > 0:
+                            if _dir == "BUY":
+                                _progress = (_cur - _entry_guard) / _tp_span
+                            else:
+                                _progress = (_entry_guard - _cur) / _tp_span
+                            try:
+                                _max_prog = float(
+                                    _get_bus_app_cfg()
+                                    .get("ai", {})
+                                    .get("max_entry_progress_to_tp", 0.80)
+                                )
+                            except Exception:
+                                _max_prog = 0.80
+                            if _progress >= _max_prog:
+                                signal["rejection_reason"] = (
+                                    f"Stale signal: price already {_progress:.0%} to TP "
+                                    f"(limit {_max_prog:.0%})"
+                                )
+                                logger.info(
+                                    f"SignalBus stale-entry blocked: {signal.get('symbol')} "
+                                    f"{_dir} progress_to_tp={_progress:.2f} "
+                                    f"limit={_max_prog:.2f}"
+                                )
+                                return False
+            except Exception as _stale_exc:
+                logger.debug(f"SignalBus stale-entry guard skipped: {_stale_exc}")
+
             # LOGIC-3: revalidate lot size using current balance before placing order.
             # This matters for pending manual signals that may be minutes or hours old.
             _lot = float(signal.get("lot_size") or 0.01)

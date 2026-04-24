@@ -95,7 +95,8 @@ def _new_bar_closed(client, mode: str) -> bool:
     Return True if a new primary-timeframe bar has closed since the last scan.
     Fetches only the latest 2 bars (minimal MT5 lock time) to compare timestamps.
 
-    First call always returns True so each mode runs immediately at startup.
+    First call seeds the latest bar timestamp and returns False so a restart
+    does not re-run strategies on already-processed candles.
     Falls back to True on any MT5 error so a data failure never silently
     suppresses trading — the strategy runner handles missing data gracefully.
     """
@@ -108,7 +109,10 @@ def _new_bar_closed(client, mode: str) -> bool:
             return True   # fail-open
         latest = df.iloc[-1]["time"]
         prev   = _last_bar_time.get(mode)
-        if prev is None or latest > prev:
+        if prev is None:
+            _last_bar_time[mode] = latest
+            return False
+        if latest > prev:
             _last_bar_time[mode] = latest
             return True
         return False
