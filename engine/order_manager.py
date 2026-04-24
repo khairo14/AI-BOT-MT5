@@ -134,18 +134,22 @@ class OrderManager:
         if req.entry_price and req.entry_price != 0.0:
             sl_dist = abs(req.entry_price - sl)
             if req.direction == "BUY":
-                sl = round(price - sl_dist, 6)
+                # BUY: MT5 fires SL when bid <= sl, TP when bid >= tp.
+                # Anchor to bid so stops trigger at the strategy-intended price.
+                sl = round(tick.bid - sl_dist, 6)
                 if tp is not None:
                     tp_dist = abs(req.entry_price - tp)
-                    tp = round(price + tp_dist, 6)
+                    tp = round(tick.bid + tp_dist, 6)
             else:  # SELL
-                sl = round(price + sl_dist, 6)
+                # SELL: MT5 fires SL when ask >= sl, TP when ask <= tp.
+                # Anchor to ask so stops trigger at the strategy-intended price.
+                sl = round(tick.ask + sl_dist, 6)
                 if tp is not None:
                     tp_dist = abs(req.entry_price - tp)
-                    tp = round(price - tp_dist, 6)
+                    tp = round(tick.ask - tp_dist, 6)
             if sl != req.sl or tp != req.tp:
                 logger.debug(
-                    f"SL/TP reanchored to live price: entry={req.entry_price} → live={price:.5f} "
+                    f"SL/TP reanchored: entry={req.entry_price} bid={tick.bid:.5f} ask={tick.ask:.5f} "
                     f"SL {req.sl:.5f}→{sl:.5f}  TP {req.tp}→{tp}"
                 )
 
@@ -177,30 +181,33 @@ class OrderManager:
             _pip_pts = 10 if sym_info.digits in (3, 5) else 1
             min_dist = (sym_info.spread + _pip_pts) * sym_info.point
         if min_dist > 0:
-            sl_dist = abs(price - sl)
+            # Use bid as reference for BUY stops, ask for SELL stops — matches
+            # MT5's closure rules: BUY SL/TP compared against bid, SELL against ask.
+            _ref = tick.bid if req.direction == "BUY" else tick.ask
+            sl_dist = abs(_ref - sl)
             if sl_dist < min_dist:
                 logger.warning(
                     f"SL too close for {req.symbol}: {sl_dist:.5f} < min {min_dist:.5f} "
                     f"(stops_level={stops_level}) — adjusting SL to minimum distance"
                 )
                 if req.direction == "BUY":
-                    sl = round(price - min_dist, sym_info.digits)
+                    sl = round(_ref - min_dist, sym_info.digits)
                 else:
-                    sl = round(price + min_dist, sym_info.digits)
+                    sl = round(_ref + min_dist, sym_info.digits)
             # Also enforce minimum distance for TP — MT5 rejects the whole order if
             # either stop is inside the freeze/stops zone (common on crypto CFDs where
             # stops_level=0 but the broker still enforces a real server-side minimum).
             if tp is not None:
-                tp_dist = abs(price - tp)
+                tp_dist = abs(_ref - tp)
                 if tp_dist < min_dist:
                     logger.warning(
                         f"TP too close for {req.symbol}: {tp_dist:.5f} < min {min_dist:.5f} "
                         f"(stops_level={stops_level}) — adjusting TP to minimum distance"
                     )
                     if req.direction == "BUY":
-                        tp = round(price + min_dist, sym_info.digits)
+                        tp = round(_ref + min_dist, sym_info.digits)
                     else:
-                        tp = round(price - min_dist, sym_info.digits)
+                        tp = round(_ref - min_dist, sym_info.digits)
         # Live spread gate — block entry if current spread exceeds mode limit.
         # Uses real-time spread from MT5 (not hardcoded) so news spikes are caught.
         _captured_spread_pips: Optional[float] = None
