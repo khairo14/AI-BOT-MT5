@@ -40,15 +40,17 @@ def _load_closed(
     trading_type: Optional[str],
     limit: int,
 ) -> list[dict]:
-    """Return closed trade entries from the journal, filtered by account + mode."""
+    """Return one merged entry per closed ticket with true net P&L.
+
+    Uses get_closed_merged() so trades that had a partial TP (partial_close
+    event) are reported with their full profit, not just the runner close.
+    """
     from engine.trade_journal import trade_journal
-    entries = trade_journal.get(
+    return trade_journal.get_closed_merged(
         account=account,
         trading_type=trading_type if trading_type != "all" else None,
-        event="close",
         limit=limit,
     )
-    return [e for e in entries if e.get("profit") is not None]
 
 
 def _daily_returns(closed: list[dict]) -> list[float]:

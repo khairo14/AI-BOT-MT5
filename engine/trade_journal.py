@@ -206,6 +206,46 @@ class TradeJournal:
         }
 
 
+    def get_closed_merged(
+        self,
+        account: str = "all",
+        trading_type: Optional[str] = None,
+        limit: int = 10_000,
+    ) -> list[dict]:
+        """
+        Return one dict per closed ticket with the true net profit.
+
+        For trades that used a partial TP (partial_close event followed by a
+        close event), the partial_close profit is summed into the close entry
+        so callers see the real net P&L without double-counting.
+
+        Returned list is sorted newest-close-first.
+        """
+        all_entries = self.get(account=account, limit=limit)
+        if trading_type:
+            all_entries = [e for e in all_entries if e.get("trading_type") == trading_type]
+
+        # Accumulate partial_close profits per ticket
+        partial_profit: dict[int, float] = {}
+        for e in all_entries:
+            if e.get("event") == "partial_close" and e.get("profit") is not None:
+                ticket = e.get("ticket")
+                if ticket is not None:
+                    partial_profit[ticket] = partial_profit.get(ticket, 0.0) + float(e["profit"])
+
+        # Collect close entries, inject summed partial profit
+        merged: list[dict] = []
+        for e in all_entries:
+            if e.get("event") == "close" and e.get("profit") is not None:
+                ticket = e.get("ticket")
+                extra  = partial_profit.get(ticket, 0.0)
+                if extra != 0.0:
+                    e = dict(e)  # shallow copy — don't mutate the original
+                    e["profit"] = round(float(e["profit"]) + extra, 2)
+                merged.append(e)
+
+        return merged
+
     def get_unclosed_tickets(self) -> list[dict]:
         """
         Return a list of journal "open" entry dicts that have no matching

@@ -21,33 +21,32 @@ class PerformanceReporter:
         
     def load_trades(self, days: int = None, mode: str = None) -> List[Dict[str, Any]]:
         """Load all trades, optionally filtered by date and account mode."""
-        if not self.journal_path.exists():
-            return []
-            
         trades = []
         cutoff = datetime.now() - timedelta(days=days) if days else None
-        
-        with open(self.journal_path, "r") as f:
-            for line in f:
-                try:
-                    trade = json.loads(line.strip())
-                    # Only count closed trades with a real profit value
-                    if trade.get("event") != "close" or trade.get("profit") is None:
-                        continue
-                    # Filter by account mode when specified
-                    if mode and trade.get("account_mode") != mode:
-                        continue
-                    if cutoff:
-                        close_time_raw = trade.get("close_time")
-                        if not close_time_raw:
-                            continue
-                        trade_time = datetime.fromisoformat(close_time_raw)
-                        if trade_time < cutoff:
-                            continue
-                    trades.append(trade)
-                except (json.JSONDecodeError, ValueError, TypeError):
+
+        # Use get_closed_merged() so partial-TP trades are counted with
+        # their true net P&L (partial_close profit + runner close profit).
+        try:
+            from engine.trade_journal import trade_journal as _tj
+            merged = _tj.get_closed_merged(account=mode or "all", limit=50_000)
+        except Exception:
+            merged = []
+
+        for trade in merged:
+            if cutoff:
+                close_time_raw = trade.get("close_time")
+                if not close_time_raw:
                     continue
-                    
+                try:
+                    trade_time = datetime.fromisoformat(close_time_raw.replace("Z", "+00:00"))
+                    # Make naive cutoff comparable by treating it as UTC
+                    _cutoff_cmp = cutoff.replace(tzinfo=None) if trade_time.tzinfo is None else cutoff
+                    if trade_time.replace(tzinfo=None) < _cutoff_cmp.replace(tzinfo=None):
+                        continue
+                except (ValueError, TypeError):
+                    continue
+            trades.append(trade)
+
         return trades
     
     def calculate_metrics(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:

@@ -352,42 +352,32 @@ async def get_scanner_performance(
         with open(scanner_path, "r") as f:
             scanner_cfg = json.load(f)
         
-        # Load trade journal for stats
-        journal_path = "data/trade_journal.jsonl"
-        # Resolve account filter: explicit param or current mode
-        acct_filter = account if account != "all" else None
+        # Load trade journal for stats — use get_closed_merged() so partial-TP
+        # trades are counted with their true net P&L.
         pair_stats = defaultdict(lambda: {
-            "signals": 0, "trades": 0, "wins": 0, 
+            "signals": 0, "trades": 0, "wins": 0,
             "losses": 0, "total_profit": 0.0, "last_signal": None
         })
-        
-        if os.path.exists(journal_path):
-            with open(journal_path, "r") as f:
-                for line in f:
-                    try:
-                        trade = json.loads(line)
-                        symbol = trade.get("symbol")
-                        if not symbol:
-                            continue
-                        # Filter by account mode when not "all"
-                        if acct_filter and trade.get("account_mode") != acct_filter:
-                            continue
-                        
-                        trade_type = trade.get("trading_type", "")
-                        key = (symbol, trade_type)
-                        event = trade.get("event")
-                        profit = trade.get("profit", 0.0) or 0.0
-                        
-                        if event == "close":
-                            pair_stats[key]["trades"] += 1
-                            if profit > 0:
-                                pair_stats[key]["wins"] += 1
-                            elif profit < 0:
-                                pair_stats[key]["losses"] += 1
-                            pair_stats[key]["total_profit"] += profit
-                            pair_stats[key]["last_signal"] = trade.get("close_time")
-                    except:
-                        continue
+        try:
+            from engine.trade_journal import trade_journal as _tj_sc
+            _acct_sc = account if account != "all" else "all"
+            _closed_sc = _tj_sc.get_closed_merged(account=_acct_sc, limit=10_000)
+            for trade in _closed_sc:
+                symbol = trade.get("symbol")
+                if not symbol:
+                    continue
+                trade_type = trade.get("trading_type", "")
+                key = (symbol, trade_type)
+                profit = trade.get("profit", 0.0) or 0.0
+                pair_stats[key]["trades"] += 1
+                if profit > 0:
+                    pair_stats[key]["wins"] += 1
+                elif profit < 0:
+                    pair_stats[key]["losses"] += 1
+                pair_stats[key]["total_profit"] += profit
+                pair_stats[key]["last_signal"] = trade.get("close_time")
+        except Exception:
+            pass
         
         # Build active/inactive breakdown by trading type
         result = {}
