@@ -337,7 +337,8 @@ function DiffPanel({
 export default function BacktestPage() {
   const [strategies, setStrategies] = useState<Record<TradingType, string[]>>(DEFAULT_STRATEGIES);
   const [symbolOptions, setSymbolOptions] = useState<string[]>(FALLBACK_SYMBOLS);
-  const [symbolSearch,  setSymbolSearch]  = useState("");
+  const [symInput,      setSymInput]      = useState("EURUSD");
+  const [symOpen,       setSymOpen]       = useState(false);
 
   // Form state
   const [mode,    setMode]    = useState<TradingType>("scalping");
@@ -389,7 +390,8 @@ export default function BacktestPage() {
   const handleModeChange = (m: TradingType) => {
     setMode(m);
     setSymbol("EURUSD");
-    setSymbolSearch("");
+    setSymInput("EURUSD");
+    setSymOpen(false);
     setStrat(strategies[m]?.[0] ?? "");
     setCompareResults({});  // BUG-BT-3: clear stale compare from previous mode
     setBaseline(null);      // BUG-BT-3: clear stale baseline from previous mode
@@ -500,33 +502,70 @@ export default function BacktestPage() {
                 <span className="ml-1 text-gray-600">({symbolOptions.length} available)</span>
               )}
             </label>
-            <input
-              type="text"
-              value={symbolSearch || symbol}
-              onChange={(e) => {
-                const v = e.target.value.toUpperCase();
-                setSymbolSearch(v);
-                if (symbolOptions.includes(v)) {
-                  setSymbol(v);
-                  setSymbolSearch("");
-                }
-              }}
-              onBlur={() => {
-                if (symbolSearch && symbolOptions.includes(symbolSearch)) {
-                  setSymbol(symbolSearch);
-                }
-                setSymbolSearch("");
-              }}
-              list="bt-symbols-list"
-              placeholder="Search symbols…"
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-            />
-            <datalist id="bt-symbols-list">
-              {(symbolSearch
-                ? symbolOptions.filter((s) => s.toUpperCase().includes(symbolSearch))
-                : symbolOptions
-              ).map((s) => <option key={s} value={s} />)}
-            </datalist>
+            <div className="relative">
+              <input
+                type="text"
+                autoComplete="off"
+                value={symInput}
+                onChange={(e) => {
+                  setSymInput(e.target.value.toUpperCase());
+                  setSymOpen(true);
+                }}
+                onFocus={() => setSymOpen(true)}
+                onBlur={() => {
+                  // commit on exact match (case-insensitive), else revert to last valid symbol
+                  const match = symbolOptions.find(
+                    (s) => s.toUpperCase() === symInput.toUpperCase()
+                  );
+                  if (match) { setSymbol(match); setSymInput(match); }
+                  else { setSymInput(symbol); }
+                  setSymOpen(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const match = symbolOptions.find(
+                      (s) => s.toUpperCase() === symInput.toUpperCase()
+                    );
+                    if (match) { setSymbol(match); setSymInput(match); }
+                    setSymOpen(false);
+                  } else if (e.key === "Escape") {
+                    setSymInput(symbol);
+                    setSymOpen(false);
+                  }
+                }}
+                placeholder="Search symbols…"
+                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+              {symOpen && (() => {
+                const matches = symInput.trim()
+                  ? symbolOptions.filter((s) => s.toUpperCase().includes(symInput.toUpperCase()))
+                  : symbolOptions;
+                return matches.length > 0 ? (
+                  <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto bg-gray-800 border border-gray-700 rounded shadow-lg">
+                    {matches.slice(0, 50).map((s) => (
+                      <li
+                        key={s}
+                        onMouseDown={(e) => {
+                          e.preventDefault(); // keep focus so blur doesn't fire first
+                          setSymbol(s);
+                          setSymInput(s);
+                          setSymOpen(false);
+                        }}
+                        className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-700 ${
+                          s === symbol ? "text-blue-400 font-medium" : "text-white"
+                        }`}
+                      >
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <ul className="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-700 rounded shadow-lg">
+                    <li className="px-3 py-1.5 text-sm text-gray-500">No match</li>
+                  </ul>
+                );
+              })()}
+            </div>
           </div>
 
           {/* Strategy */}
