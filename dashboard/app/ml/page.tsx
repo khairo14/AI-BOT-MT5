@@ -19,6 +19,7 @@ import {
   fetchLstmConfidenceDistribution,
   calibrateAllModels,
   resetCalibration,
+  fetchAccountMode,
 } from "@/lib/api";
 
 //  helpers 
@@ -140,6 +141,7 @@ export default function MLPage() {
   const [rlInsightsDays, setRlInsightsDays] = useState(7);
   const [rlInsightsStrategy, setRlInsightsStrategy] = useState("sr_breakout");
   const [memStats, setMemStats] = useState<Record<string, MemStats>>({});
+  const [accountMode, setAccountMode] = useState<"paper" | "live" | null>(null);
   const [optStatus, setOptStatus] = useState<OptimizerStatus>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
@@ -184,7 +186,7 @@ export default function MLPage() {
 
   const load = useCallback(async () => {
     try {
-      const [ai, rl, rlHist, rlStates, opt, appCfg, cal, accHist, confDist, ...mems] = await Promise.allSettled([
+      const [ai, rl, rlHist, rlStates, opt, appCfg, cal, accHist, confDist, acctMode, ...mems] = await Promise.allSettled([
         fetchAIStatus(),
         fetchRLStatus(),
         fetchRLHistory(rlInsightsMode, rlInsightsDays, rlInsightsStrategy),
@@ -194,6 +196,7 @@ export default function MLPage() {
         fetchLstmCalibration(5),
         fetchLstmAccuracyHistory(undefined, 30),
         fetchLstmConfidenceDistribution(),
+        fetchAccountMode(),
         ...MODES.map((m) => fetchMemoryStats(m)),
       ]);
       if (ai.status === "fulfilled") setAiStatus(ai.value ?? {});
@@ -240,6 +243,7 @@ export default function MLPage() {
           }
         }
       }
+      if (acctMode.status === "fulfilled") setAccountMode(acctMode.value?.mode ?? null);
       const statsMap: Record<string, MemStats> = {};
       MODES.forEach((m, i) => {
         const r = mems[i];
@@ -958,7 +962,18 @@ export default function MLPage() {
 
       {/*  4. Trade Memory  */}
       <section>
-        <SectionHeader title="Trade Memory" sub="Outcome log used for LSTM retraining and optimizer triggers." />
+        <div className="flex items-center gap-3 mb-1">
+          <SectionHeader title="Trade Memory" sub="Outcome log used for LSTM retraining and optimizer triggers." />
+          {accountMode && (
+            <span className={`shrink-0 self-start mt-0.5 inline-block px-2 py-0.5 rounded text-xs font-semibold ${
+              accountMode === "live"
+                ? "bg-emerald-900 text-emerald-300"
+                : "bg-amber-900 text-amber-300"
+            }`}>
+              {accountMode === "live" ? "Live" : "Paper (Demo)"}
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {MODES.map((mode) => {
             const s = memStats[mode] ?? {};
