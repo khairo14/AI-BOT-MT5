@@ -113,16 +113,16 @@
     },
     "day_trading": {
       "enabled": true,
-      "activation_r_factor": 0.5,
-      "trail_r_factor": 0.35,
-      "note": "Activation and trail are fractions of each trade's actual SL distance. No per-symbol config needed.",
+      "activation_r_factor": 1.0,
+      "trail_r_factor": 0.50,
+      "note": "Activates at 1R profit; trails at 0.5R behind peak — locks minimum 0.5R. Fractions of each trade's actual SL distance.",
       "symbol_overrides": {}
     },
     "swing": {
       "enabled": true,
-      "activation_r_factor": 0.5,
-      "trail_r_factor": 0.4,
-      "note": "Wider trail_r_factor vs day_trading to survive multi-day pullbacks. Fractions of each trade's actual SL distance.",
+      "activation_r_factor": 1.0,
+      "trail_r_factor": 0.60,
+      "note": "Activates at 1R profit; trails at 0.6R behind peak — wider buffer for multi-day pullbacks. Fractions of each trade's actual SL distance.",
       "symbol_overrides": {}
     }
   },

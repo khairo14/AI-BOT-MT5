@@ -765,12 +765,27 @@ class SignalBus:
                 logger.error(f"SignalBus: {err} ({signal.get('symbol')} {signal.get('direction')})")
                 return False
 
+            # TP placement: for day_trading/swing with a tp2, send tp2 to the broker
+            # so MT5 only auto-closes the remaining half (after _poll_outcome has done
+            # the partial close at tp1).  If we send tp1 to MT5, the broker closes the
+            # FULL position before _poll_outcome's 30-second poll can fire the partial
+            # close — the tp1→partial-close→trail-to-tp2 path never executes.
+            # Scalping: always use tp1 (fast exit, no multi-stage close).
+            _tp1_order = float(signal["tp"]) if signal.get("tp") else None
+            _tp2_order = float(signal.get("tp2") or 0) or None
+            if _tp2_order and trading_mode != "scalping":
+                # Broker TP = tp2; _poll_outcome handles 50% partial close at tp1
+                _broker_tp = _tp2_order
+            else:
+                # Scalping or single-target: broker TP = tp1 (full close at target)
+                _broker_tp = _tp1_order
+
             req = OrderRequest(
                 symbol=signal["symbol"],
                 direction=signal["direction"].upper(),
                 volume=_lot,
                 sl=float(signal["sl"]),
-                tp=float(signal["tp"]) if signal.get("tp") else None,
+                tp=_broker_tp,
                 entry_price=float(_ep_raw) if _ep_raw else None,
                 comment=f"{mode_prefix}|{signal.get('strategy', '?')[:20]}",
             )

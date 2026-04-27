@@ -16,7 +16,7 @@
         "rsi_max": 72,
         "max_spread_pips": 1.5,
         "crossover_window": 3,
-        "vol_confirm_mult": 0,
+        "vol_confirm_mult": 1.2,
         "symbol_sl_override": {
           "AUDCAD": 7,
           "NZDCAD": 7,
@@ -33,7 +33,7 @@
         "tp1_atr_mult": 1.5,
         "tp_atr_mult": 2.5,
         "max_spread_pips": 2.0,
-        "vol_confirm_mult": 0
+        "vol_confirm_mult": 1.2
       },
       "vwap_reversion": {
         "sigma_entry": 1.5,
@@ -60,7 +60,7 @@
         "tp1_rr": 1.5,
         "rr": 2.5,
         "max_spread_pips": 2.0,
-        "vol_confirm_mult": 0
+        "vol_confirm_mult": 1.2
       }
     }
   },
@@ -86,7 +86,7 @@
         "atr_period": 14,
         "tp1_rr": 1.5,
         "tp2_rr": 2.0,
-        "vol_confirm_mult": 0
+        "vol_confirm_mult": 1.2
       },
       "sr_breakout": {
         "lookback_bars": 50,
@@ -98,7 +98,7 @@
         "tp_rr": 2.0,
         "min_touches": 2,
         "level_tolerance": 0.0015,
-        "vol_confirm_mult": 0
+        "vol_confirm_mult": 1.2
       },
       "rsi_divergence": {
         "rsi_period": 14,

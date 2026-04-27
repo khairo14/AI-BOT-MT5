@@ -103,7 +103,14 @@ class SRBreakout(BaseStrategy):
             sl   = round(resistance - buffer, 5)
             tp1  = round(curr_close + sl_dist * p["tp1_rr"], 5)
             next_res = self._find_next_level(high.iloc[-lookback:], resistance, "up")
-            tp2  = round(next_res if next_res else curr_close + curr_atr * p["tp_rr"], 5)
+            # tp2 must be strictly beyond tp1; if the next structural level is closer
+            # than tp1 (or not found), fall back to the ATR-based tp_rr distance.
+            _tp2_candidate = next_res if (next_res and next_res > tp1) else None
+            tp2  = round(_tp2_candidate if _tp2_candidate else curr_close + curr_atr * p["tp_rr"], 5)
+            # Final guard: tp2 must at minimum equal tp_rr × sl_dist beyond entry
+            _tp2_min = round(curr_close + sl_dist * p["tp_rr"], 5)
+            if tp2 < _tp2_min:
+                tp2 = _tp2_min
 
             return StrategyResult(
                 signal=Signal(
@@ -131,7 +138,14 @@ class SRBreakout(BaseStrategy):
             sl   = round(support + buffer, 5)
             tp1  = round(curr_close - sl_dist * p["tp1_rr"], 5)
             next_sup = self._find_next_level(low.iloc[-lookback:], support, "down")
-            tp2  = round(next_sup if next_sup else curr_close - curr_atr * p["tp_rr"], 5)
+            # tp2 must be strictly beyond tp1 (lower for SELL); if the next structural
+            # level is closer than tp1 (or not found), fall back to ATR-based tp_rr.
+            _tp2_candidate = next_sup if (next_sup and next_sup < tp1) else None
+            tp2  = round(_tp2_candidate if _tp2_candidate else curr_close - curr_atr * p["tp_rr"], 5)
+            # Final guard: tp2 must at minimum equal tp_rr × sl_dist beyond entry
+            _tp2_min = round(curr_close - sl_dist * p["tp_rr"], 5)
+            if tp2 > _tp2_min:
+                tp2 = _tp2_min
 
             return StrategyResult(
                 signal=Signal(
