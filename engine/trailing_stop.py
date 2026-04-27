@@ -28,6 +28,36 @@ from engine.order_manager import OrderManager
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
+# TTL cache for app.json — same 5-second pattern used by order_manager and signal_bus.
+# Ensures trailing stop config changes made via the dashboard take effect within
+# one scan cycle without requiring a bot restart.
+import time as _ts_time
+import threading as _ts_threading
+_ts_cfg_cache: dict = {}
+_ts_cfg_loaded_at: float = 0.0
+_TS_CFG_TTL = 5.0
+_ts_cfg_lock = _ts_threading.Lock()
+
+
+def _get_ts_app_cfg() -> dict:
+    """Return app.json contents, re-reading from disk at most once every 5 s."""
+    global _ts_cfg_cache, _ts_cfg_loaded_at
+    now = _ts_time.monotonic()
+    if now - _ts_cfg_loaded_at < _TS_CFG_TTL:
+        return _ts_cfg_cache
+    with _ts_cfg_lock:
+        if now - _ts_cfg_loaded_at < _TS_CFG_TTL:
+            return _ts_cfg_cache
+        try:
+            import json as _json
+            _ts_cfg_cache = _json.loads(
+                (CONFIG_DIR / "app.json").read_text(encoding="utf-8")
+            )
+        except Exception:
+            pass
+        _ts_cfg_loaded_at = now
+    return _ts_cfg_cache
+
 
 @dataclass
 class TrailingState:
@@ -120,7 +150,10 @@ class TrailingStopManager:
         Check all open positions and update trailing stops.
         Returns number of positions trailed.
         """
-        if not self._config.get("enabled", False):
+        # LIVE-2 fix: read config from TTL cache so dashboard changes take effect
+        # within 5 s instead of requiring a full bot restart.
+        _ts_cfg = _get_ts_app_cfg().get("trailing_stops", self._config)
+        if not _ts_cfg.get("enabled", False):
             return 0
 
         # Skip entirely when markets are closed (weekends, session gaps).
@@ -155,7 +188,7 @@ class TrailingStopManager:
 
                 # Skip if trailing disabled for this mode
                 # NOTE: Scalping uses EA (AIBotScalper.mq5) for sub-millisecond trailing
-                mode_cfg = self._config.get(mode, {})
+                mode_cfg = _ts_cfg.get(mode, {})
                 if not mode_cfg.get("enabled", False):
                     continue
 

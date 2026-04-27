@@ -64,6 +64,8 @@ class TradeJournal:
         slippage: Optional[float] = None,
         execution_time_ms: Optional[int] = None,
         spread_pips: Optional[float] = None,
+        swap: Optional[float] = None,
+        commission: Optional[float] = None,
     ) -> None:
         """Append a trade event to the journal."""
         record = {
@@ -90,6 +92,9 @@ class TradeJournal:
             "slippage":          slippage,
             "execution_time_ms": execution_time_ms,
             "spread_pips":       spread_pips,
+            # Swap and commission (LIVE-5)
+            "swap":              swap,
+            "commission":        commission,
         }
         with self._lock:
             try:

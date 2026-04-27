@@ -1128,7 +1128,7 @@ async def recover_unclosed_trades(client) -> None:
         close_dt2 = datetime.fromisoformat(close_time)
         dur_mins  = (close_dt2 - open_dt2).total_seconds() / 60
 
-        # Write close event to journal
+        # Write close event to journal (include swap/commission from closing deal)
         trade_journal.log(
             ticket=ticket,
             symbol=symbol,
@@ -1143,6 +1143,8 @@ async def recover_unclosed_trades(client) -> None:
             comment=entry.get("comment", ""),
             event="close",
             close_time=close_time,
+            swap=getattr(deal, "swap", None),
+            commission=getattr(deal, "commission", None),
         )
 
         # Feed to trade memory and RL
@@ -1658,11 +1660,28 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             # GAP-6: compute execution slippage = |fill_price - signal_entry_price| in pips.
             # fill_price is set by _do_execute_sync after MT5 order fill.
             # Stored in extra for analytics and future RL feature use.
+            # Use instrument-aware pip size so crypto/stocks don't produce
+            # inflated values (e.g. XLMUSD at $0.28 with pip=0.0001 → 29.70 pips).
             _signal_entry = float(signal.get("entry_price") or signal.get("entry") or 0.0)
             _fill         = float(signal.get("fill_price") or 0.0)
             _slippage_pips: float = 0.0
             if _signal_entry > 0 and _fill > 0:
-                _slippage_pips = round(abs(_fill - _signal_entry) / pip_val, 1)
+                _sym_u_slip = sym.upper()
+                if any(x in _sym_u_slip for x in (
+                    "BTC", "ETH", "SOL", "XRP", "XLM", "BNB", "LTC", "ADA"
+                )):
+                    _slip_pip_val = 1.0        # crypto: raw price distance
+                elif any(x in _sym_u_slip for x in (
+                    "US30", "US100", "US500", "GER40", "UK100"
+                )):
+                    _slip_pip_val = 1.0        # indices: raw point distance
+                elif _sym_digits <= 2:
+                    _slip_pip_val = 1.0        # stocks: raw $ distance
+                elif _sym_digits in (5, 3):
+                    _slip_pip_val = 0.01 if "JPY" in _sym_u_slip else 0.0001
+                else:
+                    _slip_pip_val = pip_val    # 4-digit forex / other
+                _slippage_pips = round(abs(_fill - _signal_entry) / _slip_pip_val, 2)
                 if _slippage_pips > 0:
                     logger.debug(
                         f"Slippage #{ticket} {signal.get('symbol')}: "
@@ -1740,6 +1759,9 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             try:
                 from engine.trade_journal import trade_journal
                 from engine.account_store import current_mode
+                # Extract swap and commission from the closing MT5 deal
+                _deal_swap       = getattr(deal, "swap", None)
+                _deal_commission = getattr(deal, "commission", None)
                 trade_journal.log(
                     ticket=ticket,
                     symbol=signal["symbol"],
@@ -1754,6 +1776,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     comment=signal.get("strategy", ""),
                     event="close",
                     close_time=close_time,
+                    swap=_deal_swap,
+                    commission=_deal_commission,
                 )
             except Exception as _je:
                 logger.warning(f"Journal write failed for #{ticket}: {_je}")
