@@ -234,6 +234,8 @@ export default function AccountPanel() {
                       [null,           "SL"],
                       [null,           "TP"],
                       ["pnl",          "P&L"],
+                      [null,           "Swap"],
+                      [null,           "Comm"],
                       ["trading_type", "Type"],
                       [null,           "Account"],
                       [null,           "Status"],
@@ -274,6 +276,12 @@ export default function AccountPanel() {
                       <td className="py-2 pr-4 font-mono text-green-400">{e.tp || "—"}</td>
                       <td className={`py-2 pr-4 font-mono ${pnl == null ? "text-gray-500" : pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
                         {pnl == null ? "—" : `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}${isLive ? " ~" : ""}`}
+                      </td>
+                      <td className={`py-2 pr-4 font-mono ${e.swap == null ? "text-gray-600" : e.swap >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {e.swap == null ? "—" : `${e.swap >= 0 ? "+" : ""}${e.swap.toFixed(2)}`}
+                      </td>
+                      <td className={`py-2 pr-4 font-mono ${e.commission == null ? "text-gray-600" : e.commission >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {e.commission == null ? "—" : `${e.commission >= 0 ? "+" : ""}${e.commission.toFixed(2)}`}
                       </td>
                       <td className="py-2 pr-4 text-gray-500">{e.trading_type}</td>
                       <td className="py-2 pr-4">

@@ -150,6 +150,8 @@ export interface JournalEntry {
   open_time: string;
   close_time: string | null;
   logged_at: string;
+  swap?: number | null;
+  commission?: number | null;
 }
 
 export interface JournalStats {
