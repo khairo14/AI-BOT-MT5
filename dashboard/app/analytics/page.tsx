@@ -415,7 +415,7 @@ export default function AnalyticsPage() {
       const [perf, reg, exec] = await Promise.all([
         fetchAnalyticsPerformance(accountTab, modeTab),
         fetchRegimeStatus().catch(() => ({ regimes: {} })),
-        fetchExecutionQuality().catch(() => null),
+        fetchExecutionQuality(accountTab, modeTab).catch(() => null),
       ]);
       setData(perf);
       setRegimes(reg.regimes);
@@ -472,8 +472,8 @@ export default function AnalyticsPage() {
         ))}
       </div>
 
-      {/* Account tabs — overview only */}
-      {sectionTab === "overview" && <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
+      {/* Account tabs */}
+      <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
         {ACCOUNT_TABS.map((tab) => (
           <button
             key={tab}
@@ -487,10 +487,10 @@ export default function AnalyticsPage() {
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
-      </div>}
+      </div>
 
-      {/* Mode tabs — overview only */}
-      {sectionTab === "overview" && <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
+      {/* Mode tabs */}
+      <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
         {MODE_TABS.map((tab) => (
           <button
             key={tab}
@@ -504,7 +504,7 @@ export default function AnalyticsPage() {
             {MODE_LABELS[tab]}
           </button>
         ))}
-      </div>}
+      </div>
 
       {/* Execution Quality tab */}
       {sectionTab === "execution" && (

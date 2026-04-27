@@ -216,8 +216,14 @@ export const markAllNotificationsRead = () =>
 // ── Execution Quality ------------------------------------------------------
 import type { ExecutionQualityMetrics } from "@/types";
 
-export const fetchExecutionQuality = (): Promise<ExecutionQualityMetrics> =>
-  api.get("/execution-quality/metrics").then((r) => r.data);
+export const fetchExecutionQuality = (
+  account: "paper" | "live" | "all" = "all",
+  tradingType: "scalping" | "day_trading" | "swing" | "all" = "all",
+): Promise<ExecutionQualityMetrics> => {
+  const params = new URLSearchParams({ account });
+  if (tradingType !== "all") params.set("trading_type", tradingType);
+  return api.get(`/execution-quality/metrics?${params.toString()}`).then((r) => r.data);
+};
 
 export const deleteNotification = (id: string) =>
   api.delete(`/notifications/${id}`).then((r) => r.data);
@@ -430,7 +436,7 @@ export const fetchScannerSystemConfig = () =>
 export const fetchScannerHealth = () =>
   api.get("/scanner/health").then((r) => r.data);
 
-export const fetchScannerPerformance = (): Promise<{
+export const fetchScannerPerformance = (account: "paper" | "live" | "all" = "all"): Promise<{
   status: string;
   timestamp: string;
   trading_types: Record<string, {
@@ -452,7 +458,7 @@ export const fetchScannerPerformance = (): Promise<{
       status: string;
     }>;
   }>;
-}> => api.get("/scanner/performance").then((r) => r.data);
+}> => api.get(`/scanner/performance?account=${account}`).then((r) => r.data);
 
 // ── Analytics ---------------------------------------------------------------
 export const fetchAnalyticsPerformance = (

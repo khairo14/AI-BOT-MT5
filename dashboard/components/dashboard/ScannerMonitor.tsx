@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { fetchScannerPerformance } from "@/lib/api";
+import { useBotStore } from "@/lib/store";
 
 interface PairStat {
   symbol: string;
@@ -32,13 +33,15 @@ const MODE_CONFIG = {
 };
 
 export default function ScannerMonitor() {
+  const currentMode = useBotStore((s) => s.account?.mode ?? "paper");
+  const [accountFilter, setAccountFilter] = useState<"paper" | "live" | "all">(currentMode);
   const [data, setData] = useState<Record<string, TypeStats> | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<string>("");
 
   const loadData = async () => {
     try {
-      const result = await fetchScannerPerformance();
+      const result = await fetchScannerPerformance(accountFilter);
       setData(result.trading_types);
       setLastUpdate(new Date(result.timestamp).toLocaleTimeString());
     } catch (err) {
@@ -52,7 +55,8 @@ export default function ScannerMonitor() {
     loadData();
     const interval = setInterval(loadData, 60000); // Refresh every 60s
     return () => clearInterval(interval);
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountFilter]);
 
   if (loading) {
     return (
@@ -85,12 +89,34 @@ export default function ScannerMonitor() {
             Live active pairs · Last update: {lastUpdate}
           </p>
         </div>
-        <button
-          onClick={loadData}
-          className="text-xs text-gray-500 hover:text-white transition-colors"
-        >
-          ↻ Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Account filter */}
+          <div className="flex gap-1 bg-gray-800 rounded-lg p-0.5">
+            {(["paper", "live", "all"] as const).map((opt) => (
+              <button
+                key={opt}
+                onClick={() => setAccountFilter(opt)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  accountFilter === opt
+                    ? opt === "live"
+                      ? "bg-red-600 text-white"
+                      : opt === "paper"
+                      ? "bg-emerald-600 text-white"
+                      : "bg-blue-600 text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                {opt.charAt(0).toUpperCase() + opt.slice(1)}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={loadData}
+            className="text-xs text-gray-500 hover:text-white transition-colors"
+          >
+            ↻ Refresh
+          </button>
+        </div>
       </div>
 
       {/* Trading Type Sections */}

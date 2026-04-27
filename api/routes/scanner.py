@@ -327,7 +327,10 @@ async def add_symbol_to_config(request: Request, body: AddSymbolRequest):
 
 @router.get("/performance")
 @limiter.limit("60/minute")  # Task #7: Rate limiting
-async def get_scanner_performance(request: Request):
+async def get_scanner_performance(
+    request: Request,
+    account: str = Query("all", regex="^(paper|live|all)$"),
+):
     """
     Get live scanner performance metrics:
     - Active pairs by trading type (from scanner.json)
@@ -351,7 +354,8 @@ async def get_scanner_performance(request: Request):
         
         # Load trade journal for stats
         journal_path = "data/trade_journal.jsonl"
-        _mode = _cur_mode()
+        # Resolve account filter: explicit param or current mode
+        acct_filter = account if account != "all" else None
         pair_stats = defaultdict(lambda: {
             "signals": 0, "trades": 0, "wins": 0, 
             "losses": 0, "total_profit": 0.0, "last_signal": None
@@ -365,8 +369,8 @@ async def get_scanner_performance(request: Request):
                         symbol = trade.get("symbol")
                         if not symbol:
                             continue
-                        # Only count trades for the current account mode
-                        if trade.get("account_mode") != _mode:
+                        # Filter by account mode when not "all"
+                        if acct_filter and trade.get("account_mode") != acct_filter:
                             continue
                         
                         trade_type = trade.get("trading_type", "")
