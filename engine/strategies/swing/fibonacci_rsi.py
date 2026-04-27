@@ -18,6 +18,7 @@ DEFAULT_PARAMS = {
     "fib_entry_high": 0.618,
     "fib_tp": 1.0,       # TP at 100% swing retracement (full extension) — used as tp2
     "tp1_rr": 1.5,       # tp1 at 1.5R (partial close before swinging to full target)
+    "tp2_rr": 2.5,       # fallback tp2 (R-multiple) when swing_high/low is closer than tp1
     "rsi_period": 14,
     "rsi_bull_min": 35,
     "rsi_bull_max": 65,
@@ -129,7 +130,11 @@ class FibonacciRSI(BaseStrategy):
                 return self._no_signal(indicators)
             sl_dist = abs(curr_close - sl)
             tp1 = round(curr_close + sl_dist * p["tp1_rr"], 5)
-            tp2 = round(swing_high, 5)  # tp2 = 100% extension (origin swing high)
+            # tp2 = 100% extension (origin swing high), but only if it's genuinely beyond tp1.
+            # If ATR is large relative to swing range, swing_high could sit below tp1 —
+            # fall back to an R-multiple target to avoid a structurally wrong tp2.
+            _tp2_struct = round(swing_high, 5)
+            tp2 = _tp2_struct if _tp2_struct > tp1 else round(curr_close + sl_dist * p["tp2_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -151,7 +156,9 @@ class FibonacciRSI(BaseStrategy):
                 return self._no_signal(indicators)
             sl_dist = abs(sl - curr_close)
             tp1 = round(curr_close - sl_dist * p["tp1_rr"], 5)
-            tp2 = round(swing_low, 5)   # tp2 = 100% (origin low)
+            # tp2 = 100% (origin low), but only if it's genuinely below tp1.
+            _tp2_struct = round(swing_low, 5)
+            tp2 = _tp2_struct if _tp2_struct < tp1 else round(curr_close - sl_dist * p["tp2_rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",

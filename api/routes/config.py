@@ -59,7 +59,7 @@ _SCANNER_SCHEMA: dict[str, tuple] = {
 }
 
 # Max symbols per scanner mode — also enforced in update_scanner_config
-_SCANNER_MAX = {"scalping": 7, "day_trading": 15, "swing": 18}
+_SCANNER_MAX = {"scalping": 10, "day_trading": 20, "swing": 25}
 
 
 def _validate_schema(data: dict, schema: dict, path: str = "") -> None:
