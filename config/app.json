@@ -33,12 +33,19 @@
     "day_trading": 6.0,
     "swing": 15.0
   },
+  "max_deviation_points": {
+    "scalping": 5,
+    "day_trading": 10,
+    "swing": 20,
+    "comment": "Max MT5 points of slippage allowed on entry orders. 1 point = 0.1 pip on 5-digit forex. Exits (close_position) always use 20 to ensure fills."
+  },
   "weekend_gap_protection": false,
   "ai": {
     "price_prediction_enabled": true,
     "confidence_filter_enabled": false,
     "confidence_threshold": 56,
     "rl_agent_enabled": true,
+    "swing_auto_review_seconds": 60,
     "swing_scorer_weights": {
       "lstm": 0.4,
       "rr": 0.3,

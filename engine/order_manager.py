@@ -249,6 +249,19 @@ class OrderManager:
             vol = round(math.floor(vol / step) * step, 10)
             vol = max(sym_info.volume_min, vol)
 
+        # Anti-slippage: read max deviation from config per trading mode.
+        # Lower value = tighter entry — MT5 rejects fills beyond this many points.
+        # On 5-digit forex: 5 pts = 0.5 pip (scalping), 10 pts = 1 pip (day),
+        # 20 pts = 2 pips (swing). Exits (close_position) always use 20 to ensure fills.
+        _mode_prefix_dev = req.comment.split("|")[0] if "|" in req.comment else ""
+        _mode_map_dev = {"scalp": "scalping", "day": "day_trading", "swing": "swing"}
+        _tt_dev = _mode_map_dev.get(_mode_prefix_dev, "")
+        try:
+            _dev_cfg = _get_om_app_cfg().get("max_deviation_points", {})
+            _deviation = int(_dev_cfg.get(_tt_dev, 20)) if _tt_dev else 20
+        except Exception:
+            _deviation = 20
+
         request = {
             "action":    mt5.TRADE_ACTION_DEAL,
             "symbol":    req.symbol,
@@ -257,7 +270,7 @@ class OrderManager:
             "price":     price,
             "sl":        sl,
             "tp":        tp if tp else 0.0,
-            "deviation": 20,       # max price slippage in points
+            "deviation": _deviation,
             "magic":     req.magic,
             "comment":   req.comment[:31],  # MT5 limit: 31 chars
             "type_time": mt5.ORDER_TIME_GTC,
