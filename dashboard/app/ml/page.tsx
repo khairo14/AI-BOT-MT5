@@ -163,7 +163,7 @@ export default function MLPage() {
 
   // LSTM table filter/sort
   const [lstmSearch, setLstmSearch] = useState("");
-  type LstmSortKey = "sym" | "accuracy" | "bars_used" | "status";
+  type LstmSortKey = "sym" | "accuracy" | "bars_used" | "last_trained" | "status";
   const [lstmSort, setLstmSort] = useState<{ key: LstmSortKey; dir: "asc" | "desc" }>({ key: "sym", dir: "asc" });
 
   // Optimizer table filter/sort
@@ -313,7 +313,7 @@ export default function MLPage() {
       {/*  1. LSTM Models  */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <SectionHeader title="LSTM Prediction Models" sub="One model per symbol ├ù trading mode, trained on OHLCV + indicators." />
+          <SectionHeader title="LSTM Prediction Models" sub="One model per symbol × trading mode, trained on OHLCV + indicators." />
           <button
             disabled={busy["train_all"]}
             onClick={() => doAction("train_all", () => trainAllSymbols())}
@@ -339,8 +339,9 @@ export default function MLPage() {
             let cmp = 0;
             if (lstmSort.key === "sym")       cmp = sa.localeCompare(sb) || ta.localeCompare(tb);
             else if (lstmSort.key === "accuracy")  cmp = (ma.accuracy ?? -1) - (mb.accuracy ?? -1);
-            else if (lstmSort.key === "bars_used") cmp = (ma.bars_used ?? 0) - (mb.bars_used ?? 0);
-            else if (lstmSort.key === "status")    cmp = Number(ma.training) - Number(mb.training);
+            else if (lstmSort.key === "bars_used")    cmp = (ma.bars_used ?? 0) - (mb.bars_used ?? 0);
+            else if (lstmSort.key === "last_trained")  cmp = (ma.trained_at ?? "").localeCompare(mb.trained_at ?? "");
+            else if (lstmSort.key === "status")         cmp = Number(ma.training) - Number(mb.training);
             return lstmSort.dir === "asc" ? cmp : -cmp;
           });
           const toggleLstmSort = (k: LstmSortKey) =>
@@ -364,7 +365,7 @@ export default function MLPage() {
                       <SortTh label="Symbol / Mode" sortKey="sym"       current={lstmSort} onSort={toggleLstmSort} className="pl-2" />
                       <SortTh label="Accuracy"      sortKey="accuracy"  current={lstmSort} onSort={toggleLstmSort} />
                       <SortTh label="Bars Used"     sortKey="bars_used" current={lstmSort} onSort={toggleLstmSort} />
-                      <th className="pb-2 pt-2 pr-4 font-medium">Last Trained</th>
+                      <SortTh label="Last Trained" sortKey="last_trained" current={lstmSort} onSort={toggleLstmSort} />
                       <SortTh label="Status"        sortKey="status"    current={lstmSort} onSort={toggleLstmSort} />
                       <th className="pb-2 pt-2 font-medium">Action</th>
                     </tr>
@@ -1279,11 +1280,11 @@ export default function MLPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-3 text-sm text-gray-400">
           <div className="flex gap-3">
             <span className="text-blue-400 font-semibold w-48 shrink-0">LSTM retrain</span>
-            <span>Every 20th closed trade per symbol ├ù mode. Also triggers on: model age &gt; 7 days (if ΓëÑ 10 trades exist) or 8 consecutive losses (regime change indicator).</span>
+            <span>Every 20th closed trade per symbol × mode. Also triggers on: model age &gt; 7 days (if ≥ 10 trades exist) or 8 consecutive losses (regime change indicator).</span>
           </div>
           <div className="flex gap-3">
             <span className="text-purple-400 font-semibold w-48 shrink-0">Param optimizer</span>
-            <span>Triggered when live win-rate drops below 45 % with ΓëÑ 30 new trades since last optimization — 24 h cooldown per strategy ├ù symbol. Walk-forward backtest tests up to 64 parameter combos.</span>
+            <span>Triggered when live win-rate drops below 45 % with ≥ 30 new trades since last optimization — 24 h cooldown per strategy × symbol. Walk-forward backtest tests up to 64 parameter combos.</span>
           </div>
           <div className="flex gap-3">
             <span className="text-amber-400 font-semibold w-48 shrink-0">RL agent</span>
@@ -1291,7 +1292,7 @@ export default function MLPage() {
           </div>
           <div className="flex gap-3">
             <span className="text-emerald-400 font-semibold w-48 shrink-0">Best-strategy selector</span>
-            <span>Per symbol, the strategy with the highest LSTM confidence (above threshold, R:R ΓëÑ 1.5) wins. Runs at signal time — no extra schedule needed.</span>
+            <span>Per symbol, the strategy with the highest LSTM confidence (above threshold, R:R ≥ 1.5) wins. Runs at signal time — no extra schedule needed.</span>
           </div>
         </div>
       </section>
