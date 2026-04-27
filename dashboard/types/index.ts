@@ -146,7 +146,7 @@ export interface JournalEntry {
   trading_type: TradingMode;
   account_mode: AccountMode;
   comment: string;
-  event: "open" | "close";
+  event: "open" | "close" | "partial_close";
   open_time: string;
   close_time: string | null;
   logged_at: string;

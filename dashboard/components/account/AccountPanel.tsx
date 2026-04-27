@@ -167,10 +167,19 @@ export default function AccountPanel() {
         {entries.length === 0 ? (
           <p className="text-xs text-gray-600">No journal entries yet. Trades will appear here once the bot executes orders.</p>
         ) : (() => {
-          // Merge open + close rows into one row per ticket.
-          // close entry takes priority (has profit); open entry fills in times.
+          // Merge open + close + partial_close rows into one row per ticket.
+          // close entry takes priority for metadata; partial_close profits are
+          // accumulated into a _partialProfit map so the displayed P&L is the
+          // true net (partial TP profit + runner close profit).
           const merged = new Map<number, JournalEntry & { open_entry?: JournalEntry }>();
+          const partialProfit = new Map<number, number>();
           for (const e of [...entries].reverse()) {
+            if (e.event === "partial_close") {
+              if (e.profit != null) {
+                partialProfit.set(e.ticket, (partialProfit.get(e.ticket) ?? 0) + e.profit);
+              }
+              continue;
+            }
             const existing = merged.get(e.ticket);
             if (!existing) {
               merged.set(e.ticket, { ...e });
@@ -184,8 +193,12 @@ export default function AccountPanel() {
           const fmtTime = (iso: string | null | undefined) =>
             iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
-          const getPnl = (e: JournalEntry) =>
-            e.profit ?? (!( e.event === "close") ? (liveProfit[e.ticket] ?? null) : null);
+          const getPnl = (e: JournalEntry) => {
+            const closePnl = e.profit ?? (e.event !== "close" ? (liveProfit[e.ticket] ?? null) : null);
+            const partial = partialProfit.get(e.ticket) ?? 0;
+            if (closePnl == null) return partial > 0 ? partial : null;
+            return closePnl + partial;
+          };
 
           const allRows = Array.from(merged.values()).sort((a, b) => {
             let av: string | number | null = null;

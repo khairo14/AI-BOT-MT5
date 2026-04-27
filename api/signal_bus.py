@@ -1086,6 +1086,10 @@ async def recover_unclosed_trades(client) -> None:
         # Correct deal.time for broker server-clock offset so we store true UTC
         close_time = datetime.fromtimestamp(deal.time - server_offset, tz=timezone.utc).isoformat()
         profit     = deal.profit
+        # Partial TP fix: sum all DEAL_ENTRY_OUT profits so recovered trades with
+        # a prior partial_close report their true net P&L (not just the runner close).
+        if len(closed) > 1:
+            profit = sum(d.profit for d in closed)
         close_px   = deal.price
         entry_px   = float(entry.get("entry") or 0)
         direction  = entry.get("direction", "buy").upper()
@@ -1589,6 +1593,13 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             # Use Python clock for close_time — avoids broker server-clock offset issues.
             # deal.time can be in local server time (e.g. EET = UTC+2) on some brokers.
             profit     = deal.profit
+            # Partial TP fix: if a partial_close fired earlier on this ticket,
+            # its profit is NOT included in deal.profit (which only covers the
+            # final close deal). Sum all DEAL_ENTRY_OUT profits so the RL agent,
+            # risk manager, and trade memory see the true net P&L.
+            _all_out_profits = sum(d.profit for d in closed)
+            if len(closed) > 1:
+                profit = _all_out_profits
             close_px   = deal.price
             entry_px   = float(signal.get("fill_price") or signal.get("entry_price", 0))
             sym        = signal["symbol"]

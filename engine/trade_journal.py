@@ -152,7 +152,12 @@ class TradeJournal:
         """Return summary stats for the given account filter."""
         from datetime import datetime, timezone
         entries = self.get(account=account, limit=10_000)
-        closed  = [e for e in entries if e.get("event") == "close" and e.get("profit") is not None]
+        # Include partial_close events with a real profit so today_pnl and
+        # total_profit reflect the true net (partial TP profit + runner close).
+        closed  = [
+            e for e in entries
+            if e.get("event") in ("close", "partial_close") and e.get("profit") is not None
+        ]
         if not closed:
             return {
                 "total": 0, "wins": 0, "losses": 0,
@@ -166,22 +171,37 @@ class TradeJournal:
             if (e.get("close_time") or e.get("logged_at") or "")[:10] == today_str
         ]
 
-        wins   = [e for e in closed if (e["profit"] or 0) > 0]
-        losses = [e for e in closed if (e["profit"] or 0) <= 0]
+        # For win/loss counting and trade count, group by ticket so a partial_close
+        # + close on the same ticket counts as ONE trade (not two). Sum their profits
+        # to determine the net outcome.
+        from collections import defaultdict
+        _ticket_profit: dict = defaultdict(float)
+        _ticket_tt: dict = {}
+        for e in closed:
+            _ticket_profit[e["ticket"]] += (e["profit"] or 0)
+            if e.get("trading_type"):
+                _ticket_tt[e["ticket"]] = e["trading_type"]
+
+        _net_trades = list(_ticket_profit.items())  # [(ticket, net_profit), ...]
+        wins   = [t for t, p in _net_trades if p > 0]
+        losses = [t for t, p in _net_trades if p <= 0]
+
         by_mode: dict = {}
         for tt in ("scalping", "day_trading", "swing"):
-            mc = [e for e in closed if e.get("trading_type") == tt]
+            mc = [(t, p) for t, p in _net_trades if _ticket_tt.get(t) == tt]
             if mc:
-                mw = sum(1 for e in mc if (e["profit"] or 0) > 0)
+                mw = sum(1 for _, p in mc if p > 0)
                 by_mode[tt] = {"wins": mw, "losses": len(mc) - mw}
+
+        _total_trades = len(_net_trades)
         return {
-            "total":        len(closed),
+            "total":        _total_trades,
             "wins":         len(wins),
             "losses":       len(losses),
-            "win_rate":     round(len(wins) / len(closed) * 100, 1),
+            "win_rate":     round(len(wins) / _total_trades * 100, 1) if _total_trades else 0.0,
             "total_profit": round(sum(e["profit"] or 0 for e in closed), 2),
             "by_mode":      by_mode,
-            "today_trades": len(today),
+            "today_trades": len({e["ticket"] for e in today}),
             "today_pnl":    round(sum(e["profit"] or 0 for e in today), 2),
         }
 

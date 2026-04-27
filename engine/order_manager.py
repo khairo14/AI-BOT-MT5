@@ -632,11 +632,25 @@ class OrderManager:
             f"Partial close | #{ticket} | {pos.symbol} | "
             f"{close_pct*100:.0f}% ({close_volume} lots) | Reason: {reason}"
         )
-        # H-5 fix: journal the partial close so trailing audit logs are complete
+        # H-5 fix: journal the partial close so trailing audit logs are complete.
+        # Fetch the real profit from the MT5 deal record using result.deal so the
+        # journal, stats, RL agent, and win-rate all see the correct figure.
         try:
             from engine.trade_journal import trade_journal
             from engine.account_store import current_mode
             from datetime import datetime, timezone
+            _partial_profit: float | None = None
+            _partial_swap: float | None = None
+            _partial_commission: float | None = None
+            try:
+                import MetaTrader5 as _mt5_pc
+                _deals = _mt5_pc.history_deals_get(ticket=result.deal)
+                if _deals:
+                    _partial_profit     = float(_deals[0].profit)
+                    _partial_swap       = float(_deals[0].swap)
+                    _partial_commission = float(_deals[0].commission)
+            except Exception:
+                pass
             trade_journal.log(
                 ticket=ticket,
                 symbol=pos.symbol,
@@ -645,12 +659,14 @@ class OrderManager:
                 entry=pos.price_open,
                 sl=pos.sl,
                 tp=pos.tp if pos.tp else None,
-                profit= None,
+                profit=_partial_profit,
                 trading_type="",
                 account_mode=current_mode(),
                 comment=reason,
                 event="partial_close",
                 close_time=datetime.now(tz=timezone.utc).isoformat(),
+                swap=_partial_swap,
+                commission=_partial_commission,
             )
         except Exception as _je:
             logger.debug(f"partial_close journal write failed for #{ticket}: {_je}")
