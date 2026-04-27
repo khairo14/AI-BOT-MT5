@@ -326,7 +326,16 @@ class MarketScanner:
             sym_info = self.mt5.get_symbol_info(symbol)
             if not sym_info:
                 return None
-            
+
+            # Skip symbols whose market is currently closed according to MT5.
+            # trade_mode: 0=disabled, 1=longonly, 2=shortonly, 3=closeonly, 4=full.
+            # We require at least one direction to be openable (1, 2, or 4).
+            # mode 3 (closeonly) means the broker is winding down — don't open new trades.
+            _trade_mode = sym_info.get("trade_mode", 4)
+            if _trade_mode not in (1, 2, 4):
+                logger.debug(f"Scanner: skipping {symbol} — trade_mode={_trade_mode} (market closed)")
+                return None
+
             # Get OHLCV data
             df = self.mt5.get_ohlcv(symbol, timeframe, lookback_bars)
             if df is None or len(df) < 50:  # Need minimum bars for indicators

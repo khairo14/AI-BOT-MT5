@@ -228,6 +228,8 @@ class MT5Client:
             "max_lot":       info.volume_max,
             "lot_step":      info.volume_step,
             "stops_level":   info.trade_stops_level,
+            # MT5 SYMBOL_TRADE_MODE: 0=disabled, 1=longonly, 2=shortonly, 3=closeonly, 4=full
+            "trade_mode":    info.trade_mode,
         }
 
     def get_current_price(self, symbol: str) -> Optional[dict]:
