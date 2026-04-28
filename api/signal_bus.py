@@ -1438,11 +1438,14 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         try:
                             om = _get_om()
                             if om and entry_px:
-                                await asyncio.to_thread(om.partial_close, ticket, 0.5)
+                                # Swing: 40/60 split — let a larger runner ride to TP2.
+                                # Day trading: keep original 50/50 split.
+                                _partial_pct = 0.4 if trading_mode == "swing" else 0.5
+                                await asyncio.to_thread(om.partial_close, ticket, _partial_pct)
                                 await asyncio.to_thread(om.modify_position, ticket, entry_px, tp2)
                                 logger.info(
                                     f"TP1 partial-close fired: #{ticket} {signal.get('symbol')} "
-                                    f"BE={entry_px} → targeting TP2={tp2}"
+                                    f"{int(_partial_pct*100)}% closed, BE={entry_px} → targeting TP2={tp2}"
                                 )
                         except Exception as _pce:
                             logger.warning(f"TP1 partial-close failed #{ticket}: {_pce}")
