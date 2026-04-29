@@ -141,6 +141,16 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "rsi_period":     [7, 9, 14],
         "min_rr_to_vwap": [0.6, 0.8, 1.0],  # minimum VWAP RR before entry (skip tiny TP)
     },
+    "stoch_rsi_pullback": {
+        "ema_fast":             [13, 21, 34],
+        "ema_mid":              [40, 50, 60],
+        "stochrsi_oversold":    [15, 20, 25],
+        "stochrsi_overbought":  [75, 80, 85],
+        "sl_atr_mult":          [1.0, 1.5, 2.0],
+        "tp1_rr":               [1.5, 2.0],      # must be ≥ risk_reward_min 1.5 (scalping)
+        "rr":                   [2.0, 2.5, 3.0], # tp2 full close
+        "max_spread_pips":      [2.0, 3.0, 4.0],
+    },
     "macd_ema_trend": {
         "macd_fast":   [9, 12],
         "macd_slow":   [21, 26],
@@ -324,6 +334,10 @@ def _valid_combo(strategy_name: str, combo: dict) -> bool:
     # vwap_reversion: stop-loss band must be wider than entry band
     if strategy_name == "vwap_reversion":
         if combo.get("sigma_entry", 0) >= combo.get("sigma_sl", float("inf")):
+            return False
+    # stoch_rsi_pullback: tp1 (partial close) must be less than tp2 (full close)
+    if strategy_name == "stoch_rsi_pullback":
+        if combo.get("tp1_rr", 0) >= combo.get("rr", float("inf")):
             return False
     return True
 
