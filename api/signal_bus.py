@@ -1254,6 +1254,19 @@ async def recover_unclosed_trades(client) -> None:
             )
         except Exception:
             pass
+        try:
+            from api.websocket.feed import manager as _ws_manager_rec
+            import asyncio as _asyncio_rec
+            _asyncio_rec.create_task(_ws_manager_rec.broadcast_alert({
+                "type": "position_closed",
+                "symbol": symbol,
+                "profit": round(profit, 2),
+                "pips": round(pips, 1),
+                "outcome": outcome_type,
+                "strategy": entry.get("comment", ""),
+            }))
+        except Exception:
+            pass
 
     # Re-launch _poll_outcome for any tickets that are still live
     still_open = [e for e in unclosed if e["ticket"] in live_tickets]
@@ -1482,6 +1495,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                 )
                                 try:
                                     from engine.notification_manager import notification_manager as _nm
+                                    from api.websocket.feed import manager as _ws_manager_tp1
                                     _pct_str = f"{int(_partial_pct*100)}%"
                                     _nm.add(
                                         type="position_closed",
@@ -1502,6 +1516,16 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                             "trading_mode": trading_mode,
                                         },
                                     )
+                                    asyncio.create_task(_ws_manager_tp1.broadcast_alert({
+                                        "type": "position_closed",
+                                        "symbol": signal.get("symbol"),
+                                        "profit": 0.0,
+                                        "pips": 0.0,
+                                        "outcome": "tp_hit",
+                                        "strategy": signal.get("strategy", ""),
+                                        "partial": True,
+                                        "partial_pct": _partial_pct,
+                                    }))
                                 except Exception:
                                     pass
                         except Exception as _pce:
@@ -1934,6 +1958,18 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         "close_price": close_px,
                     },
                 )
+            except Exception:
+                pass
+            try:
+                from api.websocket.feed import manager as _ws_manager_close
+                asyncio.create_task(_ws_manager_close.broadcast_alert({
+                    "type": "position_closed",
+                    "symbol": signal["symbol"],
+                    "profit": round(profit, 2),
+                    "pips": round(pips, 1),
+                    "outcome": outcome_type,
+                    "strategy": signal.get("strategy", ""),
+                }))
             except Exception:
                 pass
 

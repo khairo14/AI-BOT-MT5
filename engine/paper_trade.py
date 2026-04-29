@@ -211,6 +211,31 @@ class PaperTradeEngine:
                     f"Paper position closed: {pos.symbol} {pos.direction} "
                     f"ticket={ticket} profit={pos.profit:.2f}"
                 )
+                try:
+                    from engine.notification_manager import notification_manager as _nm_paper
+                    from api.websocket.feed import manager as _ws_manager_paper
+                    import asyncio as _asyncio_paper
+                    _paper_sev = "success" if pos.profit > 0 else ("error" if pos.profit < 0 else "info")
+                    _nm_paper.add(
+                        type="position_closed",
+                        title=f"{'✅ TP Hit' if pos.profit > 0 else '❌ SL Hit'} — {pos.symbol} (paper)",
+                        message=(
+                            f"{pos.direction} {pos.symbol} #{ticket} paper closed | "
+                            f"P&L: {pos.profit:+.2f}"
+                        ),
+                        severity=_paper_sev,
+                        metadata={"ticket": ticket, "symbol": pos.symbol, "profit": pos.profit, "paper": True},
+                    )
+                    _asyncio_paper.create_task(_ws_manager_paper.broadcast_alert({
+                        "type": "position_closed",
+                        "symbol": pos.symbol,
+                        "profit": round(pos.profit, 2),
+                        "pips": 0.0,
+                        "outcome": "tp_hit" if pos.profit > 0 else "sl_hit",
+                        "strategy": pos.strategy or "",
+                    }))
+                except Exception:
+                    pass
                 # Record to TradeMemory (feeds LSTM retrains, RL stats, analytics).
                 # This was missing — paper closes only wrote to the journal, so
                 # trade_memory and RL were only updated on server-restart recovery.
