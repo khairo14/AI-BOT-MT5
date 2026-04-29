@@ -137,6 +137,15 @@ def main() -> None:
     config_dir  = ROOT / "config"
     symbols_cfg: dict = json.loads((config_dir / "symbols.json").read_text(encoding="utf-8"))
 
+    # Load scanner.json once for symbol merging across all trading types
+    _scanner_cfg: dict = {}
+    _scanner_path = config_dir / "scanner.json"
+    if _scanner_path.exists():
+        try:
+            _scanner_cfg = json.loads(_scanner_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"Could not read scanner.json for symbol list: {exc}")
+
     # Each entry: (exit_time_str, trading_type, strategy_name, pnl_pct, conf_score, entry_price, sl_price)
     collected: list[tuple[str, str, str, float, float, float, float]] = []
 
@@ -152,10 +161,19 @@ def main() -> None:
             tf             = _TF[trading_type]
             bars           = _BARS[trading_type]
             needs_d1       = any(s in _NEEDS_D1 for s in strategies)
-            active_symbols = [
-                s["symbol"] for s in symbols_cfg.get(trading_type, [])
-                if s.get("enabled", True)
-            ]
+
+            # Build deduplicated symbol list: scanner.json (primary) + symbols.json (supplement)
+            _seen_syms: set[str] = set()
+            active_symbols: list[str] = []
+            for sym in _scanner_cfg.get(trading_type, {}).get("symbols", []):
+                if sym and sym not in _seen_syms:
+                    active_symbols.append(sym)
+                    _seen_syms.add(sym)
+            for s in symbols_cfg.get(trading_type, []):
+                sym = s["symbol"]
+                if s.get("enabled", True) and sym not in _seen_syms:
+                    active_symbols.append(sym)
+                    _seen_syms.add(sym)
 
             logger.info(f"\n  [{trading_type.upper()}] fetching {tf} data (2yr ≈ {bars:,} bars) …")
             primary_cache: dict[str, Optional[pd.DataFrame]] = {}

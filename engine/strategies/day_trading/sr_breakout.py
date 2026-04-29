@@ -18,11 +18,12 @@ DEFAULT_PARAMS = {
     "rsi_period": 14,
     "retest_mode": False,
     "sl_buffer_atr": 0.3,
-    "tp1_rr": 1.5,   # partial close at 1.5R (minimum for day_trading risk_reward_min)
-    "tp_rr": 1.8,    # tp2 at next structural level (or 1.8R fallback)
-    "min_touches": 2,          # minimum touches to qualify a level
+    "tp1_rr": 1.5,   # partial close at 1.5R
+    "tp_rr": 2.5,    # tp2 runner — raised from 1.8 (only 0.3R gap) to 2.5 for meaningful runner
+    "min_touches": 3,          # raised from 2 — 3 touches = more significant structural level
     "level_tolerance": 0.0015, # price tolerance for touch counting (0.15%)
     "vol_confirm_mult": 1.2,   # volume must exceed 20-bar avg × this factor (0 = disabled)
+    "max_spread_pips": 2.0,    # blocks GOLD/oil/BTC during wide-spread conditions
 }
 
 

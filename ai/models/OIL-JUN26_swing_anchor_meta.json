@@ -1,0 +1,8 @@
+{
+  "created_at": "2026-04-29T08:43:23.199891+00:00",
+  "accuracy": 0.5212,
+  "bars_used": 17450,
+  "trading_type": "swing",
+  "ensemble_size": 3,
+  "note": "frozen anchor \u2014 never auto-overwritten"
+}

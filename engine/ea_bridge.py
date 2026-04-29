@@ -96,6 +96,29 @@ class EABridge:
             return False
 
         from engine.order_manager import BOT_MAGIC as _BOT_MAGIC
+
+        # ATR-based trailing stop / breakeven distances.
+        # The strategy stores `atr` in its indicators dict; ea_bridge converts it
+        # to pip distances using the configured multipliers so the EA trails each
+        # trade proportionally to that symbol's actual volatility instead of a
+        # fixed global default that is too tight for exotics and commodities.
+        # Fallback to 0.0 tells the EA to use its own InpTrailingStopPips default.
+        _indicators = signal.get("indicators") or {}
+        _atr = float(_indicators.get("atr") or 0.0)
+        _trail_mult = 1.0   # trail at 1.0 × ATR (expressed in price units)
+        _be_mult    = 0.6   # breakeven at 0.6 × ATR above entry
+        # Convert ATR (price units) to pips.  Use entry price to determine pip size:
+        # 5-digit forex (e.g. 1.08xxx): pip = 0.0001, so pips = atr / 0.0001
+        # 3-digit forex (e.g. 110.xxx): pip = 0.01
+        # Commodities / indices: just use 1.0 (raw points, matches _GetEffectivePipSize)
+        _entry = float(signal.get("entry_price") or signal.get("sl") or 1.0)
+        if _entry > 10.0:          # JPY pairs, metals, indices — pip = 0.01 or 1.0
+            _pip = 0.01 if _entry < 1000.0 else 1.0
+        else:                      # standard 5-digit forex pairs
+            _pip = 0.0001
+        _trail_pips = round(_atr * _trail_mult / _pip, 1) if _atr > 0 else 0.0
+        _be_pips    = round(_atr * _be_mult    / _pip, 1) if _atr > 0 else 0.0
+
         cmd = {
             "id":         sig_id,
             "action":     "open",
@@ -108,6 +131,9 @@ class EABridge:
             "magic":      _BOT_MAGIC,
             # Unix timestamp — EA uses this for stale-guard
             "created_ts": int(time.time()),
+            # Per-trade ATR-based trail/breakeven (0.0 = use EA defaults)
+            "trail_pips": _trail_pips,
+            "be_pips":    _be_pips,
         }
 
         cmd_file = d / f"ea_cmd_{sig_id}.json"

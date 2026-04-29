@@ -15,10 +15,12 @@ from engine.strategies.base_strategy import BaseStrategy, Signal, StrategyResult
 DEFAULT_PARAMS = {
     "rsi_period": 14,
     "ema_bias_period": 50,
-    "divergence_lookback": 20,
+    "divergence_lookback": 40,   # 40 M30 bars = 20 hours — captures real multi-session divergences
     "atr_period": 14,
-    "tp_rr": 1.5,   # tp1 (partial close), also fallback if no tp2_rr
-    "tp2_rr": 2.5,  # tp2 (full close)
+    "sl_atr_mult": 1.5,          # SL = curr_close ± ATR × this (consistent with other strategies)
+    "tp_rr": 1.5,               # tp1 (partial close)
+    "tp2_rr": 2.5,              # tp2 (full close)
+    "max_spread_pips": 2.0,     # gate for GOLD/GER40/GBPJPY wide-spread conditions
 }
 
 
@@ -104,15 +106,20 @@ class RSIDivergence(BaseStrategy):
             "bullish_div": bullish_div,
             "bearish_div": bearish_div,
             "ema_bias": round(curr_ema, 5),
+            "atr": round(curr_atr, 5),
         }
 
         if bullish_div and rsi_cross_up:
-            sl = round(price_low_val - curr_atr * 0.3, 5)
-            sl_dist = abs(curr_close - sl)
-            if self._sl_too_close("BUY", curr_close, sl):
-                return self._no_signal(indicators)
+            # SL is ATR-based from current entry price — anchoring to price_low_val
+            # inflated sl_dist when price had already rallied far above the divergence
+            # low by the time the RSI-50 cross fired, making TPs unrealistically far.
+            sl_dist = curr_atr * p["sl_atr_mult"]
+            sl_dist = max(sl_dist, self._min_sl_dist(curr_close))
+            sl  = round(curr_close - sl_dist, 5)
             tp1 = round(curr_close + sl_dist * p["tp_rr"], 5)
             tp2 = round(curr_close + sl_dist * p["tp2_rr"], 5)
+            if self._sl_too_close("BUY", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -129,12 +136,13 @@ class RSIDivergence(BaseStrategy):
             )
 
         if bearish_div and rsi_cross_down:
-            sl = round(price_high_val + curr_atr * 0.3, 5)
-            sl_dist = abs(sl - curr_close)
-            if self._sl_too_close("SELL", curr_close, sl):
-                return self._no_signal(indicators)
+            sl_dist = curr_atr * p["sl_atr_mult"]
+            sl_dist = max(sl_dist, self._min_sl_dist(curr_close))
+            sl  = round(curr_close + sl_dist, 5)
             tp1 = round(curr_close - sl_dist * p["tp_rr"], 5)
             tp2 = round(curr_close - sl_dist * p["tp2_rr"], 5)
+            if self._sl_too_close("SELL", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",

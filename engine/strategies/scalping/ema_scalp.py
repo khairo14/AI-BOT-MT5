@@ -1,7 +1,12 @@
 """
 S1 — EMA Scalp (Trend Following)
 Timeframe: M5 entry, M15 bias filter
-Symbols: EURUSD, GBPUSD, USDJPY, EURJPY, USDCHF
+Symbols: any forex (majors, minors, exotics), commodities, indices
+
+SL is ATR-based so the strategy adapts to each symbol's actual volatility
+rather than a fixed pip count that was too tight for exotics and commodities.
+ADX filter blocks entries in choppy/ranging conditions where EMA crossovers
+are pure noise. EMA separation filter ensures the crossover has real momentum.
 """
 
 from __future__ import annotations
@@ -18,12 +23,20 @@ DEFAULT_PARAMS = {
     "rsi_period": 7,
     "rsi_min": 40,
     "rsi_max": 72,
-    "max_spread_pips": 1.5,
-    "sl_pips": 4,
-    "tp1_rr": 1.2,          # partial close at 1.2R
-    "rr": 2.0,              # tp2 (full close) at 2.0R
-    "vol_confirm_mult": 1.2, # volume must exceed 20-bar avg × this (0 = disabled)
-    "crossover_window": 3,  # look back N bars for a valid crossover (default 3 = 15 min)
+    "max_spread_pips": 4.0,      # covers exotics & commodities (XM: AUDCAD~2pip, XAUUSD~3pip, exotics~5-8pip)
+    # ATR-based SL — replaces fixed sl_pips so the strategy scales to any symbol
+    "atr_period": 14,
+    "atr_sl_mult": 1.5,          # SL = ATR × this; optimizer searches [1.0, 1.5, 2.0, 2.5]
+    "tp1_rr": 1.2,               # partial close at 1.2R
+    "rr": 2.0,                   # tp2 (full close) at 2.0R
+    "vol_confirm_mult": 1.3,     # volume must exceed 50-bar avg × this (0 = disabled)
+    "crossover_window": 3,       # look back N bars for a valid crossover
+    # ADX trend-strength filter — blocks entries in choppy/ranging conditions
+    "adx_period": 14,
+    "adx_min": 20,               # require ADX > this before allowing entry
+    # EMA separation filter — crossover must have real momentum, not just noise
+    # Minimum gap between fast and slow EMA expressed as ATR fraction
+    "ema_sep_mult": 0.1,         # require |ema_fast - ema_slow| > ATR × this
 }
 
 
@@ -36,15 +49,30 @@ class EMAScalp(BaseStrategy):
     def calculate(self, df: pd.DataFrame, df_m15: pd.DataFrame | None = None) -> StrategyResult:
         p = {**DEFAULT_PARAMS, **self.params}
 
-        if len(df) < p["ema_slow"] + 5:
+        min_bars = max(p["ema_slow"], p["atr_period"], p["adx_period"]) + 10
+        if len(df) < min_bars:
             return self._no_signal()
 
         close = df["close"]
+        high  = df["high"]
+        low   = df["low"]
 
         # --- Indicators ---
         ema_fast = ta.trend.EMAIndicator(close, window=p["ema_fast"]).ema_indicator()
         ema_slow = ta.trend.EMAIndicator(close, window=p["ema_slow"]).ema_indicator()
-        rsi = ta.momentum.RSIIndicator(close, window=p["rsi_period"]).rsi()
+        rsi      = ta.momentum.RSIIndicator(close, window=p["rsi_period"]).rsi()
+
+        # ATR — used for SL sizing and EMA separation filter
+        atr = ta.volatility.AverageTrueRange(
+            high, low, close, window=p["atr_period"]
+        ).average_true_range()
+        curr_atr = atr.iloc[-1]
+        if curr_atr <= 0 or pd.isna(curr_atr):
+            return self._no_signal()
+
+        # ADX — trend strength filter
+        adx_ind  = ta.trend.ADXIndicator(high, low, close, window=p["adx_period"])
+        curr_adx = adx_ind.adx().iloc[-1]
 
         # M15 bias: price above/below EMA 50 on M15
         bias = "NONE"
@@ -53,23 +81,21 @@ class EMAScalp(BaseStrategy):
                 df_m15["close"], window=p["ema_bias_period"]
             ).ema_indicator()
             last_m15_close = df_m15["close"].iloc[-1]
-            last_m15_ema = ema_bias.iloc[-1]
+            last_m15_ema   = ema_bias.iloc[-1]
             bias = "BULL" if last_m15_close > last_m15_ema else "BEAR"
 
-        prev_fast = ema_fast.iloc[-2]
-        prev_slow = ema_slow.iloc[-2]
-        curr_fast = ema_fast.iloc[-1]
-        curr_slow = ema_slow.iloc[-1]
-        curr_rsi = rsi.iloc[-1]
+        curr_fast  = ema_fast.iloc[-1]
+        curr_slow  = ema_slow.iloc[-1]
+        curr_rsi   = rsi.iloc[-1]
         curr_close = close.iloc[-1]
 
-        # Crossover detection over a rolling window (crossover_window bars).
-        # Checking only the exact current bar misses crossovers that completed on
-        # bar N-1 when the runner was delayed by a slow MT5 call or task queue.
-        # With a 3-bar window (15 min at M5), we catch any crossover within the
-        # current M5 run cycle while the EMA alignment is still fresh.
-        # We also require price is still on the correct side of both EMAs at [-1]
-        # so stale crossovers from hours ago are not re-triggered.
+        # ADX gate — block entries when market is too choppy
+        adx_ok = (not pd.isna(curr_adx)) and (curr_adx >= p["adx_min"])
+
+        # EMA separation gate — crossover must have real momentum
+        ema_sep_ok = abs(curr_fast - curr_slow) >= curr_atr * p["ema_sep_mult"]
+
+        # Crossover detection over a rolling window
         window = max(1, int(p.get("crossover_window", 3)))
         bull_cross = False
         bear_cross = False
@@ -82,44 +108,49 @@ class EMAScalp(BaseStrategy):
                 bull_cross = True
             if _pf >= _ps and _cf < _cs:
                 bear_cross = True
-        # Price must still be above/below both EMAs at the current bar
+        # Price must still be on the correct side of both EMAs at the current bar
         bull_cross = bull_cross and curr_fast > curr_slow
         bear_cross = bear_cross and curr_fast < curr_slow
 
-        # Volume confirmation on signal bar (M1 primary timeframe)
+        # Volume confirmation — 50-bar baseline (4h at M5) avoids false signals
+        # from the natural session rhythm that a 20-bar window would catch.
         vol_ok = True
-        vol_mult = p.get("vol_confirm_mult", 1.2)
-        if vol_mult > 0 and "volume" in df.columns and len(df) >= 21:
+        vol_mult = p.get("vol_confirm_mult", 1.3)
+        if vol_mult > 0 and "volume" in df.columns and len(df) >= 51:
             curr_vol = df["volume"].iloc[-1]
-            avg_vol  = df["volume"].iloc[-21:-1].mean()
+            avg_vol  = df["volume"].iloc[-51:-1].mean()
             if avg_vol > 0:
                 vol_ok = curr_vol > avg_vol * vol_mult
 
+        # ATR-based SL distance — adapts to every symbol's actual volatility
+        sl_dist = curr_atr * p["atr_sl_mult"]
+        # Enforce broker minimum SL distance
+        sl_dist = max(sl_dist, self._min_sl_dist(curr_close))
+
         indicators = {
-            "ema_fast": round(curr_fast, 5),
-            "ema_slow": round(curr_slow, 5),
-            "rsi": round(curr_rsi, 2),
-            "m15_bias": bias,
-            "vol_ok": vol_ok,
+            "ema_fast":   round(curr_fast, 5),
+            "ema_slow":   round(curr_slow, 5),
+            "rsi":        round(curr_rsi, 2),
+            "atr":        round(curr_atr, 5),
+            "adx":        round(curr_adx, 2) if not pd.isna(curr_adx) else None,
+            "adx_ok":     adx_ok,
+            "ema_sep_ok": ema_sep_ok,
+            "m15_bias":   bias,
+            "vol_ok":     vol_ok,
         }
 
-        pip = self._pip_size()
-
-        # Per-symbol SL override — exotic pairs (e.g. AUDCAD, NZDCAD, AUDCHF) have
-        # wider average spreads and require more breathing room than majors.
-        # symbol_sl_override in params takes precedence over the default sl_pips.
-        sl_pips = p.get("symbol_sl_override", {}).get(self.symbol.upper(), p["sl_pips"])
-
-        # --- BUY: crossover within window, price still above EMAs, bias bullish, RSI in range ---
+        # --- BUY ---
         if (
             bull_cross
             and bias == "BULL"
             and p["rsi_min"] <= curr_rsi <= p["rsi_max"]
+            and adx_ok
+            and ema_sep_ok
             and vol_ok
         ):
-            sl  = round(curr_close - sl_pips * pip, 5)
-            tp1 = round(curr_close + sl_pips * p["tp1_rr"] * pip, 5)
-            tp2 = round(curr_close + sl_pips * p["rr"] * pip, 5)
+            sl  = round(curr_close - sl_dist, 5)
+            tp1 = round(curr_close + sl_dist * p["tp1_rr"], 5)
+            tp2 = round(curr_close + sl_dist * p["rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -135,18 +166,20 @@ class EMAScalp(BaseStrategy):
                 indicators=indicators,
             )
 
-        # --- SELL: crossover within window, price still below EMAs, bias bearish, RSI in range ---
+        # --- SELL ---
         sell_rsi_min = 100 - p["rsi_max"]
         sell_rsi_max = 100 - p["rsi_min"]
         if (
             bear_cross
             and bias == "BEAR"
             and sell_rsi_min <= curr_rsi <= sell_rsi_max
+            and adx_ok
+            and ema_sep_ok
             and vol_ok
         ):
-            sl  = round(curr_close + sl_pips * pip, 5)
-            tp1 = round(curr_close - sl_pips * p["tp1_rr"] * pip, 5)
-            tp2 = round(curr_close - sl_pips * p["rr"] * pip, 5)
+            sl  = round(curr_close + sl_dist, 5)
+            tp1 = round(curr_close - sl_dist * p["tp1_rr"], 5)
+            tp2 = round(curr_close - sl_dist * p["rr"], 5)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",
@@ -163,18 +196,3 @@ class EMAScalp(BaseStrategy):
             )
 
         return self._no_signal(indicators)
-
-    def _pip_size(self) -> float:
-        """Return pip size based on symbol — accounts for metals, crypto and indices."""
-        sym = self.symbol.upper()
-        jpy_pairs = ("JPY", "HUF", "SEK", "NOK", "DKK")
-        if any(sym.endswith(s) for s in jpy_pairs):
-            return 0.01
-        # Non-forex instruments have large nominal prices → use 0.1% of close price
-        non_forex = ("BTC", "ETH", "XAU", "GOLD", "SILVER", "XAG",
-                     "US30", "US100", "DE40", "UK100", "SPX", "NAS")
-        if any(sym.startswith(p) or sym.endswith(p) for p in non_forex):
-            # Not used for SL placement (strategies use ATR), but pip_size is kept
-            # consistent at 1.0 so old callers get a safe non-zero value.
-            return 1.0
-        return 0.0001

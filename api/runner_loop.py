@@ -262,11 +262,11 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                     if not isinstance(_scan, dict):
                         raise ValueError(f"scanner.json[{mode!r}] must be an object")
                     if not _scan.get("enabled", False):
-                        # Scanner disabled for this mode — fall back to symbols.json
-                        # (do NOT skip the mode; _sym_override stays None so
-                        # StrategyRunner uses _enabled_symbols() from symbols.json)
-                        logger.debug(f"Scanner [{mode}] disabled — using symbols.json")
-                        _sym_override = None
+                        # Scanner disabled for this mode — skip entirely.
+                        # Do NOT fall back to symbols.json; the user explicitly
+                        # turned this mode off and expects no signals.
+                        logger.info(f"Runner [{mode}]: scanner disabled — skipping mode")
+                        continue
                     else:
                         _sym_override = [s for s in _scan.get("symbols", []) if s] or None
                 except FileNotFoundError:

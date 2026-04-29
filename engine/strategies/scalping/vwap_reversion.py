@@ -21,7 +21,10 @@ DEFAULT_PARAMS = {
     "stoch_smooth": 3,
     "rsi_oversold": 28,
     "rsi_overbought": 72,
-    "max_spread_pips": 2.5,
+    "max_spread_pips": 4.0,      # raised from 2.5 — VWAP runs on M1 where spreads matter more
+    # Minimum viable RR guard: if (VWAP - entry) / (entry - SL) < this, skip.
+    # Prevents taking trades where the TP is so close that spread eats the reward.
+    "min_rr_to_vwap": 0.8,
 }
 
 
@@ -104,8 +107,14 @@ class VWAPReversion(BaseStrategy):
             and prev_k <= prev_d
             and curr_k > curr_d
         ):
-            sl = round(curr["lower_sl"], 5)
-            tp = round(curr["vwap"], 5)
+            sl  = round(curr["lower_sl"], 5)
+            tp1 = round(curr["vwap"], 5)      # partial close at VWAP
+            tp2 = round(curr["upper1"], 5)    # runner to the opposite entry band
+            risk = curr_close - sl
+            reward_to_vwap = tp1 - curr_close
+            # Skip if VWAP is too close — spread would eat the reward
+            if risk <= 0 or (reward_to_vwap / risk) < p["min_rr_to_vwap"]:
+                return self._no_signal(indicators)
             if self._sl_too_close("BUY", curr_close, sl):
                 return self._no_signal(indicators)
             return StrategyResult(
@@ -113,7 +122,8 @@ class VWAPReversion(BaseStrategy):
                     direction="BUY",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -129,8 +139,14 @@ class VWAPReversion(BaseStrategy):
             and prev_k >= prev_d
             and curr_k < curr_d
         ):
-            sl = round(curr["upper_sl"], 5)
-            tp = round(curr["vwap"], 5)
+            sl  = round(curr["upper_sl"], 5)
+            tp1 = round(curr["vwap"], 5)      # partial close at VWAP
+            tp2 = round(curr["lower1"], 5)    # runner to the opposite entry band
+            risk = sl - curr_close
+            reward_to_vwap = curr_close - tp1
+            # Skip if VWAP is too close — spread would eat the reward
+            if risk <= 0 or (reward_to_vwap / risk) < p["min_rr_to_vwap"]:
+                return self._no_signal(indicators)
             if self._sl_too_close("SELL", curr_close, sl):
                 return self._no_signal(indicators)
             return StrategyResult(
@@ -138,7 +154,8 @@ class VWAPReversion(BaseStrategy):
                     direction="SELL",
                     entry_price=curr_close,
                     sl_price=sl,
-                    tp_price=tp,
+                    tp_price=tp1,
+                    tp2_price=tp2,
                     strategy=self.name,
                     symbol=self.symbol,
                     timeframe=self.timeframe,

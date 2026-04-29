@@ -30,10 +30,10 @@
 //|  Input Parameters                                                |
 //+------------------------------------------------------------------+
 input int    InpMagicNumber         = 20260318; // Magic number (must match Python BOT_MAGIC)
-input double InpTrailingStopPips    = 8.0;      // Trailing stop distance in pips
-input double InpBreakevenPips       = 5.0;      // Move SL to breakeven after this many profit pips (0=disabled)
+input double InpTrailingStopPips    = 8.0;      // Default trailing stop distance in pips (overridden per-ticket by Python)
+input double InpBreakevenPips       = 5.0;      // Default breakeven pips (overridden per-ticket by Python; 0=disabled)
 input int    InpMaxCommandAgeSecs   = 10;       // Discard commands older than N seconds (stale guard)
-input int    InpDeviationPoints     = 20;       // Max slippage in points (matches Python order_manager)
+input int    InpDeviationPoints     = 30;       // Max slippage in points (raised from 20 to cover exotics/commodities)
 input bool   InpTrailOnlyScalps     = true;     // Only trail positions tagged "scalp|" in comment
 
 //+------------------------------------------------------------------+
@@ -43,7 +43,74 @@ input bool   InpTrailOnlyScalps     = true;     // Only trail positions tagged "
 #define HEARTBEAT_FILE  "evotrade\\ea_heartbeat.txt"
 #define CMD_PATTERN     "evotrade\\ea_cmd_"
 #define RES_PREFIX      "evotrade\\ea_res_"
+//+------------------------------------------------------------------+
+//  Per-ticket trail/breakeven overrides                             |
+//  Python sends trail_pips and be_pips in the command JSON so that  |
+//  ATR-based stops are respected on each individual trade.          |
+//  Stored as ulong→double maps indexed by ticket number.            |
+//+------------------------------------------------------------------+
+ulong g_trail_tickets[];   // ticket numbers
+double g_trail_pips[];     // trail distance in pips for that ticket
+ulong g_be_tickets[];      // ticket numbers
+double g_be_pips[];        // breakeven distance in pips for that ticket
 
+// Store a per-ticket value in a parallel array pair
+void _StoreTicketVal(ulong &keys[], double &vals[], ulong ticket, double val)
+{
+    int n = ArraySize(keys);
+    for(int i = 0; i < n; i++)
+    {
+        if(keys[i] == ticket) { vals[i] = val; return; }
+    }
+    ArrayResize(keys, n + 1);
+    ArrayResize(vals, n + 1);
+    keys[n] = ticket;
+    vals[n] = val;
+}
+
+// Lookup a per-ticket value; returns default_val if not found
+double _GetTicketVal(ulong &keys[], double &vals[], ulong ticket, double default_val)
+{
+    int n = ArraySize(keys);
+    for(int i = 0; i < n; i++)
+        if(keys[i] == ticket) return vals[i];
+    return default_val;
+}
+
+// Remove a closed ticket from both maps
+void _RemoveTicket(ulong ticket)
+{
+    int n = ArraySize(g_trail_tickets);
+    for(int i = 0; i < n; i++)
+    {
+        if(g_trail_tickets[i] == ticket)
+        {
+            for(int j = i; j < n - 1; j++)
+            {
+                g_trail_tickets[j] = g_trail_tickets[j+1];
+                g_trail_pips[j]    = g_trail_pips[j+1];
+            }
+            ArrayResize(g_trail_tickets, n - 1);
+            ArrayResize(g_trail_pips,    n - 1);
+            break;
+        }
+    }
+    n = ArraySize(g_be_tickets);
+    for(int i = 0; i < n; i++)
+    {
+        if(g_be_tickets[i] == ticket)
+        {
+            for(int j = i; j < n - 1; j++)
+            {
+                g_be_tickets[j] = g_be_tickets[j+1];
+                g_be_pips[j]    = g_be_pips[j+1];
+            }
+            ArrayResize(g_be_tickets, n - 1);
+            ArrayResize(g_be_pips,    n - 1);
+            break;
+        }
+    }
+}
 //+------------------------------------------------------------------+
 //|  OnInit                                                          |
 //+------------------------------------------------------------------+
@@ -165,6 +232,10 @@ void _ProcessOneCommand(const string rel_path)
     double tp       = _JsonNum(content, "tp");
     string comment  = _JsonStr(content, "comment");
     long   created  = (long)_JsonNum(content, "created_ts");
+    // Per-trade ATR-based trail/breakeven distances sent by Python.
+    // 0.0 means "not provided" — falls back to the EA input defaults.
+    double trail_pips_cmd = _JsonNum(content, "trail_pips");
+    double be_pips_cmd    = _JsonNum(content, "be_pips");
 
     if(sig_id == "")
     {
@@ -186,7 +257,7 @@ void _ProcessOneCommand(const string rel_path)
     // Execute
     if(action == "open")
     {
-        _ExecuteOpen(sig_id, symbol, dir, volume, sl, tp, comment);
+        _ExecuteOpen(sig_id, symbol, dir, volume, sl, tp, comment, trail_pips_cmd, be_pips_cmd);
     }
     else
     {
@@ -205,7 +276,9 @@ void _ExecuteOpen(
     const double volume,
     const double sl,
     const double tp,
-    const string comment)
+    const string comment,
+    const double trail_pips_cmd,
+    const double be_pips_cmd)
 {
     // Get live tick
     MqlTick tick;
@@ -290,6 +363,14 @@ void _ExecuteOpen(
           " | sl=", sl,
           " | tp=", tp);
 
+    // Store per-ticket trail/breakeven distances for _ManageTrailingStops.
+    // Use the values from the command if provided; otherwise keep 0.0 so
+    // _ManageTrailingStops falls back to the EA input defaults.
+    if(trail_pips_cmd > 0.0)
+        _StoreTicketVal(g_trail_tickets, g_trail_pips, res.order, trail_pips_cmd);
+    if(be_pips_cmd > 0.0)
+        _StoreTicketVal(g_be_tickets, g_be_pips, res.order, be_pips_cmd);
+
     _WriteResult(sig_id, (long)res.order, fill_price, "");
 }
 
@@ -336,22 +417,27 @@ void _ManageTrailingStops()
 {
     if(InpTrailingStopPips <= 0.0) return;
 
+    // Collect currently open tickets under our magic number
+    ulong open_tickets[];
     int total = PositionsTotal();
+    ArrayResize(open_tickets, 0);
+
     for(int i = total - 1; i >= 0; i--)
     {
         ulong ticket = PositionGetTicket(i);
         if(ticket == 0) continue;
         if(!PositionSelectByTicket(ticket)) continue;
-
-        // Only manage our bot's positions
         if((long)PositionGetInteger(POSITION_MAGIC) != (long)InpMagicNumber) continue;
 
-        // Optionally restrict to scalp-commented positions
         if(InpTrailOnlyScalps)
         {
             string pos_comment = PositionGetString(POSITION_COMMENT);
             if(StringFind(pos_comment, "scalp|") != 0) continue;
         }
+
+        int n = ArraySize(open_tickets);
+        ArrayResize(open_tickets, n + 1);
+        open_tickets[n] = ticket;
 
         string symbol      = PositionGetString(POSITION_SYMBOL);
         long   pos_type    = PositionGetInteger(POSITION_TYPE);
@@ -361,10 +447,18 @@ void _ManageTrailingStops()
 
         int    digits      = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
         double point       = SymbolInfoDouble(symbol, SYMBOL_POINT);
-        // Pip size: indices use 1.0; 5/3-digit forex = 10×point; others = raw point
         double pip_size    = _GetEffectivePipSize(symbol, digits, point);
-        double trail_dist  = _GetSymbolTrailPips(symbol) * pip_size;
-        double be_dist     = _GetSymbolBEPips(symbol)    * pip_size;
+
+        // Per-ticket override (from Python ATR calculation) takes priority.
+        // Falls back to the per-symbol default, then the global EA input.
+        double trail_pips_val = _GetTicketVal(g_trail_tickets, g_trail_pips, ticket, 0.0);
+        double be_pips_val    = _GetTicketVal(g_be_tickets,    g_be_pips,    ticket, 0.0);
+
+        if(trail_pips_val <= 0.0) trail_pips_val = _GetSymbolTrailPips(symbol);
+        if(be_pips_val    <= 0.0) be_pips_val    = _GetSymbolBEPips(symbol);
+
+        double trail_dist  = trail_pips_val * pip_size;
+        double be_dist     = be_pips_val    * pip_size;
 
         MqlTick tick;
         if(!SymbolInfoTick(symbol, tick)) continue;
@@ -375,14 +469,12 @@ void _ManageTrailingStops()
         {
             double bid = tick.bid;
 
-            // Step 1: move SL to breakeven once price is be_dist above entry
-            if(InpBreakevenPips > 0.0 && current_sl < open_price
+            if(be_pips_val > 0.0 && current_sl < open_price
                && bid >= open_price + be_dist)
             {
                 new_sl = NormalizeDouble(open_price, digits);
             }
 
-            // Step 2: trail — keep SL trail_dist below current bid
             double trail_sl = NormalizeDouble(bid - trail_dist, digits);
             if(trail_sl > new_sl)
                 new_sl = trail_sl;
@@ -391,20 +483,17 @@ void _ManageTrailingStops()
         {
             double ask = tick.ask;
 
-            // Step 1: move SL to breakeven once price is be_dist below entry
-            if(InpBreakevenPips > 0.0 && current_sl > open_price
+            if(be_pips_val > 0.0 && current_sl > open_price
                && ask <= open_price - be_dist)
             {
                 new_sl = NormalizeDouble(open_price, digits);
             }
 
-            // Step 2: trail — keep SL trail_dist above current ask
             double trail_sl = NormalizeDouble(ask + trail_dist, digits);
             if(current_sl == 0.0 || trail_sl < new_sl)
                 new_sl = trail_sl;
         }
 
-        // Only send modify request if SL actually changed
         if(new_sl == current_sl || new_sl <= 0.0) continue;
 
         MqlTradeRequest req = {};
@@ -422,6 +511,19 @@ void _ManageTrailingStops()
             Print("AIBotScalper: trail modify failed ticket=", ticket,
                   " retcode=", res.retcode);
         }
+    }
+
+    // Clean up stored values for tickets that are no longer open
+    int stored = ArraySize(g_trail_tickets);
+    for(int i = stored - 1; i >= 0; i--)
+    {
+        ulong t = g_trail_tickets[i];
+        bool found = false;
+        int ot = ArraySize(open_tickets);
+        for(int j = 0; j < ot; j++)
+            if(open_tickets[j] == t) { found = true; break; }
+        if(!found)
+            _RemoveTicket(t);
     }
 }
 

@@ -20,8 +20,12 @@ DEFAULT_PARAMS = {
     "sl_atr_mult": 1.5,
     "tp1_atr_mult": 1.5,    # partial close at 1.5×ATR
     "tp_atr_mult": 2.5,     # tp2 (full close) at 2.5×ATR
-    "max_spread_pips": 2.0,
+    "max_spread_pips": 4.0, # covers exotics & commodities (was 2.0 — too tight)
     "vol_confirm_mult": 1.2, # volume must exceed 20-bar avg × this (0 = disabled)
+    # EMA trend filter — breakout must align with the medium-term trend direction.
+    # Prevents taking squeeze breakouts against a strong prevailing trend.
+    "ema_trend_period": 50,  # EMA50 as trend reference
+    "require_trend_align": True,  # set False to disable (trades both directions vs trend)
 }
 
 
@@ -34,7 +38,7 @@ class BBSqueeze(BaseStrategy):
     def calculate(self, df: pd.DataFrame, **_) -> StrategyResult:
         p = {**DEFAULT_PARAMS, **self.params}
 
-        if len(df) < p["bb_period"] + p["min_squeeze_bars"] + 5:
+        if len(df) < max(p["bb_period"] + p["min_squeeze_bars"] + 5, p["ema_trend_period"] + 5):
             return self._no_signal()
 
         close = df["close"]
@@ -57,6 +61,10 @@ class BBSqueeze(BaseStrategy):
 
         # Squeeze: BB width < rolling average of BB width
         avg_width = width.rolling(window=p["bb_period"]).mean()
+
+        # EMA trend filter: price above EMA50 = bullish bias, below = bearish bias
+        ema_trend = ta.trend.EMAIndicator(close, window=p["ema_trend_period"]).ema_indicator()
+        curr_ema_trend = ema_trend.iloc[-1]
 
         curr_close = close.iloc[-1]
         curr_upper = upper.iloc[-1]
@@ -82,6 +90,8 @@ class BBSqueeze(BaseStrategy):
             "roc": round(curr_roc, 4),
             "squeeze_bars": squeeze_count,
             "atr": round(curr_atr, 5),
+            "ema_trend": round(curr_ema_trend, 5),
+            "price_above_ema": bool(curr_close > curr_ema_trend),
         }
 
         # Need at least min_squeeze_bars of prior squeeze before breakout
@@ -97,8 +107,20 @@ class BBSqueeze(BaseStrategy):
             if avg_vol > 0:
                 vol_ok = curr_vol > avg_vol * vol_mult
 
+        # Trend alignment: only allow breakouts in the direction of the prevailing trend.
+        # A squeeze breakout against a strong EMA50 trend is a low-quality counter-trend
+        # setup — the prior trend resumes far more often than it reverses at M5.
+        require_align = p.get("require_trend_align", True)
+        trend_bullish = curr_close > curr_ema_trend
+        trend_bearish = curr_close < curr_ema_trend
+
         # Breakout up: current close breaks above upper band
-        if curr_close > curr_upper and curr_roc > 0 and vol_ok:
+        if (
+            curr_close > curr_upper
+            and curr_roc > 0
+            and vol_ok
+            and (not require_align or trend_bullish)
+        ):
             sl  = round(curr_close - p["sl_atr_mult"] * curr_atr, 5)
             tp1 = round(curr_close + p["tp1_atr_mult"] * curr_atr, 5)
             tp2 = round(curr_close + p["tp_atr_mult"] * curr_atr, 5)
@@ -120,7 +142,12 @@ class BBSqueeze(BaseStrategy):
             )
 
         # Breakout down: current close breaks below lower band
-        if curr_close < curr_lower and curr_roc < 0 and vol_ok:
+        if (
+            curr_close < curr_lower
+            and curr_roc < 0
+            and vol_ok
+            and (not require_align or trend_bearish)
+        ):
             sl  = round(curr_close + p["sl_atr_mult"] * curr_atr, 5)
             tp1 = round(curr_close - p["tp1_atr_mult"] * curr_atr, 5)
             tp2 = round(curr_close - p["tp_atr_mult"] * curr_atr, 5)
