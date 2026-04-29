@@ -647,6 +647,8 @@ class SignalBus:
                         entry=fill_price or 0.0,
                         sl=float(signal.get("sl") or 0),
                         tp=float(signal["tp"]) if signal.get("tp") else None,
+                        tp2=float(signal["tp2"]) if signal.get("tp2") else None,
+                        tp3=float(signal["tp3"]) if signal.get("tp3") else None,
                         profit=None,
                         trading_type=trading_mode,
                         account_mode=current_mode(),
@@ -823,6 +825,8 @@ class SignalBus:
                         entry=result.open_price or 0.0,
                         sl=float(signal.get("sl") or 0),
                         tp=float(signal["tp"]) if signal.get("tp") else None,
+                        tp2=float(signal["tp2"]) if signal.get("tp2") else None,
+                        tp3=float(signal["tp3"]) if signal.get("tp3") else None,
                         profit=None,
                         trading_type=signal.get("trading_mode", "day_trading"),
                         account_mode=current_mode(),
@@ -1223,6 +1227,33 @@ async def recover_unclosed_trades(client) -> None:
             logger.debug(f"Recovery: trade memory record failed for #{ticket}: {_exc}")
 
         logger.info(f"Recovery: backfilled close for #{ticket} {symbol} {direction} profit={profit:.2f}")
+        try:
+            from engine.notification_manager import notification_manager as _nm_rec
+            _rec_emoji = {"tp_hit": "✅ TP Hit", "sl_hit": "❌ SL Hit", "manual_close": "🔒 Closed"}
+            _rec_label = _rec_emoji.get(outcome_type, outcome_type)
+            _rec_sev = "success" if profit > 0 else ("error" if profit < 0 else "info")
+            _nm_rec.add(
+                type="position_closed",
+                title=f"{_rec_label} — {symbol} (recovered)",
+                message=(
+                    f"{direction} {symbol} #{ticket} closed while bot was offline | "
+                    f"P&L: {'%+.2f' % profit} | Pips: {'%+.1f' % pips} | {trading_type}"
+                ),
+                severity=_rec_sev,
+                metadata={
+                    "ticket": ticket,
+                    "symbol": symbol,
+                    "direction": direction,
+                    "profit": profit,
+                    "pips": round(pips, 1),
+                    "outcome": outcome_type,
+                    "trading_mode": trading_type,
+                    "close_price": close_px,
+                    "recovered": True,
+                },
+            )
+        except Exception:
+            pass
 
     # Re-launch _poll_outcome for any tickets that are still live
     still_open = [e for e in unclosed if e["ticket"] in live_tickets]
@@ -1236,6 +1267,8 @@ async def recover_unclosed_trades(client) -> None:
             "entry_price":  entry.get("entry"),
             "sl":           entry.get("sl"),
             "tp":           entry.get("tp"),
+            "tp2":          entry.get("tp2"),
+            "tp3":          entry.get("tp3"),
             "lot_size":     entry.get("volume"),
             "confidence":   float(entry.get("confidence") or 0.5),
         }
@@ -1447,6 +1480,30 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                     f"TP1 partial-close fired: #{ticket} {signal.get('symbol')} "
                                     f"{int(_partial_pct*100)}% closed, BE={entry_px} → targeting TP2={tp2}"
                                 )
+                                try:
+                                    from engine.notification_manager import notification_manager as _nm
+                                    _pct_str = f"{int(_partial_pct*100)}%"
+                                    _nm.add(
+                                        type="position_closed",
+                                        title=f"Partial TP1 — {signal.get('symbol')}",
+                                        message=(
+                                            f"{signal.get('direction','').upper()} {signal.get('symbol')} "
+                                            f"#{ticket}: {_pct_str} closed at TP1={tp1:.5g}, "
+                                            f"SL → BE={entry_px:.5g}, trailing to TP2={tp2:.5g}"
+                                        ),
+                                        severity="success",
+                                        metadata={
+                                            "ticket": ticket,
+                                            "symbol": signal.get("symbol"),
+                                            "direction": signal.get("direction"),
+                                            "tp1": tp1,
+                                            "tp2": tp2,
+                                            "partial_pct": _partial_pct,
+                                            "trading_mode": trading_mode,
+                                        },
+                                    )
+                                except Exception:
+                                    pass
                         except Exception as _pce:
                             logger.warning(f"TP1 partial-close failed #{ticket}: {_pce}")
 
@@ -1852,6 +1909,33 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "
                 f"profit={profit:+.2f} ({_profit_pct:+.4f}%) pips={pips:+.1f}"
             )
+            try:
+                from engine.notification_manager import notification_manager as _nm_close
+                _outcome_emoji = {"tp_hit": "✅ TP Hit", "sl_hit": "❌ SL Hit", "manual_close": "🔒 Closed"}
+                _outcome_label = _outcome_emoji.get(outcome_type, outcome_type)
+                _severity_close = "success" if profit > 0 else ("error" if profit < 0 else "info")
+                _nm_close.add(
+                    type="position_closed",
+                    title=f"{_outcome_label} — {signal['symbol']}",
+                    message=(
+                        f"{direction} {signal['symbol']} #{ticket} closed | "
+                        f"P&L: {'%+.2f' % profit} | Pips: {'%+.1f' % pips} | "
+                        f"{signal.get('trading_mode', trading_type)} via {signal.get('strategy', 'unknown')}"
+                    ),
+                    severity=_severity_close,
+                    metadata={
+                        "ticket": ticket,
+                        "symbol": signal["symbol"],
+                        "direction": direction,
+                        "profit": profit,
+                        "pips": round(pips, 1),
+                        "outcome": outcome_type,
+                        "trading_mode": signal.get("trading_mode", trading_type),
+                        "close_price": close_px,
+                    },
+                )
+            except Exception:
+                pass
 
             # ── Daily accuracy snapshot ──────────────────────────────────────
             # Take a snapshot of LSTM accuracy history every 10 trades to track degradation

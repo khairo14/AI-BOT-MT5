@@ -66,6 +66,8 @@ class TradeJournal:
         spread_pips: Optional[float] = None,
         swap: Optional[float] = None,
         commission: Optional[float] = None,
+        tp2: Optional[float] = None,
+        tp3: Optional[float] = None,
     ) -> None:
         """Append a trade event to the journal."""
         record = {
@@ -76,6 +78,8 @@ class TradeJournal:
             "entry":        entry,
             "sl":           sl,
             "tp":           tp,
+            "tp2":          tp2,
+            "tp3":          tp3,
             "profit":       profit,
             "trading_type": trading_type,
             "account_mode": account_mode,
