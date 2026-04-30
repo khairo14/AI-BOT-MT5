@@ -152,13 +152,17 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "max_spread_pips":      [2.0, 3.0, 4.0],
     },
     "macd_ema_trend": {
-        "macd_fast":   [9, 12],
-        "macd_slow":   [21, 26],
-        "macd_signal": [6, 9],
-        "ema_fast":    [15, 20],
-        "ema_slow":    [45, 50],
-        "tp1_rr":      [1.5, 1.8, 2.0],   # must be ≥ risk_reward_min 1.5 (day_trading)
-        "tp2_rr":      [2.0, 2.5, 3.0],
+        "macd_fast":           [9, 12],
+        "macd_slow":           [21, 26],
+        "macd_signal":         [6, 9],
+        "ema_fast":            [15, 20],
+        "ema_slow":            [45, 50],
+        "atr_period":          [10, 14],
+        "sl_atr_mult":         [0.8, 1.0, 1.2, 1.5],
+        "max_entry_atr_dist":  [0.5, 1.0, 1.5],   # tighter = fewer but fresher entries
+        "vol_confirm_mult":    [0, 1.0, 1.2],      # 0 = disabled (indices/crypto noise)
+        "tp1_rr":              [1.5, 1.8, 2.0],   # must be ≥ risk_reward_min 1.5 (day_trading)
+        "tp2_rr":              [2.0, 2.5, 3.0],
     },
     "sr_breakout": {
         "lookback_bars":    [30, 50, 70],
@@ -190,10 +194,14 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "tp_rr":        [2.5, 3.0, 3.5],      # tp2 (full close)
     },
     "fibonacci_rsi": {
-        "rsi_period":      [10, 14, 18],
-        "impulse_lookback": [30, 50, 70],     # was fib_lookback (dead key — code reads impulse_lookback)
-        "sl_atr_mult":     [1.0, 1.5, 2.0],
-        "tp1_rr":          [1.5, 2.0, 2.5],  # must be ≥ risk_reward_min 1.5 (swing)
+        "rsi_period":       [10, 14, 18],
+        "impulse_lookback": [30, 50, 70],
+        "fib_entry_low":    [0.382, 0.5],       # lower bound of golden zone (shallower entry)
+        "fib_entry_high":   [0.618, 0.786],     # upper bound of golden zone (deeper entry)
+        "sl_atr_mult":      [1.0, 1.5, 2.0],
+        "candle_confirm":   [True, False],      # 1-bar H4 confirmation; False suits fast-moving assets
+        "tp1_rr":           [1.5, 2.0, 2.5],   # must be ≥ risk_reward_min 1.5 (swing)
+        "tp2_rr":           [2.0, 2.5, 3.0],   # fallback R-multiple when structural target is too close
     },
     "weekly_breakout": {
         "atr_break_mult": [0.3, 0.5, 0.7],    # was lookback_bars (dead key — code reads atr_break_mult)
@@ -222,6 +230,27 @@ _DISPATCH: dict[str, Callable] = {
 }
 
 _STRATEGY_MAP: Optional[dict] = None
+
+# Per-strategy regime-classification TF — must stay in sync with
+# engine/strategy_runner._REGIME_TF so ATR% thresholds inside the backtest
+# match the bar granularity the strategy actually classifies on at runtime.
+# H1 is the default for most strategies; H4 for the two weekly/fib swing
+# strategies; M15 for vwap_reversion (mean-reversion needs intraday resolution).
+_STRATEGY_REGIME_TF: dict[str, str] = {
+    # scalping
+    "ema_scalp":           "H1",
+    "bb_squeeze":          "H1",
+    "vwap_reversion":      "M15",
+    "stoch_rsi_pullback":  "H1",
+    # day trading
+    "macd_ema_trend":      "H1",
+    "sr_breakout":         "H1",
+    "rsi_divergence":      "H1",
+    # swing
+    "ema_trend_rider":     "H1",
+    "fibonacci_rsi":       "H4",
+    "weekly_breakout":     "H4",
+}
 
 
 def _get_strategy_map() -> dict:
@@ -333,6 +362,12 @@ def _valid_combo(strategy_name: str, combo: dict) -> bool:
     if strategy_name == "rsi_divergence":
         if combo.get("tp_rr", 0) >= combo.get("tp2_rr", float("inf")):
             return False
+    # fibonacci_rsi: tp1 must be less than tp2; golden zone low% must be less than high%
+    if strategy_name == "fibonacci_rsi":
+        if combo.get("tp1_rr", 0) >= combo.get("tp2_rr", float("inf")):
+            return False
+        if combo.get("fib_entry_low", 0) >= combo.get("fib_entry_high", float("inf")):
+            return False
     # bb_squeeze: tp1_atr_mult (partial close) must be less than tp_atr_mult (full close)
     if strategy_name == "bb_squeeze":
         if combo.get("tp1_atr_mult", 0) >= combo.get("tp_atr_mult", float("inf")):
@@ -381,11 +416,11 @@ def _simulate_trade(
     return actual > 0, rr_actual
 
 
-def _classify_bar_regime(df_slice: pd.DataFrame, symbol: str) -> str:
+def _classify_bar_regime(df_slice: pd.DataFrame, symbol: str, timeframe: str = "h1") -> str:
     """Classify regime at a backtest bar. Lightweight — no hysteresis in backtest."""
     try:
         from engine.regime_classifier import _classify_raw
-        return _classify_raw(df_slice, symbol)
+        return _classify_raw(df_slice, symbol, timeframe)
     except Exception:
         return "unknown"
 
@@ -403,6 +438,7 @@ def _backtest_combo(
     extra_dfs: "dict | None" = None,
     bt_window: int = 500,
     trading_type: str = "scalping",
+    regime_tf: str = "h1",
 ) -> tuple[float, float, int, dict[str, dict]]:
     """Walk-forward backtest one param combo.
     Returns (win_rate, avg_rr, n_trades, regime_stats).
@@ -456,7 +492,7 @@ def _backtest_combo(
                 rrs.append(rr_adj)
 
                 # Record per-regime outcome
-                regime = _classify_bar_regime(df.iloc[_win_start:i + 1], symbol)
+                regime = _classify_bar_regime(df.iloc[_win_start:i + 1], symbol, regime_tf)
                 rs = regime_stats.setdefault(regime, {"wins": 0, "total": 0, "rr_sum": 0.0})
                 rs["total"] += 1
                 if rr_adj > 0:
@@ -746,9 +782,10 @@ class ParamOptimizer:
             logger.warning(f"Optimizer: unknown strategy {strategy_name}")
             return None, 0.0, 0, {}
 
-        dispatch = _DISPATCH.get(strategy_name, lambda s, d, e={}: s.calculate(d))
-        combos   = _grid_combos(strategy_name)
-        cfg      = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
+        dispatch  = _DISPATCH.get(strategy_name, lambda s, d, e={}: s.calculate(d))
+        combos    = _grid_combos(strategy_name)
+        cfg       = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
+        regime_tf = _STRATEGY_REGIME_TF.get(strategy_name, "H1")
         
         # Walk-forward validation: split df into train (first 75%) and
         # validation (last 25%) periods. Optimize params on train only,
@@ -816,7 +853,7 @@ class ParamOptimizer:
             wr_train, avg_rr_train, n_train, regime_stats = _backtest_combo(
                 strategy_cls, dispatch, _df_train, combo,
                 cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
-                _extra_dfs_train, bt_window, trading_type,
+                _extra_dfs_train, bt_window, trading_type, regime_tf,
             )
             min_signals = MIN_BACKTEST_SIGNALS.get(trading_type, 10)
             train_score = wr_train * max(avg_rr_train, 0.0) if n_train >= min_signals else 0.0
@@ -829,7 +866,7 @@ class ParamOptimizer:
                 wr_val, avg_rr_val, n_val, _ = _backtest_combo(
                     strategy_cls, dispatch, _df_val, combo,
                     cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
-                    _extra_dfs_val, bt_window, trading_type,
+                    _extra_dfs_val, bt_window, trading_type, regime_tf,
                 )
                 # Require minimum signals on validation set too (33% of training threshold)
                 val_score = wr_val * max(avg_rr_val, 0.0) if n_val >= max(min_signals // 3, 3) else 0.0

@@ -20,6 +20,8 @@ DEFAULT_PARAMS = {
     "macd_slow": 26,
     "macd_signal": 9,
     "atr_period": 14,
+    "sl_atr_mult": 1.2,           # SL = max(ATR × this, |close − EMA20| × 1.5)
+    "max_entry_atr_dist": 1.0,    # skip if price is already >N×ATR from EMA20 (stale bounce)
     "tp1_rr": 1.5,   # must be ≥ risk_reward_min 1.5 (day_trading)
     "tp2_rr": 2.0,
     "vol_confirm_mult": 1.2,  # volume must exceed 20-bar avg × this (0 = disabled)
@@ -86,6 +88,12 @@ class MACDEMATrend(BaseStrategy):
         curr_ema20_m15 = ema_fast_m15.iloc[-1]
         curr_atr = atr.iloc[-1]
 
+        # Proximity filter: skip if price has drifted more than max_entry_atr_dist×ATR
+        # away from EMA20. Prevents entering a stale bounce (e.g. crossover 5 bars ago
+        # and price has already moved 2×ATR) which inflates the SL and degrades R:R.
+        max_dist = curr_atr * p.get("max_entry_atr_dist", 1.0)
+        near_ema = abs(curr_close - curr_ema20_m15) <= max_dist
+
         # Pullback bounce on M15: price crossed EMA20 within the last 6 bars (90 min).
         # A 6-bar window covers the full preceding H1 bar so bounces that complete
         # early in the session are not missed when the runner fires at H1 close.
@@ -107,6 +115,7 @@ class MACDEMATrend(BaseStrategy):
             "bull_bounce": bull_bounce,
             "bear_bounce": bear_bounce,
             "curr_close": round(curr_close, 5),
+            "near_ema": near_ema,
         }
 
         # Volume confirmation on entry bar (M15 primary timeframe)
@@ -118,8 +127,8 @@ class MACDEMATrend(BaseStrategy):
             if avg_vol > 0:
                 vol_ok = curr_vol > avg_vol * vol_mult
 
-        if h1_trend == "BULL" and h1_macd_bull and bull_bounce and vol_ok:
-            sl_dist = max(curr_atr * 1.2, abs(curr_close - curr_ema20_m15) * 1.5)
+        if h1_trend == "BULL" and h1_macd_bull and bull_bounce and near_ema and vol_ok:
+            sl_dist = max(curr_atr * p["sl_atr_mult"], abs(curr_close - curr_ema20_m15) * 1.5)
             sl  = round(curr_close - sl_dist, 5)
             tp1 = round(curr_close + sl_dist * p["tp1_rr"], 5)
             tp2 = round(curr_close + sl_dist * p["tp2_rr"], 5)
@@ -138,8 +147,8 @@ class MACDEMATrend(BaseStrategy):
                 indicators=indicators,
             )
 
-        if h1_trend == "BEAR" and h1_macd_bear and bear_bounce and vol_ok:
-            sl_dist = max(curr_atr * 1.2, abs(curr_close - curr_ema20_m15) * 1.5)
+        if h1_trend == "BEAR" and h1_macd_bear and bear_bounce and near_ema and vol_ok:
+            sl_dist = max(curr_atr * p["sl_atr_mult"], abs(curr_close - curr_ema20_m15) * 1.5)
             sl  = round(curr_close + sl_dist, 5)
             tp1 = round(curr_close - sl_dist * p["tp1_rr"], 5)
             tp2 = round(curr_close - sl_dist * p["tp2_rr"], 5)

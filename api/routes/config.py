@@ -117,6 +117,42 @@ def _validate_numeric_fields(data: dict) -> None:
             _validate_numeric_fields(value)
 
 
+def _validate_known_keys(
+    updates: dict,
+    existing: dict,
+    path: str = "",
+    allow_new_at: frozenset[str] = frozenset(),
+) -> None:
+    """Reject any key in *updates* that does not exist in *existing* (the current config
+    file contents). This prevents typos and unsupported fields from silently becoming
+    durable config drift.
+
+    allow_new_at: set of dotted-path prefixes where adding new keys IS legitimate
+    (e.g. symbol_strategy_override, which is an open-ended per-symbol dict).
+    """
+    for key, value in updates.items():
+        full_path = f"{path}.{key}" if path else key
+        # Check if this path is inside an explicitly open-ended section
+        _in_open = any(
+            full_path == p or full_path.startswith(p + ".")
+            or path == p or path.startswith(p + ".")
+            for p in allow_new_at
+        )
+        if key not in existing:
+            if _in_open:
+                # New key inside an open-ended section — allowed, skip recursion
+                continue
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Unknown config key '{full_path}'. "
+                    "This key does not exist in the config — check spelling."
+                ),
+            )
+        if isinstance(value, dict) and isinstance(existing.get(key), dict):
+            _validate_known_keys(value, existing[key], full_path, allow_new_at)
+
+
 def _load(filename: str) -> dict:
     path = CONFIG_DIR / filename
     if not path.exists():
@@ -171,6 +207,8 @@ def update_app_config(body: PatchRequest):
     """Deep-merge partial updates into app.json with schema validation."""
     _validate_numeric_fields(body.data)
     _validate_schema(body.data, _APP_SCHEMA)
+    current = _load("app.json")
+    _validate_known_keys(body.data, current)
     # Validate scorer weight sums if present — must sum to ≈1.0
     for weight_key in ("scorer_weights", "scalping_scorer_weights", "swing_scorer_weights"):
         wdata = body.data.get("ai", {}).get(weight_key)
@@ -181,7 +219,6 @@ def update_app_config(body: PatchRequest):
                     status_code=422,
                     detail=f"ai.{weight_key} weights sum to {total:.3f}; must sum to 1.0 (±0.05)",
                 )
-    current = _load("app.json")
     _deep_merge(current, body.data)
     _save("app.json", current)
     return current
@@ -201,6 +238,8 @@ def update_risk_config(body: PatchRequest):
     """Deep-merge partial updates into risk.json with schema validation."""
     _validate_numeric_fields(body.data)
     _validate_schema(body.data, _RISK_SCHEMA)
+    current = _load("risk.json")
+    _validate_known_keys(body.data, current)
     # Extra cross-field check: daily limit must be <= weekly limit
     dd = body.data.get("drawdown", {})
     daily  = dd.get("daily_limit_pct")
@@ -210,7 +249,6 @@ def update_risk_config(body: PatchRequest):
             status_code=422,
             detail=f"drawdown.daily_limit_pct ({daily}) cannot exceed weekly_limit_pct ({weekly})",
         )
-    current = _load("risk.json")
     _deep_merge(current, body.data)
     _save("risk.json", current)
     # Signal the risk manager to reload
@@ -328,6 +366,14 @@ def get_strategies_config():
     return _load("strategies.json")
 
 
+# Paths inside strategies.json where new keys are allowed (open-ended per-symbol dicts)
+_STRATEGIES_OPEN_PATHS = frozenset({
+    "scalping.symbol_strategy_override",
+    "day_trading.symbol_strategy_override",
+    "swing.symbol_strategy_override",
+})
+
+
 @router.patch("/strategies")
 def update_strategies_config(body: PatchRequest):
     """Update strategy parameters or active strategy lists with validation."""
@@ -355,6 +401,7 @@ def update_strategies_config(body: PatchRequest):
                                f"Valid names: {sorted(_KNOWN_STRATEGIES)}",
                     )
     current = _load("strategies.json")
+    _validate_known_keys(body.data, current, allow_new_at=_STRATEGIES_OPEN_PATHS)
     _deep_merge(current, body.data)
     _save("strategies.json", current)
     return current
@@ -425,6 +472,7 @@ def update_scanner_config(body: PatchRequest):
                     detail=f"scanner.{mode}.symbols must contain only strings",
                 )
     current = _load("scanner.json")
+    _validate_known_keys(body.data, current)
     _deep_merge(current, body.data)
     for m, limit in _SCANNER_MAX.items():
         if m in current and isinstance(current[m].get("symbols"), list):

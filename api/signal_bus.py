@@ -497,10 +497,10 @@ class SignalBus:
                 if datetime.now(tz=timezone.utc) > exp_dt:
                     signal["status"] = "expired"
                     signal["rejection_reason"] = "Signal expired before manual approval"
-                    raise ValueError(
+                    raise RuntimeError(
                         f"Signal {signal_id} expired at {expires_at} — cannot execute"
                     )
-            except ValueError:
+            except RuntimeError:
                 raise
             except Exception:
                 pass  # malformed expires_at — allow execution
@@ -1032,10 +1032,12 @@ class SignalBus:
             )
         if restored:
             logger.info(f"SignalBus: {restored} pending swing signal(s) restored from disk")
-        try:
-            _PENDING_SIGNALS_FILE.unlink(missing_ok=True)
-        except Exception:
-            pass
+        # Re-save the file to reflect only the signals that were successfully
+        # re-queued (pending). If the API restarts again before their timers
+        # fire they will be correctly restored a second time.
+        # Each timer's _restore_exec callback calls _save_pending_swing_signals()
+        # once it executes or is rejected, which removes it from the file at that point.
+        self._save_pending_swing_signals()
 
     # ── helpers ─────────────────────────────────────────────────────────────
 

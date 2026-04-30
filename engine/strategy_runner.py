@@ -167,13 +167,13 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
     "vwap_reversion":        {"M1": 1500, "M15": 250, "H1": 250},
     "stoch_rsi_pullback":    {"M5": 250, "H1": 250},
     # D1 added to day_trading strategies for MTF confirmation
-    "macd_ema_trend":  {"H1": 250, "M15": 250, "D1": 60},
+    "macd_ema_trend":  {"H1": 250, "M15": 250},
     "sr_breakout":     {"H1": 250, "D1": 60},
     "rsi_divergence":  {"M30": 250, "H1": 250, "D1": 60},
     # W1 added to swing strategies for MTF confirmation (50 bars ≈ 1 year)
     "ema_trend_rider": {"H1": 250, "H4": 250, "D1": 60, "W1": 50},
-    "fibonacci_rsi":   {"H4": 250, "W1": 50},
-    "weekly_breakout": {"H4": 250, "D1": 60, "W1": 50},
+    "fibonacci_rsi":   {"H4": 250},
+    "weekly_breakout": {"H4": 250, "D1": 60},
 }
 
 # Primary timeframe per strategy — used for regime classification and LSTM scoring.
