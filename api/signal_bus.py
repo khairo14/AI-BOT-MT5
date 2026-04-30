@@ -767,6 +767,65 @@ class SignalBus:
                 logger.error(f"SignalBus: {err} ({signal.get('symbol')} {signal.get('direction')})")
                 return False
 
+            # SPREAD-GUARD: re-fetch live spread and reject if it exceeds the configured
+            # max for this trading mode. Catches exotic pairs (e.g. USDSGD with 22+ pip
+            # spread) that slipped through the scanner filter due to stale data or config
+            # gaps. This is a last-line defence — a 22-pip spread on a 60-pip SL burns
+            # 36% of risk budget before price moves a single pip.
+            try:
+                if self._client is not None:
+                    _spread_info = self._client.get_symbol_info(signal["symbol"])
+                    if _spread_info:
+                        _live_spread = _spread_info.get("spread_pips", 0.0)
+                        try:
+                            import json as _json_sg
+                            import os as _os_sg
+                            _scanner_cfg_path = _os_sg.path.join(
+                                _os_sg.path.dirname(_os_sg.path.abspath(__file__)),
+                                "..", "config", "market_scanner.json"
+                            )
+                            with open(_scanner_cfg_path) as _f_sg:
+                                _scanner_cfg = _json_sg.load(_f_sg)
+                            _max_spread = (
+                                _scanner_cfg.get("trading_types", {})
+                                .get(trading_mode, {})
+                                .get("criteria", {})
+                                .get("max_spread_pips", 999.0)
+                            )
+                        except Exception:
+                            _max_spread = 999.0
+                        if _live_spread > _max_spread:
+                            err = (
+                                f"Live spread {_live_spread:.2f} pips exceeds "
+                                f"max {_max_spread:.2f} pips for {trading_mode} "
+                                f"— order blocked to protect funds"
+                            )
+                            signal["rejection_reason"] = err
+                            logger.warning(
+                                f"SignalBus spread-guard blocked: "
+                                f"{signal.get('symbol')} — {err}"
+                            )
+                            notification_manager.add(
+                                type="spread_guard",
+                                title="High Spread — Trade Blocked",
+                                message=(
+                                    f"{signal.get('symbol')} {signal.get('direction','').upper()}: "
+                                    f"spread {_live_spread:.1f} pips (max {_max_spread:.1f}) "
+                                    f"— signal rejected to protect funds"
+                                ),
+                                severity="warning",
+                                metadata={
+                                    "symbol": signal.get("symbol"),
+                                    "trading_mode": trading_mode,
+                                    "live_spread_pips": _live_spread,
+                                    "max_spread_pips": _max_spread,
+                                    "signal_id": signal.get("id"),
+                                },
+                            )
+                            return False
+            except Exception as _sg_exc:
+                logger.debug(f"SignalBus: spread guard skipped: {_sg_exc}")
+
             # TP placement: for day_trading/swing with a tp2, send tp2 to the broker
             # so MT5 only auto-closes the remaining half (after _poll_outcome has done
             # the partial close at tp1).  If we send tp1 to MT5, the broker closes the

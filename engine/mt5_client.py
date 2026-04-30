@@ -212,7 +212,13 @@ class MT5Client:
                     logger.warning(f"symbol_select failed for {symbol}: {mt5.last_error()}")
             tick = mt5.symbol_info_tick(symbol)
 
-        spread_pips = round(info.spread * info.point, 5)
+        # Convert MT5 spread (in points) to pips — instrument-aware.
+        # On 5-digit (0.00001) and 3-digit (0.001) brokers, 1 pip = 10 points.
+        # On 4-digit (0.0001) / 2-digit (0.01) / indices / stocks, 1 point ≈ 1 pip/unit.
+        # Without this, exotic pairs like USDSGD (2230 points) are mislabelled as
+        # 0.0223 "pips" instead of 22.3 pips, bypassing the spread filter.
+        _points_per_pip = 10 if info.digits in (5, 3) else 1
+        spread_pips = round(info.spread / _points_per_pip, 2)
 
         return {
             "symbol":        info.name,
