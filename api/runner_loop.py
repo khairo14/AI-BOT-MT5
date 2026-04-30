@@ -13,7 +13,7 @@ tick, reducing MT5 lock contention by ~90% for scalping (M1 bars close
 every 60 s, not every 5 s).
 
 Intervals (seconds between checks — actual execution gated by bar close):
-  scalping:    5 s check, fires on new M1 bar  (~60 s between runs)
+    scalping:    5 s check, fires on new M5 bar  (~300 s between runs)
   day_trading: 60 s check, fires on new H1 bar (~3600 s between runs)
   swing:       300 s check, fires on new H4 bar (~14400 s between runs)
 """
@@ -40,8 +40,8 @@ INTERVALS: dict[str, int] = {
 
 # Primary timeframe per mode — used by bar-close guard to detect new bar
 _MODE_PRIMARY_TF: dict[str, str] = {
-    "scalping":    "M5",  # all scalping strategies run on M5; firing on M1 closes
-                          # evaluated partially-formed M5 bars 4 out of 5 ticks.
+    "scalping":    "M5",  # all scalping strategies are scheduled on M5 bar close
+                          # to avoid evaluating partially-formed M5 bars.
     "day_trading": "H1",
     "swing":       "H4",
 }

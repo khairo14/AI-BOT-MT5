@@ -161,12 +161,18 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "tp2_rr":      [2.0, 2.5, 3.0],
     },
     "sr_breakout": {
-        "lookback_bars":  [30, 50, 70],
-        "atr_period":     [10, 14, 20],
-        "sl_buffer_atr":  [0.2, 0.3, 0.5],
-        "tp1_rr":         [1.5, 1.8, 2.0],   # must be ≥ risk_reward_min 1.5 (day_trading)
-        "tp_rr":          [2.0, 2.5, 3.0],   # tp2 runner — raised minimum from 2.0 (was 2.2)
-        "min_touches":    [2, 3],
+        "lookback_bars":    [30, 50, 70],
+        "atr_period":       [10, 14, 20],
+        "sl_buffer_atr":    [0.2, 0.3, 0.5],
+        "tp1_rr":           [1.5, 1.8, 2.0],   # must be ≥ risk_reward_min 1.5 (day_trading)
+        "tp_rr":            [2.0, 2.5, 3.0],   # tp2 runner
+        "min_touches":      [2, 3],
+        "retest_mode":      [True, False],      # retest entry = tighter SL, better price for forex
+        "vol_confirm_mult": [0, 1.0, 1.2],     # 0 = disable MT5 volume filter (noise on H1 forex)
+        "rsi_confirm":      [48, 52, 55],      # bull: RSI > this; bear: RSI < (100-this)
+        "atr_vol_filter":   [0, 0.6, 0.8],    # 0 = disable ATR floor (helps London open entries)
+        "session_open":     [0, 2, 7],         # 0=all-day, 2=Tokyo open, 7=London open
+        "session_close":    [0, 21, 22],       # 0=all-day, 21=NY end, 22=forex daily close
     },
     "rsi_divergence": {
         "rsi_period":           [10, 14, 18],

@@ -24,6 +24,11 @@ DEFAULT_PARAMS = {
     "level_tolerance": 0.0015, # price tolerance for touch counting (0.15%)
     "vol_confirm_mult": 1.2,   # volume must exceed 20-bar avg × this factor (0 = disabled)
     "max_spread_pips": 2.0,    # blocks GOLD/oil/BTC during wide-spread conditions
+    "rsi_confirm": 52,         # bull: RSI > this; bear: RSI < (100-this). Relaxed from 55/45 so
+                               # retest entries (where RSI has already pulled back) still qualify
+    "atr_vol_filter": 0.8,    # min ATR as fraction of avg. 0 = disabled (useful for London open)
+    "session_open":  7,        # UTC hour window start — London open. Both 0 = all-session (disabled)
+    "session_close": 21,       # UTC hour window end   — NY session end
 }
 
 
@@ -86,14 +91,36 @@ class SRBreakout(BaseStrategy):
             "vol_ok":      vol_ok,
         }
 
-        # Only trade breakouts when volatility is at least average
-        if curr_atr < avg_atr * 0.8:
+        # Only trade breakouts when volatility meets the configured floor
+        if p["atr_vol_filter"] > 0 and curr_atr < avg_atr * p["atr_vol_filter"]:
             return self._no_signal(indicators)
+
+        # Session filter: only trade within the configured UTC hour window.
+        # session_open=0 AND session_close=0 → disabled (all hours, good for crypto/24h).
+        # Handles overnight wrap: e.g. session_open=22, session_close=7.
+        s_open  = int(p.get("session_open",  0))
+        s_close = int(p.get("session_close", 0))
+        if s_open != 0 or s_close != 0:
+            _bar_time = df["time"].iloc[-1] if "time" in df.columns else None
+            if _bar_time is not None:
+                try:
+                    _hour = int(pd.Timestamp(_bar_time).hour)
+                    if s_close > s_open:
+                        # Normal window e.g. 07:00–21:00
+                        if not (s_open <= _hour < s_close):
+                            return self._no_signal(indicators)
+                    elif s_close < s_open:
+                        # Overnight window e.g. 22:00–07:00
+                        if not (_hour >= s_open or _hour < s_close):
+                            return self._no_signal(indicators)
+                    # s_open == s_close (non-zero) → treat as disabled (shouldn't happen in practice)
+                except Exception:
+                    pass
 
         buffer = curr_atr * p["sl_buffer_atr"]
 
         # Bullish breakout: close breaks above resistance
-        if resistance and curr_close > resistance and curr_rsi > 55 and vol_ok:
+        if resistance and curr_close > resistance and curr_rsi > p["rsi_confirm"] and vol_ok:
             if p["retest_mode"]:
                 # In retest mode: signal fires when price comes back to retest the broken level
                 prev_close = close.iloc[-2]
@@ -129,7 +156,7 @@ class SRBreakout(BaseStrategy):
             )
 
         # Bearish breakout: close breaks below support
-        if support and curr_close < support and curr_rsi < 45 and vol_ok:
+        if support and curr_close < support and curr_rsi < (100 - p["rsi_confirm"]) and vol_ok:
             if p["retest_mode"]:
                 prev_close = close.iloc[-2]
                 if not (prev_close > support and curr_close < (support + buffer)):
