@@ -164,7 +164,7 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
     # H1 added to scalping strategies for MTF confirmation (higher TF trend check)
     "ema_scalp":             {"M5": 250, "M15": 250, "H1": 250},
     "bb_squeeze":            {"M5": 250, "H1": 250},
-    "vwap_reversion":        {"M1": 1500, "M15": 250, "H1": 250},
+    "vwap_reversion":        {"M5": 250, "M15": 250, "H1": 250},
     "stoch_rsi_pullback":    {"M5": 250, "H1": 250},
     # D1 added to day_trading strategies for MTF confirmation
     "macd_ema_trend":  {"H1": 250, "M15": 250},
@@ -187,7 +187,7 @@ TIMEFRAME_BARS: dict[str, dict[str, int]] = {
 _PRIMARY_TF: dict[str, str] = {
     "ema_scalp":           "H1",   # regime from H1; strategy still executes on M5 data
     "bb_squeeze":          "H1",   # regime from H1; strategy still executes on M5 data
-    "vwap_reversion":      "H1",   # regime from H1; strategy executes on M1 data
+    "vwap_reversion":      "H1",   # regime from H1; strategy executes on M5 data
     "stoch_rsi_pullback":  "H1",   # regime from H1; strategy still executes on M5 data
     "macd_ema_trend":      "H1",
     "sr_breakout":         "H1",
@@ -903,7 +903,7 @@ class StrategyRunner:
         if strat_name == "stoch_rsi_pullback":
             return strategy.calculate(tf_data["M5"])
         if strat_name == "vwap_reversion":
-            return strategy.calculate(tf_data["M1"])
+            return strategy.calculate(tf_data["M5"])
         if strat_name == "macd_ema_trend":
             # M15 is the primary entry TF; H1 is bias/signal confirmation
             return strategy.calculate(tf_data["M15"], df_h1=tf_data.get("H1"))

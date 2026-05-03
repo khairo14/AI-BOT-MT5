@@ -62,9 +62,9 @@ _STRATEGIES: dict[str, list[str]] = {
 # Jobs with bars_used >= mode-specific threshold are treated as already done and skipped.
 # Set to ~80% of requested bars to handle broker data limitations
 _DONE_BARS_THRESHOLD: dict[str, int] = {
-    "scalping":     200_000,   # 80% of 250k — handles symbols that only return ~200-250k bars
-    "day_trading":  40_000,    # 80% of 50k  — day trades need at least 40k H1 bars (~4.5 years)
-    "swing":        25_000,    # ~83% of 30k — swing trades need at least 25k H4 bars (~11 years)
+    "scalping":     250_000,   # 80% of 250k — handles symbols that only return ~200-250k bars
+    "day_trading":  50_000,    # 80% of 50k  — day trades need at least 40k H1 bars (~4.5 years)
+    "swing":        30_000,    # ~83% of 30k — swing trades need at least 25k H4 bars (~11 years)
 }
 
 

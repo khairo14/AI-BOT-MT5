@@ -87,7 +87,7 @@ _RETRAIN_DEDUP_SECS = 120   # 2-minute cooldown window per key
 # Bar counts for auto-retrain (LSTM) — matches manual retrain dataset sizes.
 # Uses get_ohlcv_range() for scalping to exceed MT5's copy_rates_from_pos() practical limit.
 _RETRAIN_BARS: dict[str, int] = {
-    "scalping":    200_000,  # M5  ≈ 2 years (694 days)
+    "scalping":    250_000,  # M5  ≈ 2 years (868 days)
     "day_trading":  50_000,  # H1  ≈ 5.7 years
     "swing":        30_000,  # H4  ≈ 13.7 years (matched to manual retrain)
 }
@@ -98,7 +98,7 @@ _RETRAIN_BARS: dict[str, int] = {
 # overfitting while maintaining robustness. Win-rate trigger (< 45% + 30 trades) +
 # 24-hour cooldown ensures adaptation without thrashing or corrupting good params.
 _AUTO_OPT_BARS: dict[str, int] = {
-    "scalping":    200_000,  # M5  ≈ 2 years
+    "scalping":    250_000,  # M5 ≈ 2.4 years — enough for regime-filtered vwap_reversion
     "day_trading":  50_000,  # H1  ≈ 5.7 years
     "swing":        30_000,  # H4  ≈ 13.7 years (matches _RETRAIN_BARS and run_retrain.py)
 }
@@ -2119,7 +2119,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         if _type == "scalping":
                             from datetime import timedelta
                             _date_to = datetime.now(tz=timezone.utc)
-                            _date_from = _date_to - timedelta(days=694)  # ≈ 2 years for 200k M5 bars
+                            _date_from = _date_to - timedelta(days=868)  # ≈ 2.4 years for 250k M5 bars
                             _df = await asyncio.to_thread(
                                 _client.get_ohlcv_range, _sym, _tf_str, _date_from, _date_to
                             )
@@ -2152,7 +2152,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         if trading_type == "scalping":
                             from datetime import timedelta
                             _date_to2 = datetime.now(tz=timezone.utc)
-                            _date_from2 = _date_to2 - timedelta(days=694)  # ≈ 2 years
+                            _date_from2 = _date_to2 - timedelta(days=868)  # ≈ 2 years
                             _df2 = await asyncio.to_thread(
                                 _client2.get_ohlcv_range, _sym, _tf_str2, _date_from2, _date_to2
                             )

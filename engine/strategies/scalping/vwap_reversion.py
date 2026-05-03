@@ -1,126 +1,211 @@
 """
-S3 — VWAP Reversion
-Timeframe: M1 entry (Stochastic), M5 context (RSI)
-Symbols: EURUSD, GBPUSD, EURJPY, US100Cash
+S3 — VWAP Reversion (SCALPING — M5 PRIMARY)
+
+Strategy:
+  When price penetrates beyond sigma_entry standard deviations from VWAP
+  AND RSI confirms oversold/overbought, enter a mean-reversion trade
+  targeting VWAP (TP1) with runner to opposite band (TP2).
+
+Edge: Price has a statistical tendency to revert to VWAP after extreme
+      deviations, especially in ranging/low-volatility regimes. This
+      strategy is gated to ONLY run in ranging_low_vol, ranging_high_vol,
+      and quiet regimes by strategy_runner.py.
+
+Fixes applied:
+  - Single calculate() method (removed duplicate with Stochastic)
+  - M5 primary timeframe (matches ema_scalp, bb_squeeze conventions)
+  - VWAP + std pre-computed once per dataframe (not re-computed on slices)
+  - All params exposed in optimizer grid
+  - RSI confirmation always required (no penetration bypass)
+  - Adaptive volatility filter using ATR% instead of hardcoded range check
+  - Volume confirmation — avoid low-liquidity snap-throughs
 """
 
 from __future__ import annotations
 
-import ta
 import numpy as np
 import pandas as pd
+import ta
 
 from engine.strategies.base_strategy import BaseStrategy, Signal, StrategyResult
 
+
 DEFAULT_PARAMS = {
-    "sigma_entry": 1.5,
-    "sigma_sl": 2.5,
+    # ── VWAP bands ──────────────────────────────────────────────────────────
+    "sigma_entry": 1.2,           # entry when price is this many stds from VWAP
+    "sigma_sl": 2.5,              # stop-loss at this many stds from VWAP
+    "vwap_std_window": 20,        # rolling window for VWAP std deviation (M5 bars)
+
+    # ── RSI confirmation ────────────────────────────────────────────────────
     "rsi_period": 14,
-    "stoch_k": 5,
-    "stoch_d": 3,
-    "stoch_smooth": 3,
-    "rsi_oversold": 28,
-    "rsi_overbought": 72,
-    "max_spread_pips": 4.0,      # raised from 2.5 — VWAP runs on M1 where spreads matter more
-    # Minimum viable RR guard: if (VWAP - entry) / (entry - SL) < this, skip.
-    # Prevents taking trades where the TP is so close that spread eats the reward.
-    "min_rr_to_vwap": 0.8,
+    "rsi_oversold": 32,           # RSI must be ≤ this for BUY
+    "rsi_overbought": 68,         # RSI must be ≥ this for SELL
+
+    # ── Filters ─────────────────────────────────────────────────────────────
+    "min_rr_to_vwap": 0.6,        # minimum R:R to VWAP to take the trade
+    "atr_vol_filter": 1.2,        # ATR% above which trades are blocked (adaptive vol filter)
+    "atr_period": 14,             # period for ATR calculation
+    "min_volume_ratio": 0.5,      # last bar volume / 20-bar avg — filter low-liquidity
+    "max_spread_pips": 3.0,       # max allowed spread (enforced by strategy_runner)
 }
+
+
+def _ensure_vwap(df: pd.DataFrame, window: int) -> pd.DataFrame:
+    """
+    Compute daily VWAP and its rolling standard deviation.
+    Cached: if columns already exist, returns immediately (no recomputation).
+    """
+    if "vwap" in df.columns and "vwap_std" in df.columns:
+        if "typical" not in df.columns:
+            df["typical"] = (df["high"] + df["low"] + df["close"]) / 3.0
+        return df
+
+    # VWAP requires a date column to reset daily
+    if "date" not in df.columns:
+        if "time" in df.columns:
+            df["date"] = df["time"].dt.date
+        else:
+            # Fallback: single-session VWAP (no daily reset needed)
+            pass
+
+    typical = (df["high"] + df["low"] + df["close"]) / 3.0
+
+    if "date" in df.columns:
+        # Daily-reset VWAP: cumulative TP×Vol / cumulative Vol per day
+        df["cum_tp_vol"] = (typical * df["volume"]).groupby(df["date"]).cumsum()
+        df["cum_vol"] = df["volume"].groupby(df["date"]).cumsum()
+        df["vwap"] = df["cum_tp_vol"] / df["cum_vol"].replace(0, np.nan)
+        # Rolling std of typical price, computed per day to avoid session bleed
+        df["vwap_std"] = df.groupby("date")["typical"].transform(
+            lambda x: x.rolling(window, min_periods=10).std()
+        )
+    else:
+        # No date column — single-session fallback
+        df["cum_tp_vol"] = (typical * df["volume"]).cumsum()
+        df["cum_vol"] = df["volume"].cumsum()
+        df["vwap"] = df["cum_tp_vol"] / df["cum_vol"].replace(0, np.nan)
+        df["vwap_std"] = typical.rolling(window, min_periods=10).std()
+
+    return df
+
+
+def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """Return ATR as percentage of current price."""
+    if len(df) < period + 1:
+        return 0.0
+    high = df["high"].values.astype(float)
+    low = df["low"].values.astype(float)
+    close = df["close"].values.astype(float)
+    prev_close = np.roll(close, 1)
+    prev_close[0] = close[0]
+    tr = np.maximum(
+        high - low,
+        np.maximum(
+            np.abs(high - prev_close),
+            np.abs(low - prev_close),
+        ),
+    )
+    atr = float(np.mean(tr[-period:]))
+    current_price = abs(close[-1])
+    if current_price == 0:
+        return 0.0
+    return (atr / current_price) * 100.0
 
 
 class VWAPReversion(BaseStrategy):
 
     name = "vwap_reversion"
     trading_type = "scalping"
-    timeframe = "M1"
+    timeframe = "M5"  # ← changed from M1 to M5 for system consistency
 
     def calculate(self, df: pd.DataFrame, **_) -> StrategyResult:
         p = {**DEFAULT_PARAMS, **self.params}
 
-        if len(df) < 30:
+        # ── Minimum data check ──────────────────────────────────────────────
+        min_bars = max(p["vwap_std_window"], p["rsi_period"], p["atr_period"]) + 10
+        if len(df) < min_bars:
             return self._no_signal()
 
-        # ---------------------------------------------------------------
-        # VWAP (daily reset) — computed from the dataframe's session open
-        # ---------------------------------------------------------------
-        df = df.copy()
-        df["date"] = df["time"].dt.date
-        df["typical"] = (df["high"] + df["low"] + df["close"]) / 3
-        df["cum_tp_vol"] = df.groupby("date")["typical"].transform(
-            lambda x: (x * df.loc[x.index, "volume"]).cumsum()
-        )
-        df["cum_vol"] = df.groupby("date")["volume"].transform("cumsum")
-        df["vwap"] = df["cum_tp_vol"] / df["cum_vol"].replace(0, np.nan)
-
-        # Rolling std of typical price (daily) for deviation bands
-        df["vwap_std"] = df.groupby("date")["typical"].transform(
-            lambda x: x.expanding().std()
-        )
-
-        df["upper1"] = df["vwap"] + p["sigma_entry"] * df["vwap_std"]
-        df["lower1"] = df["vwap"] - p["sigma_entry"] * df["vwap_std"]
-        df["upper_sl"] = df["vwap"] + p["sigma_sl"] * df["vwap_std"]
-        df["lower_sl"] = df["vwap"] - p["sigma_sl"] * df["vwap_std"]
+        # ── Pre-compute VWAP (cached) ───────────────────────────────────────
+        _ensure_vwap(df, p["vwap_std_window"])
 
         close = df["close"]
         high = df["high"]
         low = df["low"]
+        volume = df["volume"] if "volume" in df.columns else None
 
-        rsi = ta.momentum.RSIIndicator(close, window=p["rsi_period"]).rsi()
-        stoch = ta.momentum.StochasticOscillator(
-            high, low, close,
-            window=p["stoch_k"],
-            smooth_window=p["stoch_d"],
-        )
-        stoch_k = stoch.stoch()
-        stoch_d = stoch.stoch_signal()
-
+        # ── Current bar values ──────────────────────────────────────────────
         curr = df.iloc[-1]
-        prev_k = stoch_k.iloc[-2]
-        prev_d = stoch_d.iloc[-2]
-        curr_k = stoch_k.iloc[-1]
-        curr_d = stoch_d.iloc[-1]
-        curr_rsi = rsi.iloc[-1]
-        curr_close = close.iloc[-1]
 
+        # Sanity: VWAP must be valid
+        if np.isnan(curr.get("vwap", np.nan)) or np.isnan(curr.get("vwap_std", np.nan)):
+            return self._no_signal()
+
+        vwap = float(curr["vwap"])
+        std = float(curr["vwap_std"])
+        price = float(curr["close"])
+
+        if std <= 0 or vwap <= 0:
+            return self._no_signal()
+
+        # ── Band calculations ───────────────────────────────────────────────
+        upper_entry = vwap + p["sigma_entry"] * std
+        lower_entry = vwap - p["sigma_entry"] * std
+        upper_sl = vwap + p["sigma_sl"] * std
+        lower_sl = vwap - p["sigma_sl"] * std
+
+        # ── RSI ────────────────────────────────────────────────────────────
+        rsi_series = ta.momentum.RSIIndicator(close, window=p["rsi_period"]).rsi()
+        curr_rsi = float(rsi_series.iloc[-1])
+        if np.isnan(curr_rsi):
+            return self._no_signal()
+
+        # ── Volatility filter (adaptive ATR%) ───────────────────────────────
+        atr_pct = _compute_atr(df, period=p["atr_period"])
+        if atr_pct > p["atr_vol_filter"]:
+            return self._no_signal()
+
+        # ── Volume filter (avoid low-liquidity snap-throughs) ───────────────
+        if volume is not None and len(volume) >= 20:
+            avg_vol = float(volume.iloc[-20:].mean())
+            last_vol = float(volume.iloc[-1])
+            if avg_vol > 0 and last_vol / avg_vol < p["min_volume_ratio"]:
+                return self._no_signal()
+
+        # ── Indicators for UI / logging ─────────────────────────────────────
         indicators = {
-            "vwap": round(curr["vwap"], 5) if not np.isnan(curr["vwap"]) else None,
-            "vwap_std": round(curr["vwap_std"], 6) if not np.isnan(curr["vwap_std"]) else None,
-            "upper1": round(curr["upper1"], 5),
-            "lower1": round(curr["lower1"], 5),
+            "vwap": round(vwap, 5),
+            "vwap_std": round(std, 5),
             "rsi": round(curr_rsi, 2),
-            "stoch_k": round(curr_k, 2),
-            "stoch_d": round(curr_d, 2),
+            "atr_pct": round(atr_pct, 3),
         }
 
-        # Skip if VWAP std is invalid or session is too young (< 20 bars → std unreliable)
-        session_bars = int((df["date"] == curr["date"]).sum())
-        if np.isnan(curr["vwap"]) or np.isnan(curr["vwap_std"]) or curr["vwap_std"] == 0:
-            return self._no_signal(indicators)
-        if session_bars < 20:
-            return self._no_signal(indicators)
+        # ====================================================================
+        # BUY SIGNAL — price below lower band + RSI oversold
+        # ====================================================================
+        if price <= lower_entry and curr_rsi <= p["rsi_oversold"]:
+            sl = lower_sl
+            tp1 = vwap          # primary target: reversion to mean
+            tp2 = upper_entry   # runner: reversion to opposite band
 
-        # BUY: price at lower deviation, RSI oversold, Stoch %K crosses above %D
-        if (
-            curr_close <= curr["lower1"]
-            and curr_rsi < p["rsi_oversold"]
-            and prev_k <= prev_d
-            and curr_k > curr_d
-        ):
-            sl  = round(curr["lower_sl"], 5)
-            tp1 = round(curr["vwap"], 5)      # partial close at VWAP
-            tp2 = round(curr["upper1"], 5)    # runner to the opposite entry band
-            risk = curr_close - sl
-            reward_to_vwap = tp1 - curr_close
-            # Skip if VWAP is too close — spread would eat the reward
-            if risk <= 0 or (reward_to_vwap / risk) < p["min_rr_to_vwap"]:
+            risk = price - sl
+            reward = tp1 - price
+
+            if risk <= 0:
                 return self._no_signal(indicators)
-            if self._sl_too_close("BUY", curr_close, sl):
+
+            rr = reward / risk
+
+            if rr < p["min_rr_to_vwap"]:
                 return self._no_signal(indicators)
+
+            if self._sl_too_close("BUY", price, sl):
+                return self._no_signal(indicators)
+
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
-                    entry_price=curr_close,
+                    entry_price=price,
                     sl_price=sl,
                     tp_price=tp1,
                     tp2_price=tp2,
@@ -132,27 +217,32 @@ class VWAPReversion(BaseStrategy):
                 indicators=indicators,
             )
 
-        # SELL: price at upper deviation, RSI overbought, Stoch %K crosses below %D
-        if (
-            curr_close >= curr["upper1"]
-            and curr_rsi > p["rsi_overbought"]
-            and prev_k >= prev_d
-            and curr_k < curr_d
-        ):
-            sl  = round(curr["upper_sl"], 5)
-            tp1 = round(curr["vwap"], 5)      # partial close at VWAP
-            tp2 = round(curr["lower1"], 5)    # runner to the opposite entry band
-            risk = sl - curr_close
-            reward_to_vwap = curr_close - tp1
-            # Skip if VWAP is too close — spread would eat the reward
-            if risk <= 0 or (reward_to_vwap / risk) < p["min_rr_to_vwap"]:
+        # ====================================================================
+        # SELL SIGNAL — price above upper band + RSI overbought
+        # ====================================================================
+        if price >= upper_entry and curr_rsi >= p["rsi_overbought"]:
+            sl = upper_sl
+            tp1 = vwap          # primary target: reversion to mean
+            tp2 = lower_entry   # runner: reversion to opposite band
+
+            risk = sl - price
+            reward = price - tp1
+
+            if risk <= 0:
                 return self._no_signal(indicators)
-            if self._sl_too_close("SELL", curr_close, sl):
+
+            rr = reward / risk
+
+            if rr < p["min_rr_to_vwap"]:
                 return self._no_signal(indicators)
+
+            if self._sl_too_close("SELL", price, sl):
+                return self._no_signal(indicators)
+
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",
-                    entry_price=curr_close,
+                    entry_price=price,
                     sl_price=sl,
                     tp_price=tp1,
                     tp2_price=tp2,

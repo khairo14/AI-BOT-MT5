@@ -111,6 +111,20 @@ _BT_WINDOW: dict[str, int] = {
     "swing":       400,   # max param period = lookback(100)  → 4× coverage
 }
 
+# Per-strategy overrides for bt_window and step.
+# vwap_reversion is the critical case: its calculate() runs groupby("date") +
+# expanding().std() on every bar of the slice — an O(n²) operation that causes
+# the optimizer to hang when bt_window=200 and the dataset is 250k M5 bars.
+# Reducing bt_window to one trading session (100 bars ≈ ~1 day on M1/M5)
+# keeps the VWAP computation bounded to a single session which is also semantically
+# correct (VWAP resets daily anyway). The larger step reduces total bar evaluations.
+_BT_WINDOW_STRATEGY: dict[str, int] = {
+    "vwap_reversion": 100,   # 100 M5 bars = ~8.3 hours — one trading session
+}
+_BT_STEP_STRATEGY: dict[str, int] = {
+    "vwap_reversion": 20,    # check every 20 bars (100 min) instead of 10 (50 min)
+}
+
 # ── Parameter grids ──────────────────────────────────────────────────────────
 # Only the most impactful parameters per strategy (keep total combos ≤ MAX_GRID_COMBOS)
 PARAM_GRIDS: dict[str, dict[str, list]] = {
@@ -129,17 +143,25 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "bb_period":          [15, 20, 25],
         "bb_std":             [1.5, 2.0, 2.5],
         "min_squeeze_bars":   [3, 5, 7],
+        "max_squeeze_bars":   [20, 30, 0],      # new: 0 = disabled
         "sl_atr_mult":        [1.0, 1.5, 2.0],
-        "tp1_atr_mult":       [1.0, 1.5, 2.0],   # partial close level
-        "tp_atr_mult":        [2.0, 2.5, 3.0],   # tp2 (full close)
-        "ema_trend_period":   [30, 50, 70],       # trend filter period
+        "tp1_atr_mult":       [1.0, 1.5, 2.0],
+        "tp_atr_mult":        [2.0, 2.5, 3.0],
+        "adx_period":         [10, 14],          # new
+        "adx_min":            [15, 18, 20, 25],  # new
+        "ema_trend_period":   [30, 50, 70],
         "max_spread_pips":    [3.0, 4.0, 5.0],
     },
     "vwap_reversion": {
-        "sigma_entry":    [1.0, 1.5, 2.0],
-        "sigma_sl":       [2.0, 2.5, 3.0],
-        "rsi_period":     [7, 9, 14],
-        "min_rr_to_vwap": [0.6, 0.8, 1.0],  # minimum VWAP RR before entry (skip tiny TP)
+        "sigma_entry":       [1.0, 1.2, 1.5, 2.0],
+        "sigma_sl":          [2.0, 2.5, 3.0],
+        "rsi_period":        [7, 9, 14],
+        "rsi_oversold":      [28, 32, 35],
+        "rsi_overbought":    [65, 68, 72],
+        "min_rr_to_vwap":    [0.4, 0.6, 0.8, 1.0],
+        "vwap_std_window":   [15, 20, 30],
+        "atr_vol_filter":    [0.8, 1.0, 1.5, 2.0],   # new: adaptive
+        "atr_period":        [10, 14, 20],             # new
     },
     "stoch_rsi_pullback": {
         "ema_fast":             [13, 21, 34],
@@ -454,6 +476,40 @@ def _backtest_combo(
     rrs:  list[float] = []
     regime_stats: dict[str, dict] = {}   # label → {wins, total, rr_sum}
     _has_time = "time" in df.columns
+
+    # vwap_reversion (and any future session-aware strategy) requires a proper
+    # datetime "time" column to compute daily VWAP. Without it the strategy will
+    # raise on every bar, causing an infinite silent-exception loop. Bail early
+    # with an empty result so the optimizer marks this combo as 0-signal instead
+    # of spinning for the full dataset duration.
+    _strat_name = strategy_cls.__name__ if hasattr(strategy_cls, "__name__") else ""
+    _needs_time = getattr(strategy_cls, "_requires_time_column", False) or (
+        _strat_name in ("VWAPReversion",)
+    )
+    if _needs_time and not _has_time:
+        logger.warning(
+            f"_backtest_combo: {_strat_name} requires 'time' column but df lacks it — "
+            "skipping combo (pass OHLCV from MT5Client which always includes 'time')"
+        )
+        return 0.0, 0.0, 0, {}
+
+    # Pre-compute VWAP columns on the FULL df ONCE before the bar loop.
+    # df.iloc[a:b] slices are views — they see columns added to the parent df,
+    # so _ensure_vwap's cache check ("vwap" in df.columns) will be True on
+    # every slice without any recomputation. This is the real O(1) fix.
+    # Safety: VWAP uses only past bars (cumsum per day group) — no lookahead.
+    if _strat_name == "VWAPReversion" and _has_time:
+        try:
+            from engine.strategies.scalping.vwap_reversion import _ensure_vwap
+            df = df.copy()
+            # Ensure typical column exists before VWAP pre-compute
+            if "typical" not in df.columns:
+                df["typical"] = (df["high"] + df["low"] + df["close"]) / 3.0
+            vwap_window = params.get("vwap_std_window", 20)
+            _ensure_vwap(df, vwap_window)
+        except Exception as _ve:
+            logger.debug(f"VWAP pre-compute failed: {_ve}")
+
     i = warmup
 
     while i < len(df) - 1:
@@ -656,14 +712,12 @@ class ParamOptimizer:
         with self._lock:
             completed = dict(self._status)
             running   = set(self._running)
-            queued    = [(s, sym) for s, sym, _, _ in self._queue]  # extract strategy_name and symbol
-        # Merge: add `running` and `queued` flags
+            queued    = [(s, sym) for s, sym, _, _ in self._queue]
         result = {k: {**v, "running": False, "queued": False} for k, v in completed.items()}
         for key in running:
             if key in result:
                 result[key]["running"] = True
             else:
-                # Job started but no prior record — create a placeholder
                 parts = key.split("__", 1)
                 result[key] = {
                     "strategy": parts[0] if parts else key,
@@ -786,7 +840,11 @@ class ParamOptimizer:
         combos    = _grid_combos(strategy_name)
         cfg       = _BACKTEST_CONFIG.get(trading_type, _BACKTEST_CONFIG["day_trading"])
         regime_tf = _STRATEGY_REGIME_TF.get(strategy_name, "H1")
-        
+
+        cfg = dict(cfg)   # copy so we don't mutate the module-level constant
+        if _BT_STEP_STRATEGY and strategy_name in _BT_STEP_STRATEGY:
+            cfg["step"] = _BT_STEP_STRATEGY[strategy_name]
+            
         # Walk-forward validation: split df into train (first 75%) and
         # validation (last 25%) periods. Optimize params on train only,
         # then score each candidate on validation to measure generalization.
@@ -810,20 +868,13 @@ class ParamOptimizer:
         regime_best: dict[str, tuple[float, dict]] = {}
 
         spread_r  = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
-        bt_window = _BT_WINDOW.get(trading_type, 500)
+        bt_window = _BT_WINDOW_STRATEGY.get(strategy_name, _BT_WINDOW.get(trading_type, 500))
 
         # Build secondary-timeframe extras for strategies that need them.
-        # The optimizer only fetches one df (primary TF). For multi-TF strategies
-        # we reuse the same df as the secondary TF — reasonable approximation for
-        # parameter search (trend direction changes slowly relative to entry TF).
         _extra_dfs: dict = {}
         if strategy_name in ("macd_ema_trend", "rsi_divergence"):
-            # Both strategies use df_h1 for trend confirmation; the optimizer
-            # receives H1 data (TRADING_TYPE_TF["day_trading"] = "H1"), so
-            # pass the same df as df_h1.
             _extra_dfs = {"df_h1": df}
         elif strategy_name == "ema_scalp":
-            # ema_scalp wants M15 bias; optimizer provides M5 for scalping (reused as M15 approximation).
             _extra_dfs = {"df_m15": df}
         elif strategy_name == "ema_trend_rider":
             _extra_dfs = {"df_h4": df, "df_d1": df}
@@ -832,8 +883,6 @@ class ParamOptimizer:
 
         # Slice extra_dfs to match the train/val boundary so the secondary-TF
         # dataframe cannot leak future bars into the training backtest.
-        # Without this, the full extra_df (100% of data) is visible to the
-        # training phase even though the primary df is capped at 75%.
         if _use_validation and _extra_dfs:
             _extra_dfs_train = {
                 k: v.iloc[:_val_split].reset_index(drop=True)
@@ -860,18 +909,14 @@ class ParamOptimizer:
             if train_score <= 0.0:
                 continue  # skip combos that don't work on training data
 
-            # Phase 2: validate on held-out period — use validation score for selection
-            # This prevents selecting params that overfit to the training period.
+            # Phase 2: validate on held-out period
             if _use_validation:
                 wr_val, avg_rr_val, n_val, _ = _backtest_combo(
                     strategy_cls, dispatch, _df_val, combo,
                     cfg["step"], cfg["max_hold"], cfg["warmup"], spread_r, symbol,
                     _extra_dfs_val, bt_window, trading_type, regime_tf,
                 )
-                # Require minimum signals on validation set too (33% of training threshold)
                 val_score = wr_val * max(avg_rr_val, 0.0) if n_val >= max(min_signals // 3, 3) else 0.0
-                # Use blended score: 40% train + 60% validation
-                # Weighted toward validation to penalize overfitting
                 score = 0.4 * train_score + 0.6 * val_score
             else:
                 score = train_score
@@ -898,15 +943,7 @@ class ParamOptimizer:
     # ── Persistence ──────────────────────────────────────────────────────────
 
     def _load_opt(self) -> dict:
-        """Load optimized params from disk.
-
-        Recovery logic for a corrupt/empty file (e.g. left by the old non-atomic
-        write path before the atomic-write fix was applied):
-          1. If the file is missing → return {}  (normal first-run)
-          2. If the file is empty or unparseable → log a warning, attempt to
-             restore the most recent archive copy, then return that data.
-             If no archive exists, delete the corrupt file and return {}.
-        """
+        """Load optimized params from disk with archive recovery on corruption."""
         if not OPT_FILE.exists():
             return {}
         try:
@@ -919,17 +956,15 @@ class ParamOptimizer:
                 f"Optimizer: could not load params file ({exc}) — "
                 "attempting archive recovery"
             )
-            # Try to restore from the most recent archive copy
             _archive_dir = OPT_FILE.parent / "params_archive"
             _archives = sorted(_archive_dir.glob("optimized_params_*.json")) \
                 if _archive_dir.exists() else []
-            for _arc in reversed(_archives):   # newest first
+            for _arc in reversed(_archives):
                 try:
                     _arc_text = _arc.read_text(encoding="utf-8").strip()
                     if not _arc_text:
                         continue
                     _data = json.loads(_arc_text)
-                    # Restore the valid archive over the corrupt main file
                     import shutil as _sh
                     _sh.copy2(_arc, OPT_FILE)
                     logger.info(
@@ -938,8 +973,7 @@ class ParamOptimizer:
                     )
                     return _data
                 except Exception:
-                    continue   # try the next older archive
-            # No usable archive — delete corrupt file so next save starts clean
+                    continue
             try:
                 OPT_FILE.unlink(missing_ok=True)
             except Exception:
@@ -958,9 +992,6 @@ class ParamOptimizer:
         regime_params: dict[str, dict] | None = None,
     ) -> None:
         with self._lock:
-            # Version archive: copy current file before overwriting so params
-            # can be rolled back manually if new optimization underperforms.
-            # Keep last 5 versions only to avoid unbounded disk growth.
             try:
                 import shutil as _shutil
                 _archive_dir = OPT_FILE.parent / "params_archive"
@@ -969,7 +1000,6 @@ class ParamOptimizer:
                     _ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
                     _archive_path = _archive_dir / f"optimized_params_{_ts}.json"
                     _shutil.copy2(OPT_FILE, _archive_path)
-                    # Prune: keep only last 5 archives
                     _archives = sorted(_archive_dir.glob("optimized_params_*.json"))
                     for _old in _archives[:-5]:
                         _old.unlink(missing_ok=True)
@@ -978,15 +1008,12 @@ class ParamOptimizer:
 
             data = self._load_opt()
             data.setdefault(strategy_name, {})
-            # Merge: keep existing by_regime if present, update with new findings
             existing = data[strategy_name].get(symbol, {})
             existing_by_regime = existing.get("by_regime", {}) if isinstance(existing, dict) else {}
             if regime_params:
                 existing_by_regime.update(regime_params)
             entry = dict(params)
-            # Safety: clamp any R:R parameters to a minimum of 1.0 so that a
-            # mis-configured grid or future code change cannot persist a negative
-            # or sub-minimum R:R value to optimized_params.json.
+            # Safety: clamp any R:R parameters to a minimum of 1.0
             _RR_KEYS = {"rr", "tp_rr", "tp1_rr", "tp2_rr", "tp1_atr_mult", "tp_atr_mult"}
             _MIN_RR  = 1.0
             for _k in _RR_KEYS:
@@ -999,11 +1026,9 @@ class ParamOptimizer:
             if existing_by_regime:
                 entry["by_regime"] = existing_by_regime
             data[strategy_name][symbol] = entry
-            # Also update __global__ if this is the first symbol
             if "__global__" not in data[strategy_name]:
                 data[strategy_name]["__global__"] = entry
-            # Atomic write: serialise to a temp file in the same directory then
-            # rename over the target so a mid-write crash cannot corrupt the JSON.
+            # Atomic write
             import os as _os, tempfile as _tempfile
             _serialised = json.dumps(data, indent=2)
             _fd, _tmp_path = _tempfile.mkstemp(dir=OPT_FILE.parent, suffix=".tmp")

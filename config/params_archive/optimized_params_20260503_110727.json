@@ -1,0 +1,4684 @@
+{
+  "rsi_divergence": {
+    "GBPUSD": {
+      "rsi_period": 18,
+      "ema_bias_period": 65,
+      "divergence_lookback": 30,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "quiet": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "__global__": {
+      "rsi_period": 10,
+      "ema_bias_period": 40,
+      "tp_rr": 1.5,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 40,
+          "tp_rr": 1.5
+        },
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 40,
+          "tp_rr": 1.5
+        },
+        "quiet": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "AUDUSD": {
+      "rsi_period": 14,
+      "ema_bias_period": 50,
+      "divergence_lookback": 30,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 1.5,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 1.5,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "rsi_period": 14,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 1.5,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "GBPJPY": {
+      "rsi_period": 18,
+      "ema_bias_period": 65,
+      "divergence_lookback": 40,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 1.8,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "GOLD": {
+      "rsi_period": 14,
+      "ema_bias_period": 40,
+      "divergence_lookback": 60,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 14,
+          "ema_bias_period": 40,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "OILCash": {
+      "rsi_period": 14,
+      "ema_bias_period": 50,
+      "divergence_lookback": 60,
+      "sl_atr_mult": 1.0,
+      "tp_rr": 1.8,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 14,
+          "ema_bias_period": 50,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "US100Cash": {
+      "rsi_period": 10,
+      "ema_bias_period": 65,
+      "divergence_lookback": 60,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 1.5,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "US30Cash": {
+      "rsi_period": 10,
+      "ema_bias_period": 65,
+      "divergence_lookback": 60,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "US500Cash": {
+      "rsi_period": 14,
+      "ema_bias_period": 65,
+      "divergence_lookback": 30,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 14,
+          "ema_bias_period": 65,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 14,
+          "ema_bias_period": 65,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "quiet": {
+          "rsi_period": 18,
+          "ema_bias_period": 40,
+          "tp_rr": 1.5
+        }
+      }
+    },
+    "GER40Cash": {
+      "rsi_period": 10,
+      "ema_bias_period": 40,
+      "divergence_lookback": 60,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 1.8,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 40,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 40,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "ETHUSD": {
+      "rsi_period": 14,
+      "ema_bias_period": 65,
+      "tp_rr": 2.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "tp_rr": 1.5
+        },
+        "trending_bull": {
+          "rsi_period": 14,
+          "ema_bias_period": 65,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "Tesla": {
+      "rsi_period": 18,
+      "ema_bias_period": 40,
+      "tp_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 40,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "rsi_period": 18,
+          "ema_bias_period": 40,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "ema_bias_period": 40,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Nvidia": {
+      "rsi_period": 10,
+      "ema_bias_period": 50,
+      "divergence_lookback": 30,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 1.8,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Apple": {
+      "rsi_period": 18,
+      "ema_bias_period": 65,
+      "divergence_lookback": 30,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "Microsoft": {
+      "rsi_period": 18,
+      "ema_bias_period": 65,
+      "tp_rr": 2.0,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.0
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Amazon": {
+      "rsi_period": 10,
+      "ema_bias_period": 65,
+      "divergence_lookback": 40,
+      "sl_atr_mult": 1.0,
+      "tp_rr": 1.8,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "USDJPY": {
+      "rsi_period": 18,
+      "ema_bias_period": 65,
+      "divergence_lookback": 40,
+      "sl_atr_mult": 1.0,
+      "tp_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 14,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "quiet": {
+          "rsi_period": 14,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "EURUSD": {
+      "rsi_period": 14,
+      "ema_bias_period": 65,
+      "divergence_lookback": 60,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 1.5,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 14,
+          "ema_bias_period": 65,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 1.5,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "quiet": {
+          "rsi_period": 10,
+          "ema_bias_period": 65,
+          "divergence_lookback": 60,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "UK100Cash": {
+      "rsi_period": 10,
+      "ema_bias_period": 50,
+      "divergence_lookback": 30,
+      "sl_atr_mult": 1.0,
+      "tp_rr": 1.8,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "ema_bias_period": 50,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.8,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "BTCUSD": {
+      "rsi_period": 18,
+      "ema_bias_period": 65,
+      "divergence_lookback": 30,
+      "sl_atr_mult": 1.0,
+      "tp_rr": 1.5,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 30,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "ema_bias_period": 65,
+          "divergence_lookback": 40,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    }
+  },
+  "macd_ema_trend": {
+    "AUDUSD": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 6,
+      "ema_fast": 20,
+      "ema_slow": 50,
+      "atr_period": 14,
+      "sl_atr_mult": 0.8,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.2,
+      "tp1_rr": 1.8,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 0.8,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        }
+      }
+    },
+    "__global__": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 9,
+      "ema_fast": 15,
+      "ema_slow": 45,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "trending_bull": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        }
+      }
+    },
+    "EURUSD": {
+      "macd_fast": 9,
+      "macd_slow": 26,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 45,
+      "atr_period": 10,
+      "sl_atr_mult": 1.5,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 0,
+      "tp1_rr": 1.8,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 0,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 0,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "GBPUSD": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 45,
+      "atr_period": 14,
+      "sl_atr_mult": 1.2,
+      "max_entry_atr_dist": 1.5,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 1.0,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "atr_period": 14,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 1.0,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "US100Cash": {
+      "macd_fast": 9,
+      "macd_slow": 26,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 50,
+      "atr_period": 10,
+      "sl_atr_mult": 1.2,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 0,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.2,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "US30Cash": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 50,
+      "atr_period": 10,
+      "sl_atr_mult": 1.2,
+      "max_entry_atr_dist": 1.0,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "tp1_rr": 1.5,
+          "tp2_rr": 1.5
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 14,
+          "sl_atr_mult": 1.2,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 1.0,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "US500Cash": {
+      "macd_fast": 9,
+      "macd_slow": 26,
+      "macd_signal": 9,
+      "ema_fast": 15,
+      "ema_slow": 50,
+      "atr_period": 14,
+      "sl_atr_mult": 1.2,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.2,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 14,
+          "sl_atr_mult": 1.2,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "quiet": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "tp1_rr": 1.5,
+          "tp2_rr": 1.5
+        },
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.2,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        },
+        "volatile_breakout": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "tp1_rr": 1.8,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Tesla": {
+      "macd_fast": 9,
+      "macd_slow": 21,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 50,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "tp1_rr": 1.5,
+          "tp2_rr": 1.5
+        },
+        "trending_bear": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "UK100Cash": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 6,
+      "ema_fast": 20,
+      "ema_slow": 50,
+      "atr_period": 14,
+      "sl_atr_mult": 1.5,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.2,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "Apple": {
+      "macd_fast": 9,
+      "macd_slow": 26,
+      "macd_signal": 9,
+      "ema_fast": 20,
+      "ema_slow": 50,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Amazon": {
+      "macd_fast": 12,
+      "macd_slow": 26,
+      "macd_signal": 9,
+      "ema_fast": 15,
+      "ema_slow": 50,
+      "atr_period": 10,
+      "sl_atr_mult": 1.0,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "atr_period": 10,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 0.8,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "USDJPY": {
+      "macd_fast": 9,
+      "macd_slow": 21,
+      "macd_signal": 9,
+      "ema_fast": 20,
+      "ema_slow": 50,
+      "atr_period": 14,
+      "sl_atr_mult": 1.5,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.2,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 0.8,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "quiet": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 14,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 1.5,
+          "vol_confirm_mult": 0,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "GBPJPY": {
+      "macd_fast": 9,
+      "macd_slow": 26,
+      "macd_signal": 9,
+      "ema_fast": 20,
+      "ema_slow": 50,
+      "atr_period": 14,
+      "sl_atr_mult": 1.0,
+      "max_entry_atr_dist": 1.0,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 14,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 1.8,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 1.0,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "GER40Cash": {
+      "macd_fast": 12,
+      "macd_slow": 26,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 45,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        }
+      }
+    },
+    "BTCUSD": {
+      "macd_fast": 12,
+      "macd_slow": 26,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 45,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 20,
+          "ema_slow": 45,
+          "tp1_rr": 1.5,
+          "tp2_rr": 1.5
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "tp1_rr": 1.5,
+          "tp2_rr": 1.5
+        }
+      }
+    },
+    "GOLD": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 6,
+      "ema_fast": 20,
+      "ema_slow": 50,
+      "atr_period": 14,
+      "sl_atr_mult": 1.5,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.2,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.5,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 1.8,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.2,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.2,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        }
+      }
+    },
+    "OILCash": {
+      "macd_fast": 9,
+      "macd_slow": 26,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 50,
+      "atr_period": 14,
+      "sl_atr_mult": 1.0,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bear": {
+          "macd_fast": 9,
+          "macd_slow": 26,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "atr_period": 14,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 20,
+          "ema_slow": 50,
+          "atr_period": 10,
+          "sl_atr_mult": 0.8,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Nvidia": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 6,
+      "ema_fast": 15,
+      "ema_slow": 45,
+      "atr_period": 10,
+      "sl_atr_mult": 1.0,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "macd_fast": 12,
+          "macd_slow": 21,
+          "macd_signal": 6,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Microsoft": {
+      "macd_fast": 12,
+      "macd_slow": 21,
+      "macd_signal": 9,
+      "ema_fast": 15,
+      "ema_slow": 45,
+      "atr_period": 10,
+      "sl_atr_mult": 1.5,
+      "max_entry_atr_dist": 0.5,
+      "vol_confirm_mult": 1.0,
+      "tp1_rr": 1.8,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "macd_fast": 9,
+          "macd_slow": 21,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 45,
+          "atr_period": 10,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "macd_fast": 12,
+          "macd_slow": 26,
+          "macd_signal": 9,
+          "ema_fast": 15,
+          "ema_slow": 50,
+          "atr_period": 10,
+          "sl_atr_mult": 1.0,
+          "max_entry_atr_dist": 0.5,
+          "vol_confirm_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    }
+  },
+  "sr_breakout": {
+    "Nvidia": {
+      "lookback_bars": 50,
+      "atr_period": 10,
+      "sl_buffer_atr": 0.5,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "min_touches": 2,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.0,
+      "rsi_confirm": 52,
+      "atr_vol_filter": 0,
+      "session_open": 0,
+      "session_close": 22,
+      "by_regime": {
+        "volatile_breakout": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0,
+          "session_open": 0,
+          "session_close": 22
+        },
+        "trending_bear": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0,
+          "session_open": 0,
+          "session_close": 22
+        },
+        "trending_bull": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0,
+          "session_open": 0,
+          "session_close": 22
+        }
+      }
+    },
+    "__global__": {
+      "lookback_bars": 30,
+      "atr_period": 20,
+      "sl_buffer_atr": 0.2,
+      "tp_rr": 2.2,
+      "by_regime": {
+        "volatile_breakout": {
+          "lookback_bars": 30,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.2,
+          "tp_rr": 1.8
+        },
+        "trending_bear": {
+          "lookback_bars": 30,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.2,
+          "tp_rr": 2.2
+        },
+        "trending_bull": {
+          "lookback_bars": 30,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.2,
+          "tp_rr": 1.8
+        }
+      }
+    },
+    "GBPJPY": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.5,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "min_touches": 2,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 48,
+      "atr_vol_filter": 0.6,
+      "session_open": 7,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0.6,
+          "session_open": 7,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0.6,
+          "session_open": 7,
+          "session_close": 0
+        }
+      }
+    },
+    "US100Cash": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.8,
+      "tp_rr": 3.0,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 0,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0,
+      "session_open": 0,
+      "session_close": 22,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": false,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 2,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.8,
+          "tp_rr": 3.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 0,
+          "session_close": 22
+        },
+        "volatile_breakout": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0,
+          "min_touches": 3,
+          "retest_mode": false,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0.6,
+          "session_open": 2,
+          "session_close": 0
+        }
+      }
+    },
+    "US30Cash": {
+      "lookback_bars": 70,
+      "atr_period": 10,
+      "sl_buffer_atr": 0.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.0,
+      "min_touches": 2,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.0,
+      "rsi_confirm": 52,
+      "atr_vol_filter": 0.6,
+      "session_open": 0,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0.6,
+          "session_open": 0,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0.6,
+          "session_open": 0,
+          "session_close": 0
+        },
+        "volatile_breakout": {
+          "lookback_bars": 50,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "EURUSD": {
+      "lookback_bars": 50,
+      "atr_period": 10,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.0,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0.6,
+      "session_open": 2,
+      "session_close": 21,
+      "by_regime": {
+        "trending_bear": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.6,
+          "session_open": 2,
+          "session_close": 21
+        },
+        "trending_bull": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.6,
+          "session_open": 2,
+          "session_close": 21
+        },
+        "quiet": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.6,
+          "session_open": 2,
+          "session_close": 21
+        }
+      }
+    },
+    "USDJPY": {
+      "lookback_bars": 70,
+      "atr_period": 20,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0,
+      "session_open": 7,
+      "session_close": 21,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 30,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0,
+          "session_open": 0,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 2,
+          "session_close": 0
+        },
+        "quiet": {
+          "lookback_bars": 30,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0,
+          "session_open": 0,
+          "session_close": 0
+        }
+      }
+    },
+    "GBPUSD": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.5,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "min_touches": 2,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 48,
+      "atr_vol_filter": 0.6,
+      "session_open": 7,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0.6,
+          "session_open": 0,
+          "session_close": 0
+        },
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0.6,
+          "session_open": 7,
+          "session_close": 0
+        }
+      }
+    },
+    "GOLD": {
+      "lookback_bars": 70,
+      "atr_period": 20,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0,
+      "session_open": 7,
+      "session_close": 21,
+      "by_regime": {
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 7,
+          "session_close": 21
+        },
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 7,
+          "session_close": 21
+        }
+      }
+    },
+    "GER40Cash": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.5,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "min_touches": 2,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 48,
+      "atr_vol_filter": 0.6,
+      "session_open": 7,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0.6,
+          "session_open": 7,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 30,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.2,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.6,
+          "session_open": 2,
+          "session_close": 21
+        }
+      }
+    },
+    "Tesla": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.0,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0,
+      "session_open": 2,
+      "session_close": 0,
+      "by_regime": {
+        "volatile_breakout": {
+          "lookback_bars": 50,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 0,
+          "session_close": 21
+        },
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0.8,
+          "session_open": 7,
+          "session_close": 22
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 2,
+          "session_close": 0
+        }
+      }
+    },
+    "Apple": {
+      "lookback_bars": 70,
+      "atr_period": 10,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 0,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0.8,
+      "session_open": 0,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.8,
+          "session_open": 0,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.8,
+          "session_open": 0,
+          "session_close": 0
+        },
+        "volatile_breakout": {
+          "lookback_bars": 70,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.8,
+          "session_open": 0,
+          "session_close": 0
+        }
+      }
+    },
+    "BRENTCash": {
+      "lookback_bars": 50,
+      "atr_period": 10,
+      "sl_buffer_atr": 0.5,
+      "tp1_rr": 1.8,
+      "tp_rr": 2.5,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 0,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0.8,
+      "session_open": 2,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.8,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.8,
+          "session_open": 2,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.8,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.8,
+          "session_open": 2,
+          "session_close": 0
+        },
+        "volatile_breakout": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.8,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.8,
+          "session_open": 2,
+          "session_close": 0
+        }
+      }
+    },
+    "NZDCAD": {
+      "lookback_bars": 50,
+      "atr_period": 10,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.0,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0.6,
+      "session_open": 2,
+      "session_close": 21,
+      "by_regime": {
+        "trending_bear": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.6,
+          "session_open": 2,
+          "session_close": 21
+        },
+        "trending_bull": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.6,
+          "session_open": 2,
+          "session_close": 21
+        }
+      }
+    }
+  },
+  "fibonacci_rsi": {
+    "EURUSD": {
+      "rsi_period": 14,
+      "impulse_lookback": 30,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 2.0,
+      "candle_confirm": false,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 10,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": true,
+          "tp1_rr": 1.5,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 14,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "__global__": {
+      "rsi_period": 14,
+      "sl_atr_mult": 1.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 14,
+          "sl_atr_mult": 1.0,
+          "impulse_lookback": 30
+        },
+        "trending_bull": {
+          "rsi_period": 14,
+          "sl_atr_mult": 1.0,
+          "impulse_lookback": 30
+        }
+      },
+      "impulse_lookback": 30
+    },
+    "USDJPY": {
+      "rsi_period": 14,
+      "impulse_lookback": 30,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "AUDUSD": {
+      "rsi_period": 18,
+      "impulse_lookback": 30,
+      "fib_entry_low": 0.382,
+      "fib_entry_high": 0.786,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 14,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "USDCAD": {
+      "rsi_period": 10,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.382,
+      "fib_entry_high": 0.786,
+      "sl_atr_mult": 2.0,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": true,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "NZDUSD": {
+      "rsi_period": 10,
+      "impulse_lookback": 30,
+      "fib_entry_low": 0.382,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.0,
+      "candle_confirm": true,
+      "tp1_rr": 1.5,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": true,
+          "tp1_rr": 1.5,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "GOLD": {
+      "rsi_period": 10,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "OILCash": {
+      "rsi_period": 14,
+      "impulse_lookback": 70,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.5,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": true,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "BRENTCash": {
+      "rsi_period": 10,
+      "impulse_lookback": 70,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.786,
+      "sl_atr_mult": 2.0,
+      "candle_confirm": false,
+      "tp1_rr": 2.5,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 18,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": true,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "US100Cash": {
+      "rsi_period": 18,
+      "impulse_lookback": 70,
+      "fib_entry_low": 0.382,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 14,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "rsi_period": 14,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 14,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "BTCUSD": {
+      "rsi_period": 18,
+      "impulse_lookback": 50,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 14,
+          "impulse_lookback": 50,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 14,
+          "impulse_lookback": 50,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5
+        }
+      }
+    },
+    "SOLUSD": {
+      "rsi_period": 18,
+      "impulse_lookback": 50,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 14,
+          "impulse_lookback": 70,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5
+        }
+      }
+    },
+    "Tesla": {
+      "rsi_period": 10,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "Nvidia": {
+      "rsi_period": 18,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 1.5,
+          "tp2_rr": 3.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 10,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "US500Cash": {
+      "rsi_period": 14,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.0,
+      "candle_confirm": false,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 10,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Google": {
+      "rsi_period": 10,
+      "impulse_lookback": 70,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 2.0,
+      "candle_confirm": true,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": true,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "AdvMicroDev": {
+      "rsi_period": 18,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 14,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 1.5,
+          "tp2_rr": 3.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "ADAUSD": {
+      "rsi_period": 18,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.786,
+      "sl_atr_mult": 1.0,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        },
+        "trending_bull": {
+          "rsi_period": 18,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": false,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        }
+      }
+    },
+    "GBPUSD": {
+      "rsi_period": 10,
+      "impulse_lookback": 50,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 2.0,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "rsi_period": 14,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 3.0
+        }
+      }
+    },
+    "SILVER": {
+      "rsi_period": 14,
+      "impulse_lookback": 30,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 14,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 10,
+          "impulse_lookback": 50,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "ETHUSD": {
+      "rsi_period": 14,
+      "impulse_lookback": 70,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": true,
+      "tp1_rr": 2.5,
+      "tp2_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": true,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "trending_bull": {
+          "rsi_period": 14,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": true,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "Netflix": {
+      "rsi_period": 10,
+      "impulse_lookback": 70,
+      "fib_entry_low": 0.382,
+      "fib_entry_high": 0.618,
+      "sl_atr_mult": 1.5,
+      "candle_confirm": false,
+      "tp1_rr": 2.0,
+      "tp2_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "volatile_breakout": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.5,
+          "candle_confirm": false,
+          "tp1_rr": 2.0,
+          "tp2_rr": 2.5
+        }
+      }
+    },
+    "NGASCash": {
+      "rsi_period": 18,
+      "impulse_lookback": 30,
+      "fib_entry_low": 0.5,
+      "fib_entry_high": 0.786,
+      "sl_atr_mult": 2.0,
+      "candle_confirm": false,
+      "tp1_rr": 1.5,
+      "tp2_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "rsi_period": 10,
+          "impulse_lookback": 70,
+          "fib_entry_low": 0.382,
+          "fib_entry_high": 0.618,
+          "sl_atr_mult": 1.0,
+          "candle_confirm": true,
+          "tp1_rr": 2.5,
+          "tp2_rr": 3.0
+        },
+        "trending_bear": {
+          "rsi_period": 18,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        },
+        "volatile_breakout": {
+          "rsi_period": 18,
+          "impulse_lookback": 30,
+          "fib_entry_low": 0.5,
+          "fib_entry_high": 0.786,
+          "sl_atr_mult": 2.0,
+          "candle_confirm": false,
+          "tp1_rr": 1.5,
+          "tp2_rr": 2.0
+        }
+      }
+    }
+  },
+  "weekly_breakout": {
+    "EURUSD": {
+      "atr_break_mult": 0.5,
+      "adx_threshold": 18,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 18,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "__global__": {
+      "sl_atr_mult": 1.0,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bull": {
+          "sl_atr_mult": 1.0,
+          "tp_rr": 1.5
+        }
+      }
+    },
+    "USDJPY": {
+      "atr_break_mult": 0.5,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "atr_break_mult": 0.5,
+          "adx_threshold": 20,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "AUDUSD": {
+      "atr_break_mult": 0.5,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "USDCAD": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 18,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.0,
+      "by_regime": {
+        "trending_bull": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 20,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "GOLD": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 25,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.5,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.5,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "NZDUSD": {
+      "atr_break_mult": 0.7,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        },
+        "volatile_breakout": {
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 1.5
+        }
+      }
+    },
+    "OILCash": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 20,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "BRENTCash": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "atr_break_mult": 0.5,
+          "adx_threshold": 25,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "NGASCash": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 20,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.0,
+      "by_regime": {
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 20,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "US100Cash": {
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 1.5,
+      "by_regime": {
+        "trending_bull": {
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        },
+        "volatile_breakout": {
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 1.5
+        },
+        "trending_bear": {
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "US500Cash": {
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 1.5,
+      "by_regime": {
+        "trending_bull": {
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 1.5
+        },
+        "trending_bear": {
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 1.5
+        },
+        "volatile_breakout": {
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 1.5
+        }
+      }
+    },
+    "BTCUSD": {
+      "atr_break_mult": 0.7,
+      "adx_threshold": 25,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 20,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 20,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "Tesla": {
+      "atr_break_mult": 0.5,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "Nvidia": {
+      "sl_atr_mult": 2.0,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "volatile_breakout": {
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.5
+        },
+        "trending_bull": {
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "Netflix": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 20,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 20,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "GBPUSD": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 18,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 18,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 18,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "SILVER": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "ETHUSD": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "atr_break_mult": 0.5,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "SOLUSD": {
+      "atr_break_mult": 0.5,
+      "adx_threshold": 18,
+      "sl_atr_mult": 2.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.5,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "XLMUSD": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 25,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "AdvMicroDev": {
+      "atr_break_mult": 0.7,
+      "adx_threshold": 18,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "BRENT-JUN26": {
+      "atr_break_mult": 0.3,
+      "adx_threshold": 25,
+      "sl_atr_mult": 2.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 25,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        },
+        "volatile_breakout": {
+          "atr_break_mult": 0.7,
+          "adx_threshold": 20,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 18,
+          "sl_atr_mult": 2.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0
+        }
+      }
+    },
+    "ON-Semiconductor": {
+      "atr_break_mult": 0.7,
+      "adx_threshold": 18,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "atr_break_mult": 0.3,
+          "adx_threshold": 18,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    }
+  },
+  "ema_trend_rider": {
+    "EURUSD": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.5
+        },
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "__global__": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 20,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "USDJPY": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.5,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "USDCAD": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "GOLD": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "AUDUSD": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 20,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "BRENTCash": {
+      "ema_fast": 25,
+      "ema_slow": 60,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 20,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "OILCash": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "volatile_breakout": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "NZDUSD": {
+      "ema_fast": 25,
+      "ema_slow": 60,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 20,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "SILVER": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 20,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "NGASCash": {
+      "ema_fast": 20,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 20,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 2.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 20,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "US100Cash": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 20,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "Tesla": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.5
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "BTCUSD": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "Nvidia": {
+      "ema_fast": 20,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "Google": {
+      "ema_fast": 20,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "XRPUSD": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "Facebook": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "Netflix": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "SOLUSD": {
+      "ema_fast": 25,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 20,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp_rr": 2.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 20,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        }
+      }
+    },
+    "GBPUSD": {
+      "ema_fast": 25,
+      "ema_slow": 60,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.0,
+          "tp_rr": 2.5
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "US500Cash": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "AdvMicroDev": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 2.0,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "ETHUSD": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 2.0,
+      "tp1_rr": 2.5,
+      "tp_rr": 3.5,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        },
+        "volatile_breakout": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.5
+        }
+      }
+    },
+    "NZDCAD": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "OILMn-JUN26": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 20,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "OIL-JUN26": {
+      "ema_fast": 13,
+      "ema_slow": 60,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 60,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 2.0,
+          "tp_rr": 3.0
+        },
+        "trending_bull": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 2.5,
+          "tp_rr": 3.0
+        },
+        "volatile_breakout": {
+          "ema_fast": 20,
+          "ema_slow": 60,
+          "sl_atr_mult": 2.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    }
+  },
+  "ema_scalp": {
+    "USDCHF": {
+      "ema_fast": 10,
+      "ema_slow": 18,
+      "rsi_min": 52,
+      "rsi_max": 65,
+      "atr_sl_mult": 1.0,
+      "adx_min": 25,
+      "ema_sep_mult": 0.05,
+      "max_spread_pips": 3.0,
+      "rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 10,
+          "ema_slow": 18,
+          "rsi_min": 52,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.0,
+          "adx_min": 25,
+          "ema_sep_mult": 0.05,
+          "max_spread_pips": 3.0,
+          "rr": 3.0
+        }
+      }
+    },
+    "__global__": {
+      "ema_fast": 13,
+      "ema_slow": 18,
+      "rsi_min": 40,
+      "rsi_max": 60,
+      "sl_pips": 10,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 18,
+          "rsi_min": 40,
+          "rsi_max": 60,
+          "sl_pips": 10,
+          "rr": 2.5
+        }
+      }
+    },
+    "EURUSD": {
+      "ema_fast": 13,
+      "ema_slow": 21,
+      "rsi_min": 52,
+      "rsi_max": 60,
+      "atr_sl_mult": 1.5,
+      "adx_min": 15,
+      "ema_sep_mult": 0.1,
+      "max_spread_pips": 3.0,
+      "rr": 1.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 21,
+          "rsi_min": 52,
+          "rsi_max": 60,
+          "atr_sl_mult": 1.5,
+          "adx_min": 15,
+          "ema_sep_mult": 0.1,
+          "max_spread_pips": 3.0,
+          "rr": 1.5
+        }
+      }
+    },
+    "AUDUSD": {
+      "ema_fast": 8,
+      "ema_slow": 18,
+      "rsi_min": 45,
+      "rsi_max": 65,
+      "atr_sl_mult": 1.5,
+      "adx_min": 25,
+      "ema_sep_mult": 0.1,
+      "max_spread_pips": 4.0,
+      "rr": 1.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 8,
+          "ema_slow": 18,
+          "rsi_min": 45,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.5,
+          "adx_min": 25,
+          "ema_sep_mult": 0.1,
+          "max_spread_pips": 4.0,
+          "rr": 1.5
+        }
+      }
+    },
+    "GBPUSD": {
+      "ema_fast": 13,
+      "ema_slow": 18,
+      "rsi_min": 40,
+      "rsi_max": 65,
+      "atr_sl_mult": 1.0,
+      "adx_min": 20,
+      "ema_sep_mult": 0.1,
+      "max_spread_pips": 4.0,
+      "rr": 3.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 13,
+          "ema_slow": 18,
+          "rsi_min": 40,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.0,
+          "adx_min": 20,
+          "ema_sep_mult": 0.1,
+          "max_spread_pips": 4.0,
+          "rr": 3.0
+        }
+      }
+    },
+    "GBPCAD": {
+      "ema_fast": 5,
+      "ema_slow": 26,
+      "rsi_min": 52,
+      "rsi_max": 70,
+      "atr_sl_mult": 1.0,
+      "adx_min": 25,
+      "ema_sep_mult": 0.05,
+      "max_spread_pips": 3.0,
+      "rr": 2.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 8,
+          "ema_slow": 18,
+          "rsi_min": 45,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.5,
+          "adx_min": 25,
+          "ema_sep_mult": 0.1,
+          "max_spread_pips": 4.0,
+          "rr": 1.5
+        }
+      }
+    },
+    "AUDCAD": {
+      "ema_fast": 10,
+      "ema_slow": 26,
+      "rsi_min": 52,
+      "rsi_max": 60,
+      "atr_sl_mult": 1.5,
+      "adx_min": 20,
+      "ema_sep_mult": 0.1,
+      "max_spread_pips": 5.0,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 10,
+          "ema_slow": 34,
+          "rsi_min": 40,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.0,
+          "adx_min": 25,
+          "ema_sep_mult": 0.05,
+          "max_spread_pips": 5.0,
+          "rr": 2.0
+        }
+      }
+    },
+    "AUDJPY": {
+      "ema_fast": 5,
+      "ema_slow": 34,
+      "rsi_min": 52,
+      "rsi_max": 65,
+      "atr_sl_mult": 1.0,
+      "adx_min": 20,
+      "ema_sep_mult": 0.2,
+      "max_spread_pips": 4.0,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 10,
+          "ema_slow": 18,
+          "rsi_min": 52,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.0,
+          "adx_min": 25,
+          "ema_sep_mult": 0.05,
+          "max_spread_pips": 3.0,
+          "rr": 3.0
+        }
+      }
+    },
+    "EURJPY": {
+      "ema_fast": 8,
+      "ema_slow": 18,
+      "rsi_min": 45,
+      "rsi_max": 60,
+      "atr_sl_mult": 1.0,
+      "adx_min": 15,
+      "ema_sep_mult": 0.2,
+      "max_spread_pips": 4.0,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 8,
+          "ema_slow": 18,
+          "rsi_min": 45,
+          "rsi_max": 60,
+          "atr_sl_mult": 1.0,
+          "adx_min": 15,
+          "ema_sep_mult": 0.2,
+          "max_spread_pips": 4.0,
+          "rr": 2.5
+        }
+      }
+    },
+    "US30Cash": {
+      "ema_fast": 8,
+      "ema_slow": 18,
+      "rsi_min": 50,
+      "rsi_max": 65,
+      "atr_sl_mult": 2.5,
+      "adx_min": 15,
+      "ema_sep_mult": 0.05,
+      "max_spread_pips": 4.0,
+      "rr": 1.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 10,
+          "ema_slow": 21,
+          "rsi_min": 52,
+          "rsi_max": 70,
+          "atr_sl_mult": 2.5,
+          "adx_min": 25,
+          "ema_sep_mult": 0.1,
+          "max_spread_pips": 4.0,
+          "rr": 2.0
+        }
+      }
+    },
+    "US100Cash": {
+      "ema_fast": 10,
+      "ema_slow": 26,
+      "rsi_min": 52,
+      "rsi_max": 60,
+      "atr_sl_mult": 1.5,
+      "adx_min": 20,
+      "ema_sep_mult": 0.1,
+      "max_spread_pips": 5.0,
+      "rr": 2.5,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 10,
+          "ema_slow": 26,
+          "rsi_min": 52,
+          "rsi_max": 60,
+          "atr_sl_mult": 1.5,
+          "adx_min": 20,
+          "ema_sep_mult": 0.1,
+          "max_spread_pips": 5.0,
+          "rr": 2.5
+        }
+      }
+    },
+    "USDJPY": {
+      "ema_fast": 10,
+      "ema_slow": 34,
+      "rsi_min": 40,
+      "rsi_max": 65,
+      "atr_sl_mult": 1.0,
+      "adx_min": 25,
+      "ema_sep_mult": 0.05,
+      "max_spread_pips": 5.0,
+      "rr": 2.0,
+      "by_regime": {
+        "quiet": {
+          "ema_fast": 10,
+          "ema_slow": 34,
+          "rsi_min": 40,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.0,
+          "adx_min": 25,
+          "ema_sep_mult": 0.05,
+          "max_spread_pips": 5.0,
+          "rr": 2.0
+        }
+      }
+    }
+  },
+  "bb_squeeze": {
+    "GBPUSD": {
+      "bb_period": 15,
+      "bb_std": 1.5,
+      "min_squeeze_bars": 7,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 1.5,
+      "tp_atr_mult": 2.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 15,
+          "bb_std": 1.5,
+          "min_squeeze_bars": 7,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 1.5,
+          "tp_atr_mult": 2.0
+        }
+      }
+    },
+    "__global__": {
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 3,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 3,
+          "sl_atr_mult": 1.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "EURJPY": {
+      "bb_period": 20,
+      "bb_std": 1.5,
+      "min_squeeze_bars": 3,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 2.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 20,
+          "bb_std": 1.5,
+          "min_squeeze_bars": 3,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 2.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "OILCash": {
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 7,
+      "sl_atr_mult": 1.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 7,
+          "sl_atr_mult": 1.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "USDJPY": {
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 5,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 1.5,
+      "tp_atr_mult": 2.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 5,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 1.5,
+          "tp_atr_mult": 2.0
+        }
+      }
+    },
+    "USDCHF": {
+      "bb_period": 15,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 5,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 1.5,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 15,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 5,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 1.5,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "US100Cash": {
+      "bb_period": 20,
+      "bb_std": 1.5,
+      "min_squeeze_bars": 3,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 2.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 20,
+          "bb_std": 1.5,
+          "min_squeeze_bars": 3,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 2.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "US30Cash": {
+      "bb_period": 25,
+      "bb_std": 1.5,
+      "min_squeeze_bars": 5,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 1.5,
+      "tp_atr_mult": 2.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 20,
+          "bb_std": 1.5,
+          "min_squeeze_bars": 5,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 2.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "EURUSD": {
+      "bb_period": 15,
+      "bb_std": 2.0,
+      "min_squeeze_bars": 5,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 2.0,
+      "tp_atr_mult": 3.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 15,
+          "bb_std": 2.0,
+          "min_squeeze_bars": 5,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 2.0,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "AUDUSD": {
+      "bb_period": 15,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 7,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 2.0,
+      "tp_atr_mult": 2.5,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 15,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 7,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 2.0,
+          "tp_atr_mult": 2.5
+        }
+      }
+    },
+    "AUDCAD": {
+      "bb_period": 25,
+      "bb_std": 1.5,
+      "min_squeeze_bars": 5,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 1.5,
+      "tp_atr_mult": 2.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 15,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 5,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 1.5,
+          "tp_atr_mult": 3.0
+        }
+      }
+    },
+    "GBPJPY": {
+      "bb_period": 20,
+      "bb_std": 2.0,
+      "min_squeeze_bars": 7,
+      "sl_atr_mult": 1.0,
+      "tp1_atr_mult": 1.0,
+      "tp_atr_mult": 2.0,
+      "by_regime": {
+        "quiet": {
+          "bb_period": 20,
+          "bb_std": 2.0,
+          "min_squeeze_bars": 7,
+          "sl_atr_mult": 1.0,
+          "tp1_atr_mult": 1.0,
+          "tp_atr_mult": 2.0
+        }
+      }
+    }
+  },
+  "vwap_reversion": {
+    "GBPUSD": {
+      "sigma_entry": 1.5,
+      "sigma_sl": 3.0,
+      "rsi_period": 9,
+      "min_rr_to_vwap": 1.0,
+      "vwap_std_window": 30,
+      "by_regime": {
+        "quiet": {
+          "sigma_entry": 1.5,
+          "sigma_sl": 3.0,
+          "rsi_period": 9,
+          "min_rr_to_vwap": 1.0,
+          "vwap_std_window": 30
+        }
+      }
+    },
+    "__global__": {
+      "sigma_entry": 1.5,
+      "sigma_sl": 3.0,
+      "rsi_period": 9,
+      "min_rr_to_vwap": 1.0,
+      "vwap_std_window": 30,
+      "by_regime": {
+        "quiet": {
+          "sigma_entry": 1.5,
+          "sigma_sl": 3.0,
+          "rsi_period": 9,
+          "min_rr_to_vwap": 1.0,
+          "vwap_std_window": 30
+        }
+      }
+    }
+  }
+}
