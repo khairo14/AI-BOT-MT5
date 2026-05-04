@@ -988,7 +988,8 @@ def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_
 
 def _model_key(symbol: str, trading_type: str) -> str:
     """Composite key: e.g. 'EURUSD_scalping'"""
-    return f"{symbol}_{trading_type}"
+    clean = symbol.rstrip("#+*!")
+    return f"{clean}_{trading_type}"
 
 
 # Application-level singleton

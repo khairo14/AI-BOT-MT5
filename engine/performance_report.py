@@ -54,6 +54,9 @@ class PerformanceReporter:
         if not trades:
             return {
                 "total_trades": 0,
+                "wins": 0,
+                "losses": 0,
+                "breakeven": 0,
                 "win_rate": 0.0,
                 "profit_factor": 0.0,
                 "total_profit": 0.0,
@@ -66,6 +69,9 @@ class PerformanceReporter:
         if not valid_trades:
             return {
                 "total_trades": len(trades),
+                "wins": 0,
+                "losses": 0,
+                "breakeven": 0,
                 "win_rate": 0.0,
                 "profit_factor": 0.0,
                 "total_profit": 0.0,

@@ -8,20 +8,16 @@
     "day_trading": 20,
     "swing": 25
   },
-  "exclude_symbols": [
-    "XAUAUD", "XAUEUR", "XAGGBP", "XAGEUR",
-    "CHFJPY", "AUDNZD", "EURCAD", "EURNZD",
-    "CADCHF", "CADJPY", "NZDCHF", "NZDJPY"
-  ],
+  "exclude_symbols": [],
   "trading_types": {
     "scalping": {
       "enabled": true,
       "description": "High-frequency intraday trading (M1/M5 timeframes)",
-      "allowed_categories": ["forex", "us_index"],
+      "allowed_categories": ["forex", "indices"],
       "criteria": {
         "atr_min_pips": 5.0,
         "atr_max_pips": 50.0,
-        "max_spread_pips": 2.0,
+        "max_spread_pips": 3.0,
         "min_daily_volume_lots": 1000,
         "adx_min": 20,
         "adx_max": 60,
@@ -42,7 +38,7 @@
     "day_trading": {
       "enabled": true,
       "description": "Intraday position trading (M15/H1 timeframes)",
-      "allowed_categories": ["forex", "us_index", "eu_index", "commodity", "stock"],
+      "allowed_categories": ["forex", "indices", "commodity", "stock"],
       "criteria": {
         "atr_min_pips": 10.0,
         "atr_max_pips": 150.0,
@@ -67,7 +63,7 @@
     "swing": {
       "enabled": true,
       "description": "Multi-day position trading (H4/D1 timeframes)",
-      "allowed_categories": ["forex", "us_index", "eu_index", "commodity", "crypto", "stock"],
+      "allowed_categories": ["forex", "indices", "commodity", "crypto", "stock"],
       "criteria": {
         "atr_min_pips": 20.0,
         "atr_max_pips": 500.0,
@@ -103,17 +99,11 @@
       "pip_multiplier": 10.0,
       "session_weight": 1.0
     },
-    "us_index": {
+    "indices": {
       "enabled": true,
       "priority": 3,
       "pip_multiplier": 0.1,
       "session_weight": 0.9
-    },
-    "eu_index": {
-      "enabled": true,
-      "priority": 4,
-      "pip_multiplier": 0.1,
-      "session_weight": 0.8
     },
     "commodity": {
       "enabled": true,

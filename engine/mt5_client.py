@@ -236,6 +236,10 @@ class MT5Client:
             "stops_level":   info.trade_stops_level,
             # MT5 SYMBOL_TRADE_MODE: 0=disabled, 1=longonly, 2=shortonly, 3=closeonly, 4=full
             "trade_mode":    info.trade_mode,
+            "path":          info.path,
+            "currency_base": info.currency_base,
+            "currency_profit":info.currency_profit,
+            "description":   info.description,
         }
 
     def get_current_price(self, symbol: str) -> Optional[dict]:

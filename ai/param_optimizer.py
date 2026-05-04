@@ -143,12 +143,10 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "bb_period":          [15, 20, 25],
         "bb_std":             [1.5, 2.0, 2.5],
         "min_squeeze_bars":   [3, 5, 7],
-        "max_squeeze_bars":   [20, 30, 0],      # new: 0 = disabled
+        "max_squeeze_bars":   [20, 0],      # new: 0 = disabled
         "sl_atr_mult":        [1.0, 1.5, 2.0],
-        "tp1_atr_mult":       [1.0, 1.5, 2.0],
         "tp_atr_mult":        [2.0, 2.5, 3.0],
-        "adx_period":         [10, 14],          # new
-        "adx_min":            [15, 18, 20, 25],  # new
+        "adx_min":            [15, 20, 25],  # new
         "ema_trend_period":   [30, 50, 70],
         "max_spread_pips":    [3.0, 4.0, 5.0],
     },
@@ -586,7 +584,10 @@ class ParamOptimizer:
         self._load_status()
 
     # ── Public API ────────────────────────────────────────────────────────────
-
+    @staticmethod
+    def _key(strategy_name: str, symbol: str) -> str:
+        return f"{strategy_name}__{symbol.rstrip('#+*!')}"
+    
     def optimize_async(
         self,
         strategy_name: str,
@@ -595,7 +596,7 @@ class ParamOptimizer:
         trading_type: str,
     ) -> bool:
         """Start background optimization or queue if at limit. Returns False if already running/queued (duplicate)."""
-        key = f"{strategy_name}__{symbol}"
+        key = self._key(strategy_name, symbol)
         with self._lock:
             # Prevent duplicates: already running or already in queue
             if key in self._running:
@@ -634,7 +635,8 @@ class ParamOptimizer:
         with self._lock:
             data = self._load_opt()
         strat = data.get(strategy_name, {})
-        sym_entry = strat.get(symbol) or strat.get("__global__") or {}
+        clean = symbol.rstrip("#+*!")
+        sym_entry = strat.get(clean) or strat.get("__global__") or {}
 
         if regime and isinstance(sym_entry, dict):
             by_regime = sym_entry.get("by_regime", {})
@@ -652,7 +654,7 @@ class ParamOptimizer:
         - Never been optimized for this pair, OR
         - Last optimized > BACKTEST_COOLDOWN_HOURS ago AND recent win_rate low
         """
-        key = f"{strategy_name}__{symbol}"
+        key = self._key(strategy_name, symbol)
         with self._lock:
             info = self._status.get(key, {})
 
@@ -746,7 +748,7 @@ class ParamOptimizer:
             if not self._queue or len(self._running) >= MAX_CONCURRENT_OPT:
                 return
             strategy_name, symbol, df, trading_type = self._queue.popleft()
-            key = f"{strategy_name}__{symbol}"
+            key = self._key(strategy_name, symbol)
             self._running.add(key)
         t = threading.Thread(
             target=self._optimize,
@@ -791,7 +793,7 @@ class ParamOptimizer:
                 notification_manager.add(
                     type="optimizer_complete",
                     title="Optimization Complete",
-                    message=f"{strategy_name} optimized for {symbol} (score: {score:.3f})",
+                    message=f"{self._key(strategy_name, symbol)} optimized for {symbol} (score: {score:.3f})",
                     severity="success",
                     metadata={
                         "strategy": strategy_name,
@@ -866,8 +868,8 @@ class ParamOptimizer:
 
         # Per-regime tracking: {regime: (best_score, best_params)}
         regime_best: dict[str, tuple[float, dict]] = {}
-
-        spread_r  = SPREAD_COST_R_SYMBOL.get(symbol, SPREAD_COST_R.get(trading_type, 0.05))
+        clean = symbol.rstrip("#+*!")
+        spread_r  = SPREAD_COST_R_SYMBOL.get(clean, SPREAD_COST_R.get(trading_type, 0.05))
         bt_window = _BT_WINDOW_STRATEGY.get(strategy_name, _BT_WINDOW.get(trading_type, 500))
 
         # Build secondary-timeframe extras for strategies that need them.
@@ -1025,7 +1027,8 @@ class ParamOptimizer:
                     entry[_k] = _MIN_RR
             if existing_by_regime:
                 entry["by_regime"] = existing_by_regime
-            data[strategy_name][symbol] = entry
+            clean = symbol.rstrip("#+*!")
+            data[strategy_name][clean] = entry
             if "__global__" not in data[strategy_name]:
                 data[strategy_name]["__global__"] = entry
             # Atomic write

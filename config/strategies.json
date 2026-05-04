@@ -1,11 +1,6 @@
 {
   "scalping": {
     "active_strategies": ["ema_scalp", "bb_squeeze", "vwap_reversion", "stoch_rsi_pullback"],
-    "symbol_strategy_override": {
-      "US100Cash": ["bb_squeeze", "vwap_reversion"],
-      "US30Cash":  ["bb_squeeze", "vwap_reversion"],
-      "USDCHF":    ["ema_scalp"]
-    },
     "params": {
       "ema_scalp": {
         "ema_fast": 8,
@@ -69,12 +64,6 @@
     "atr_trail_timeframe": "H1",
     "atr_trail_period": 14,
     "atr_trail_multiplier": 1.5,
-    "symbol_strategy_override": {
-      "BTCUSD":  ["sr_breakout"],
-      "ETHUSD":  ["sr_breakout"],
-      "Tesla":  ["macd_ema_trend", "sr_breakout"],
-      "Nvidia": ["macd_ema_trend", "sr_breakout"]
-    },
     "params": {
       "macd_ema_trend": {
         "ema_fast": 20,
@@ -115,13 +104,6 @@
     "atr_trail_timeframe": "H4",
     "atr_trail_period": 14,
     "atr_trail_multiplier": 2.0,
-    "symbol_strategy_override": {
-      "BTCUSD":   ["fibonacci_rsi", "weekly_breakout"],
-      "ETHUSD":   ["fibonacci_rsi", "weekly_breakout"],
-      "NGASCash": ["weekly_breakout"],
-      "Netflix":     ["weekly_breakout"],
-      "AdvMicroDev": ["weekly_breakout"]
-    },
     "params": {
       "ema_trend_rider": {
         "ema_fast": 21,

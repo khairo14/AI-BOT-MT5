@@ -198,11 +198,12 @@ class SessionFilter:
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _get_category(self, symbol: str) -> str:
+        clean = symbol.upper().rstrip("#+*!")
         with self._sym_cat_lock:
             if not self._sym_cat or _time.monotonic() - self._sym_cat_loaded_at > 300:
                 self._sym_cat = _load_symbol_categories()
                 self._sym_cat_loaded_at = _time.monotonic()
-        return self._sym_cat.get(symbol.upper(), "forex")
+        return self._sym_cat.get(clean, "forex")
 
     @staticmethod
     def _category_to_session(cat: str) -> str:

@@ -125,7 +125,8 @@ _ASSET_GROUP_BUY: dict[str, str] = {
 
 def _usd_direction(symbol: str, direction: str) -> str | None:
     """Return 'USD_LONG' or 'USD_SHORT' for this trade, or None if not a USD pair."""
-    buy_polarity = _USD_POLARITY_BUY.get(symbol)
+    clean = symbol.rstrip("#+*!")
+    buy_polarity = _USD_POLARITY_BUY.get(clean)
     if buy_polarity is None:
         return None
     return buy_polarity if direction == "BUY" else (
@@ -135,7 +136,8 @@ def _usd_direction(symbol: str, direction: str) -> str | None:
 
 def _asset_group_direction(symbol: str, direction: str) -> str | None:
     """Return a directional group tag for non-USD correlated assets, or None."""
-    buy_tag = _ASSET_GROUP_BUY.get(symbol)
+    clean = symbol.rstrip("#+*!")
+    buy_tag = _ASSET_GROUP_BUY.get(clean)
     if buy_tag is None:
         return None
     # Invert last word for SELL direction (CRYPTO_LONG → CRYPTO_SHORT etc.)
@@ -312,8 +314,7 @@ class StrategyRunner:
             symbols = self._enabled_symbols(trading_type)
             active_strategies = self._active_strategies(trading_type)
             for symbol in symbols:
-                per_symbol_strats = self._per_symbol_overrides(trading_type, symbol) or active_strategies
-                for strat_name in per_symbol_strats:
+                for strat_name in active_strategies:
                     sig = self._run_strategy(trading_type, symbol, strat_name)
                     if sig:
                         new_signals.append(sig)
@@ -707,9 +708,8 @@ class StrategyRunner:
             logger.warning(f"run_mode [{trading_type}]: account pre-fetch failed: {_acct_exc}")
 
         for symbol in symbols:
-            per_symbol_strats = self._per_symbol_overrides(trading_type, symbol) or active_strategies
             candidates: list[StrategySignal] = []
-            for strat_name in per_symbol_strats:
+            for strat_name in active_strategies:
                 sig = self._run_strategy(trading_type, symbol, strat_name, _account=_mode_account)
                 if sig:
                     candidates.append(sig)
@@ -933,14 +933,6 @@ class StrategyRunner:
 
     def _active_strategies(self, trading_type: str) -> list[str]:
         return self._strategies_cfg.get(trading_type, {}).get("active_strategies", [])
-
-    def _per_symbol_overrides(self, trading_type: str, symbol: str) -> list[str] | None:
-        return (
-            self._strategies_cfg
-            .get(trading_type, {})
-            .get("symbol_strategy_override", {})
-            .get(symbol)
-        )
 
     def _strategy_params(self, strat_name: str, symbol: str = "", regime: str | None = None) -> dict:
         """Return merged params: strategies.json defaults + optimized overrides.

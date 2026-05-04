@@ -29,9 +29,7 @@ from ai.predictor import predictor, TRADING_TYPE_TF
 # Per-strategy bar-fetch TF overrides; take precedence over TRADING_TYPE_TF.
 # vwap_reversion executes on M1 at runtime — the optimizer must train on M1 bars
 # so parameter search happens on the same resolution the strategy actually sees.
-_STRATEGY_TF_OVERRIDE: dict[str, str] = {
-    "vwap_reversion": "M1",
-}
+
 from ai.rl_agent import rl_manager
 from ai.trade_memory import memory
 
@@ -41,7 +39,7 @@ TRADING_TYPE = Literal["scalping", "day_trading", "swing"]
 
 # Default bar counts per trading type — match run_retrain.py and auto-retrain settings.
 _TRAIN_BARS: dict[str, int] = {
-    "scalping":    200_000,  # M5  ≈ 2 years
+    "scalping":    250_000,  # M5  ≈ 2.4 years
     "day_trading":  50_000,  # H1  ≈ 5.7 years
     "swing":         30_000,  # H4  ≈ 13.7 years
 }
@@ -129,7 +127,7 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
                 # Scalping: use date-range fetch to get full 2-year M5 dataset
                 if trading_type == "scalping":
                     _date_to = datetime.now(tz=timezone.utc)
-                    _date_from = _date_to - timedelta(days=694)
+                    _date_from = _date_to - timedelta(days=868)
                     df = await asyncio.to_thread(
                         client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to
                     )
@@ -180,7 +178,7 @@ async def train_symbol(symbol: str, req: TrainRequest = TrainRequest()):
     if req.trading_type == "scalping":
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         _date_to = _dt.now(tz=_tz.utc)
-        _date_from = _date_to - _td(days=694)
+        _date_from = _date_to - _td(days=868)
         df = await asyncio.to_thread(client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to)
     else:
         df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, bars)
@@ -1158,7 +1156,7 @@ def optimizer_status():
 # These cover 2+ years of history so UI-triggered optimizations are consistent
 # with the standalone run and will NOT downgrade already-optimized results.
 _OPT_BARS: dict[str, int] = {
-    "scalping":    200_000,   # M5  ~2 years
+    "scalping":    250_000,   # M5  ~2.4 years
     "day_trading":  50_000,   # H1  ~5.7 years
     "swing":         30_000,   # H4  ~13.7 years
 }
@@ -1189,12 +1187,12 @@ async def run_optimizer(
     if client is None or not client.is_connected():
         raise HTTPException(status_code=503, detail="MT5 not connected")
 
-    tf_str  = _STRATEGY_TF_OVERRIDE.get(strategy_name) or TRADING_TYPE_TF.get(req.trading_type, "H1")
-    n_bars  = req.bars or _OPT_BARS.get(req.trading_type, 17_000)
+    tf_str  = TRADING_TYPE_TF.get(req.trading_type, "H1")
+    n_bars  = req.bars or _OPT_BARS.get(req.trading_type, 50_000)
     # Scalping: use date-range fetch to get full 2-year dataset (M5 default; M1 for vwap_reversion)
     if req.trading_type == "scalping" and req.bars == 0:
         _date_to   = datetime.now(tz=timezone.utc)
-        _date_from = _date_to - timedelta(days=694)
+        _date_from = _date_to - timedelta(days=868)
         df = await asyncio.to_thread(client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to)
     else:
         df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
@@ -1270,7 +1268,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                     symbols.append(s)
 
             # ── Phase 1: fetch each (symbol, tf) once, 300 ms between pairs ──
-            n_bars = req.bars or _OPT_BARS.get(trading_type, 17_000)
+            n_bars = req.bars or _OPT_BARS.get(trading_type, 50_000)
             for symbol in symbols:
                 if not symbol:
                     continue
@@ -1279,7 +1277,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                     # Scalping: use date-range fetch to get full 2-year M5 dataset
                     if trading_type == "scalping" and req.bars == 0:
                         _date_to   = datetime.now(tz=timezone.utc)
-                        _date_from = _date_to - timedelta(days=694)
+                        _date_from = _date_to - timedelta(days=868)
                         df = await asyncio.to_thread(
                             client.get_ohlcv_range, symbol, tf_str, _date_from, _date_to
                         )
@@ -1287,30 +1285,6 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                         df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
                     ohlcv_cache[cache_key] = df
                 await asyncio.sleep(0.3)  # rest between pairs — gives live bot MT5 lock
-
-            # ── Phase 1b: per-strategy TF-override fetches ─────────────────────
-            # Fetch alternate-TF bars for strategies that deviate from the default
-            # trading-type TF (e.g. vwap_reversion needs M1, not M5, to match its
-            # runtime execution TF so parameter search is on the same resolution).
-            for _strat_ovr in active:
-                _alt_tf = _STRATEGY_TF_OVERRIDE.get(_strat_ovr)
-                if not _alt_tf or _alt_tf == tf_str:
-                    continue
-                for symbol in symbols:
-                    if not symbol:
-                        continue
-                    _alt_key = (symbol, _alt_tf)
-                    if _alt_key not in ohlcv_cache:
-                        if trading_type == "scalping" and req.bars == 0:
-                            _date_to   = datetime.now(tz=timezone.utc)
-                            _date_from = _date_to - timedelta(days=694)
-                            df = await asyncio.to_thread(
-                                client.get_ohlcv_range, symbol, _alt_tf, _date_from, _date_to
-                            )
-                        else:
-                            df = await asyncio.to_thread(client.get_ohlcv, symbol, _alt_tf, n_bars)
-                        ohlcv_cache[_alt_key] = df
-                    await asyncio.sleep(0.3)
 
             # ── Mode boundary rest ─────────────────────────────────────────────
             await asyncio.sleep(2.0)
@@ -1322,7 +1296,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                 for symbol in symbols:
                     if not symbol:
                         continue
-                    _fetch_tf = _STRATEGY_TF_OVERRIDE.get(strat) or tf_str
+                    _fetch_tf = tf_str
                     df = ohlcv_cache.get((symbol, _fetch_tf))
                     if df is None or df.empty:
                         continue

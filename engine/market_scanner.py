@@ -241,28 +241,29 @@ class MarketScanner:
         results = []
         
         for symbol in symbols:
-            # Get symbol category
-            category = self._get_symbol_category(symbol)
+            # Fetch symbol info ONCE — used by category detection and metrics
+            sym_info = self.mt5.get_symbol_info(symbol)
+            if not sym_info:
+                continue
+            
+            # Dynamic category from MT5 path
+            category = self._get_category_from_path(sym_info.get("path", ""))
             if not category:
                 continue
             
-            # Check if category is enabled
+            # Check if category is enabled in config
             cat_cfg = self.cfg["categories"].get(category)
             if not cat_cfg or not cat_cfg.get("enabled"):
                 continue
-
-            # Enforce allowed_categories for this trading type (strategy compatibility)
+            
+            # Enforce allowed_categories for this trading type
             allowed = type_cfg.get("allowed_categories")
             if allowed and category not in allowed:
                 continue
-
-            # Calculate all metrics
+            
+            # Calculate all metrics — pass the already-fetched sym_info
             metrics = self._calculate_metrics(
-                symbol, 
-                timeframe, 
-                lookback_bars,
-                category,
-                cat_cfg
+                symbol, timeframe, lookback_bars, category, cat_cfg, sym_info
             )
             
             if not metrics:
@@ -315,7 +316,8 @@ class MarketScanner:
         timeframe: str,
         lookback_bars: int,
         category: str,
-        cat_cfg: dict
+        cat_cfg: dict,
+        sym_info: dict,  # NEW: pre-fetched from caller
     ) -> Optional[Dict[str, Any]]:
         """
         Calculate all raw metrics for a symbol.
@@ -323,7 +325,6 @@ class MarketScanner:
         """
         try:
             # Get symbol info
-            sym_info = self.mt5.get_symbol_info(symbol)
             if not sym_info:
                 return None
 
@@ -366,7 +367,7 @@ class MarketScanner:
             current_price = float(df["close"].iloc[-1])
             
             # Trading hours check
-            trading_hours_active = self._is_trading_hours(symbol, category)
+            trading_hours_active = self._is_trading_hours(symbol, category, sym_info)
             
             return {
                 "atr_pips": atr_pips,
@@ -530,7 +531,7 @@ class MarketScanner:
         
         return round(rsi, 1)
     
-    def _is_trading_hours(self, symbol: str, category: str) -> bool:
+    def _is_trading_hours(self, symbol: str, category: str, sym_info: dict = None) -> bool:
         """Check if symbol is in active trading hours."""
         if not self.cfg["filters"].get("respect_trading_hours"):
             return True
@@ -553,19 +554,36 @@ class MarketScanner:
         if category == "crypto":
             return True
         
-        # US markets: 14:30-21:00 UTC (Monday-Friday)
-        if category in ["us_index", "stock"]:
-            if weekday >= 5:  # Weekend
-                return False
-            return 14 <= hour < 21
-        
-        # EU markets: 08:00-16:30 UTC (Monday-Friday)
-        if category == "eu_index":
+        if category in ("indices", "stock"):
             if weekday >= 5:
                 return False
-            return 8 <= hour < 17
+            
+            region = None
+            if sym_info:
+                segments = sym_info.get("path", "").split("\\")
+                # Stocks: region is the second segment (Stocks\US\Tesla)
+                if segments and segments[0].lower() == "stocks" and len(segments) >= 2:
+                    region = segments[1].upper()
+                # Indices: infer region from profit currency
+                if region is None:
+                    currency = sym_info.get("currency_profit", "").upper()
+                    if currency == "USD": region = "US"
+                    elif currency == "EUR": region = "EU"
+                    elif currency in ("JPY", "AUD", "HKD", "SGD", "CNH"): region = "ASIA"
+                    elif currency == "GBP": region = "EU"
+                    elif currency == "ZAR": region = "ASIA"
+            
+            if region == "US":
+                return 14 <= hour < 21
+            elif region == "EU":
+                return 8 <= hour < 17
+            elif region == "ASIA":
+                return 23 <= hour or hour < 8
+            return weekday < 5
         
-        # Default: assume 24/5
+        if category == "commodity":
+            return weekday < 5
+        
         return weekday < 5
     
     # -----------------------------------------------------------------------
@@ -710,36 +728,37 @@ class MarketScanner:
     # -----------------------------------------------------------------------
     # Utility
     # -----------------------------------------------------------------------
-    
-    def _get_symbol_category(self, symbol: str) -> Optional[str]:
-        """Determine symbol category (forex, crypto, us_index, etc.)."""
-        symbol_upper = symbol.upper()
+    @staticmethod
+    def _get_category_from_path(path: str) -> Optional[str]:
+        """Determine symbol category dynamically from MT5's symbol group path.
         
-        # Forex pairs (7 characters, ends with USD/JPY/EUR/GBP/CHF/CAD/AUD/NZD)
-        forex_endings = ["USD", "JPY", "EUR", "GBP", "CHF", "CAD", "AUD", "NZD"]
-        if len(symbol) == 6 and any(symbol_upper.endswith(end) for end in forex_endings):
+        Reads the 'path' field from get_symbol_info() which contains the full
+        Market Watch tree path, e.g. 'Forex\\Standard Ultra Low\\Majors\\EURUSD#'
+        The second-to-last segment is the asset group.
+        """
+        if not path:
+            return None
+
+        segments = path.split("\\")
+        first = segments[0].lower() if segments else ""
+        
+        if first == "forex":
             return "forex"
-        
-        # Crypto
-        crypto_symbols = ["BTC", "ETH", "XRP", "SOL", "ADA", "DOT", "DOGE", "LINK"]
-        if any(crypto in symbol_upper for crypto in crypto_symbols):
+        if first in ("cryptocurrencies", "crypto"):
             return "crypto"
-        
-        # US indices
-        if any(x in symbol_upper for x in ["US100", "US30", "US500", "NAS100", "DOW", "SPX"]):
-            return "us_index"
-        
-        # EU indices
-        if any(x in symbol_upper for x in ["GER40", "GER30", "UK100", "FRA40", "ESP35", "EU50"]):
-            return "eu_index"
-        
-        # Commodities
-        commodities = ["GOLD", "SILVER", "XAUUSD", "XAGUSD", "OIL", "BRENT", "NGAS", "WTI"]
-        if any(com in symbol_upper for com in commodities):
-            return "commodity"
-        
-        # Stocks (everything else with proper formatting)
-        return "stock"
+        if first == "stocks":
+            return "stock"
+        if first == "indices":
+            return "indices"
+        # Derivatives group contains metals, energies, and cash indices
+        if first == "derivatives":
+            for seg in segments:
+                s = seg.lower()
+                if s in ("indices", "index"):
+                    return "indices"
+                if s in ("metals", "metal") or s in ("energies", "energy"):
+                    return "commodity"
+        return None
     
     def _is_cache_valid(self) -> bool:
         """Check if cached results are still valid."""

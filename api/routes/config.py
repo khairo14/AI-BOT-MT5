@@ -310,44 +310,13 @@ def get_available_symbols(client: MT5Client = Depends(get_client)):
     if not raw:
         return {"symbols": [], "grouped": {}}
 
-    # Category detection — ordered most-specific to least-specific
-    def _category(name: str) -> str:
-        u = name.upper()
-        forex_ccys = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
-                      "SGD", "HKD", "NOK", "SEK", "DKK", "MXN", "ZAR", "TRY",
-                      "PLN", "CZK", "HUF", "CNH"]
-        is_forex = (
-            len(name) == 6
-            and any(u.startswith(c) for c in forex_ccys)
-            and any(u.endswith(c) for c in forex_ccys)
-        )
-        if is_forex:
-            majors = {"EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"}
-            return "forex_major" if u in majors else "forex_minor"
-        crypto_tokens = ["BTC", "ETH", "XRP", "SOL", "ADA", "BNB", "DOGE",
-                         "MATIC", "DOT", "AVAX", "LINK", "LTC", "XLM", "UNI",
-                         "ATOM", "FIL", "TRX", "ALGO", "VET", "FTM"]
-        if any(tok in u for tok in crypto_tokens):
-            return "crypto"
-        if any(x in u for x in ["GOLD", "XAU", "SILVER", "XAG", "PLAT", "PALL"]):
-            return "precious_metals"
-        if any(x in u for x in ["OIL", "BRENT", "WTI", "NGAS", "GAS", "COCOA",
-                                  "COFFEE", "CORN", "WHEAT", "SUGAR", "COTTON"]):
-            return "commodities"
-        if any(x in u for x in ["US100", "US30", "US500", "SPX", "NAS", "DOW",
-                                  "GER", "UK100", "DAX", "CAC", "NIKKEI", "AUS",
-                                  "HK50", "JP225", "STOXX", "FTSE", "SPI"]):
-            return "indices"
-        # Everything else (stocks, ETFs, bonds)
-        return "stocks"
-
     grouped: dict[str, list[str]] = {}
     for sym in raw:
-        name = sym.name
-        cat = _category(name)
-        grouped.setdefault(cat, [])
-        if name not in grouped[cat]:
-            grouped[cat].append(name)
+            name = sym.name
+            cat = _category_from_path(sym.path)
+            grouped.setdefault(cat, [])
+            if name not in grouped[cat]:
+                grouped[cat].append(name)
 
     # Sort each category alphabetically
     for cat in grouped:
@@ -355,6 +324,31 @@ def get_available_symbols(client: MT5Client = Depends(get_client)):
 
     flat = sorted({sym.name for sym in raw})
     return {"symbols": flat, "grouped": grouped}
+
+def _category_from_path(path: str) -> str:
+    """Determine category dynamically from MT5's symbol group path."""
+    if not path:
+        return "other"
+    
+    segments = path.split("\\")
+    first = segments[0].lower() if segments else ""
+    
+    if first == "forex":
+        return "forex"
+    if first in ("cryptocurrencies", "crypto"):
+        return "crypto"
+    if first == "stocks":
+        return "stocks"
+    if first == "indices":
+        return "indices"
+    if first == "derivatives":
+        for seg in segments:
+            s = seg.lower()
+            if s in ("indices", "index"):
+                return "indices"
+            if s in ("metals", "metal") or s in ("energies", "energy"):
+                return "commodities"
+    return "other"
 
 
 # ---------------------------------------------------------------------------
@@ -364,15 +358,6 @@ def get_available_symbols(client: MT5Client = Depends(get_client)):
 @router.get("/strategies")
 def get_strategies_config():
     return _load("strategies.json")
-
-
-# Paths inside strategies.json where new keys are allowed (open-ended per-symbol dicts)
-_STRATEGIES_OPEN_PATHS = frozenset({
-    "scalping.symbol_strategy_override",
-    "day_trading.symbol_strategy_override",
-    "swing.symbol_strategy_override",
-})
-
 
 @router.patch("/strategies")
 def update_strategies_config(body: PatchRequest):
@@ -401,7 +386,7 @@ def update_strategies_config(body: PatchRequest):
                                f"Valid names: {sorted(_KNOWN_STRATEGIES)}",
                     )
     current = _load("strategies.json")
-    _validate_known_keys(body.data, current, allow_new_at=_STRATEGIES_OPEN_PATHS)
+    _validate_known_keys(body.data, current)
     _deep_merge(current, body.data)
     _save("strategies.json", current)
     return current

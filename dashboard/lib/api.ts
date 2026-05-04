@@ -525,8 +525,13 @@ export interface ProfitabilityReport {
   };
 }
 
-export const fetchProfitabilityReport = (days?: number): Promise<ProfitabilityReport> =>
-  api.get(`/profitability/${days ? `?days=${days}` : ""}`).then((r) => r.data);
+export const fetchProfitabilityReport = (days?: number, account?: string): Promise<ProfitabilityReport> => {
+  const params = new URLSearchParams();
+  if (days) params.append("days", String(days));
+  if (account && account !== "all") params.append("account", account);
+  const qs = params.toString();
+  return api.get(`/profitability/${qs ? `?${qs}` : ""}`).then((r) => r.data);
+};
 
 export const fetchProfitabilityStatus = (): Promise<{
   task: string;

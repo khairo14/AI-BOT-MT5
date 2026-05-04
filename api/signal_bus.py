@@ -2053,7 +2053,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             try:
                 from ai.predictor import predictor, TRADING_TYPE_TF
                 from ai.trade_memory import memory as _mem
-                _sym   = signal["symbol"]
+                _sym   = signal["symbol"].rstrip("#+*!")
                 _type  = trading_type
                 _key   = f"{_sym}_{_type}"
                 _now_ts = time.monotonic()
@@ -2061,7 +2061,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     raise Exception(f"retrain dedup cooldown active for {_key}")
                 _total = len([
                     o for o in _mem.recent(n=500, live_only=True)
-                    if o.get("symbol") == _sym and o.get("trading_type") == _type
+                    if o.get("symbol").rstrip("#+*!") == _sym and o.get("trading_type") == _type
                 ])
 
                 # Trigger 0: no model exists yet for this symbol×mode — bootstrap
@@ -2103,7 +2103,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 if not _retrain and not predictor.is_training(_sym, _type):
                     _recent_trades = [
                         o for o in _mem.recent(n=50, live_only=True)
-                        if o.get("symbol") == _sym and o.get("trading_type") == _type
+                        if o.get("symbol").rstrip("#+*!") == _sym and o.get("trading_type") == _type
                     ][-8:]
                     if len(_recent_trades) == 8 and all(o.get("profit", 0) < 0 for o in _recent_trades):
                         _retrain = True

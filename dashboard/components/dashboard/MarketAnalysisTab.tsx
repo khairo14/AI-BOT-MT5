@@ -119,36 +119,31 @@ function scoreColor(score: number | null): string {
   return "text-red-400";
 }
 
-function deriveCategory(sym: string): string {
+function deriveCategory(sym: string, scanCategory?: string): string {
+  if (scanCategory) return scanCategory;
+  
   const u = sym.toUpperCase();
-  if (
-    u.includes("CASH") ||
-    ["US100", "US30", "US500", "UK100", "GER40", "EU50"].some((k) => u.includes(k))
-  )
-    return "indices";
-  if (
-    u.includes("GOLD") ||
-    u.includes("SILVER") ||
-    u.includes("OIL") ||
-    u.includes("BRENT") ||
-    u.includes("NGAS")
-  )
+  
+  // Commodities — check BEFORE indices since BRENTCash contains "CASH"
+  if (["GOLD", "SILVER", "OIL", "BRENT", "NGAS", "XAU", "XAG"].some((k) => u.includes(k)))
     return "commodities";
-  if (
-    ["BTC", "ETH", "XRP", "SOL", "BCH", "XLM", "DOGE", "ADA", "DOT"].some((c) =>
-      u.includes(c)
-    )
-  )
+    
+  // Indices (exclude commodities first)
+  if (["US100", "US30", "US500", "UK100", "GER40", "EU50", "FRA40", "JP225", "AUS200"].some((k) => u.includes(k)))
+    return "indices";
+  
+  // Crypto
+  if (["BTC", "ETH", "XRP", "SOL", "BCH", "XLM", "DOGE", "ADA", "DOT", "LTC"].some((c) => u.includes(c)))
     return "crypto";
-  const FX = [
-    "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD",
-    "SGD", "HKD", "NOK", "SEK", "MXN", "TRY", "ZAR",
-  ];
-  const isFX =
-    FX.some((c) => u.startsWith(c)) && FX.some((c) => u.endsWith(c));
-  if (isFX) return "forex";
+  
+  // Forex
+  const FX = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD", "SGD", "HKD", "NOK", "SEK", "MXN", "TRY", "ZAR"];
+  if (FX.some((c) => u.startsWith(c)) && FX.some((c) => u.endsWith(c)))
+    return "forex";
+  
   // Futures (contains hyphen)
   if (u.includes("-")) return "futures";
+  
   return "stocks";
 }
 
@@ -219,9 +214,10 @@ export default function MarketAnalysisTab({
   if (scanData) {
     for (const [mode, results] of Object.entries(scanData.trading_types)) {
       for (const r of results) {
-        const existing = scoreMap.get(r.symbol);
+        const cleanSymbol = r.symbol.replace(/#/g, '');
+        const existing = scoreMap.get(cleanSymbol);
         if (!existing || r.composite_score > existing.score) {
-          scoreMap.set(r.symbol, {
+          scoreMap.set(cleanSymbol, {
             score: r.composite_score,
             category: r.category,
             mode,
@@ -235,11 +231,12 @@ export default function MarketAnalysisTab({
   // Build unified symbol list
   const symbols: SymbolAnalysis[] = Object.entries(regimes).map(
     ([sym, regime]) => {
-      const scan = scoreMap.get(sym);
+      const clean = sym.replace(/#/g, '');
+      const scan = scoreMap.get(clean);
       return {
         symbol: sym,
         regime: regime as Regime,
-        category: scan?.category ?? deriveCategory(sym),
+        category: scan?.category ?? deriveCategory(clean),
         bestScore: scan?.score ?? null,
         bestMode: scan?.mode ?? null,
         tradingHoursActive: scan?.active ?? true,

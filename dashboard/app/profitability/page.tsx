@@ -10,10 +10,10 @@ export default function ProfitabilityPage() {
   const [selectedAccount, setSelectedAccount] = useState<"all" | "paper" | "live">("all");
   const [exporting, setExporting] = useState(false);
 
-  const loadReport = async (days?: number) => {
+  const loadReport = async (days?: number, account?: string) => {
     setLoading(true);
     try {
-      const data = await fetchProfitabilityReport(days);
+      const data = await fetchProfitabilityReport(days, account);
       setReport(data);
     } catch (err) {
       console.error("Failed to load profitability report:", err);
@@ -65,8 +65,8 @@ export default function ProfitabilityPage() {
   };
 
   useEffect(() => {
-    loadReport(selectedPeriod || undefined);
-  }, [selectedPeriod]);
+    loadReport(selectedPeriod || undefined, selectedAccount);
+  }, [selectedPeriod, selectedAccount]);
 
   if (loading) {
     return (
@@ -132,7 +132,7 @@ export default function ProfitabilityPage() {
             >
               {exporting ? "⏳" : "📊"} Excel
             </button>
-            <button              onClick={() => loadReport(selectedPeriod || undefined)}
+            <button              onClick={() => loadReport(selectedPeriod || undefined, selectedAccount)}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
             >
               🔄 Refresh
