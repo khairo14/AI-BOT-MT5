@@ -51,40 +51,30 @@ DEFAULT_PARAMS = {
 
 
 def _ensure_vwap(df: pd.DataFrame, window: int) -> pd.DataFrame:
-    """
-    Compute daily VWAP and its rolling standard deviation.
-    Cached: if columns already exist, returns immediately (no recomputation).
-    """
     if "vwap" in df.columns and "vwap_std" in df.columns:
         if "typical" not in df.columns:
             df["typical"] = (df["high"] + df["low"] + df["close"]) / 3.0
         return df
 
-    # VWAP requires a date column to reset daily
+    # Compute typical price and add as column — needed by both paths
+    df["typical"] = (df["high"] + df["low"] + df["close"]) / 3.0
+    
     if "date" not in df.columns:
         if "time" in df.columns:
             df["date"] = df["time"].dt.date
-        else:
-            # Fallback: single-session VWAP (no daily reset needed)
-            pass
-
-    typical = (df["high"] + df["low"] + df["close"]) / 3.0
 
     if "date" in df.columns:
-        # Daily-reset VWAP: cumulative TP×Vol / cumulative Vol per day
-        df["cum_tp_vol"] = (typical * df["volume"]).groupby(df["date"]).cumsum()
+        df["cum_tp_vol"] = (df["typical"] * df["volume"]).groupby(df["date"]).cumsum()
         df["cum_vol"] = df["volume"].groupby(df["date"]).cumsum()
         df["vwap"] = df["cum_tp_vol"] / df["cum_vol"].replace(0, np.nan)
-        # Rolling std of typical price, computed per day to avoid session bleed
         df["vwap_std"] = df.groupby("date")["typical"].transform(
             lambda x: x.rolling(window, min_periods=10).std()
         )
     else:
-        # No date column — single-session fallback
-        df["cum_tp_vol"] = (typical * df["volume"]).cumsum()
+        df["cum_tp_vol"] = (df["typical"] * df["volume"]).cumsum()
         df["cum_vol"] = df["volume"].cumsum()
         df["vwap"] = df["cum_tp_vol"] / df["cum_vol"].replace(0, np.nan)
-        df["vwap_std"] = typical.rolling(window, min_periods=10).std()
+        df["vwap_std"] = df["typical"].rolling(window, min_periods=10).std()
 
     return df
 
