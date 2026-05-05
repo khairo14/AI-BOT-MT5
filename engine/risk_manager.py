@@ -230,6 +230,20 @@ class RiskManager:
             return 0.0
 
         raw_lot = risk_amount / (sl_ticks * _tick_value)
+        
+        # SAFETY GUARD: validate that the calculated lot doesn't exceed intended risk.
+        # MT5 can report misleading tick_value for futures contracts (e.g. $0.01
+        # instead of $1.00), causing 100x oversizing. Recompute using a floor on
+        # tick_value as a cross-check, and take the safer (smaller) of the two.
+        _tick_value_safe = max(_tick_value, 0.10)
+        _safe_lot = risk_amount / (sl_ticks * _tick_value_safe) if sl_ticks > 0 else raw_lot
+        if _safe_lot < raw_lot:
+            logger.warning(
+                f"Lot safety clamp: tick_value={_tick_value:.4f} seems low — "
+                f"using floor 0.10. Lot reduced from {raw_lot:.5f} to {_safe_lot:.5f} "
+                f"(risk_amount={risk_amount:.2f})"
+            )
+            raw_lot = _safe_lot
 
         # Round down to nearest lot_step (never round up — avoids over-risking)
         lot = math.floor(raw_lot / lot_step) * lot_step

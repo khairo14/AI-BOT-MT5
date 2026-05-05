@@ -4469,20 +4469,26 @@
       }
     },
     "EURJPY": {
-      "bb_period": 20,
-      "bb_std": 1.5,
-      "min_squeeze_bars": 3,
-      "sl_atr_mult": 1.0,
-      "tp1_atr_mult": 2.0,
+      "bb_period": 25,
+      "bb_std": 2.5,
+      "min_squeeze_bars": 5,
+      "max_squeeze_bars": 0,
+      "sl_atr_mult": 1.5,
       "tp_atr_mult": 3.0,
+      "adx_min": 20,
+      "ema_trend_period": 50,
+      "max_spread_pips": 3.0,
       "by_regime": {
         "quiet": {
-          "bb_period": 20,
-          "bb_std": 1.5,
-          "min_squeeze_bars": 3,
-          "sl_atr_mult": 1.0,
-          "tp1_atr_mult": 2.0,
-          "tp_atr_mult": 3.0
+          "bb_period": 25,
+          "bb_std": 2.5,
+          "min_squeeze_bars": 5,
+          "max_squeeze_bars": 0,
+          "sl_atr_mult": 1.5,
+          "tp_atr_mult": 3.0,
+          "adx_min": 20,
+          "ema_trend_period": 50,
+          "max_spread_pips": 3.0
         }
       }
     },
@@ -4575,56 +4581,74 @@
       }
     },
     "EURUSD": {
-      "bb_period": 15,
-      "bb_std": 2.0,
+      "bb_period": 25,
+      "bb_std": 2.5,
       "min_squeeze_bars": 5,
-      "sl_atr_mult": 1.0,
-      "tp1_atr_mult": 2.0,
-      "tp_atr_mult": 3.0,
+      "max_squeeze_bars": 20,
+      "sl_atr_mult": 1.5,
+      "tp_atr_mult": 2.5,
+      "adx_min": 15,
+      "ema_trend_period": 30,
+      "max_spread_pips": 3.0,
       "by_regime": {
         "quiet": {
           "bb_period": 15,
           "bb_std": 2.0,
-          "min_squeeze_bars": 5,
+          "min_squeeze_bars": 7,
+          "max_squeeze_bars": 20,
           "sl_atr_mult": 1.0,
-          "tp1_atr_mult": 2.0,
-          "tp_atr_mult": 3.0
+          "tp_atr_mult": 3.0,
+          "adx_min": 20,
+          "ema_trend_period": 30,
+          "max_spread_pips": 3.0
         }
       }
     },
     "AUDUSD": {
-      "bb_period": 15,
+      "bb_period": 20,
       "bb_std": 2.5,
-      "min_squeeze_bars": 7,
+      "min_squeeze_bars": 5,
+      "max_squeeze_bars": 20,
       "sl_atr_mult": 1.0,
-      "tp1_atr_mult": 2.0,
-      "tp_atr_mult": 2.5,
+      "tp_atr_mult": 2.0,
+      "adx_min": 25,
+      "ema_trend_period": 70,
+      "max_spread_pips": 5.0,
       "by_regime": {
         "quiet": {
-          "bb_period": 15,
+          "bb_period": 20,
           "bb_std": 2.5,
-          "min_squeeze_bars": 7,
+          "min_squeeze_bars": 5,
+          "max_squeeze_bars": 20,
           "sl_atr_mult": 1.0,
-          "tp1_atr_mult": 2.0,
-          "tp_atr_mult": 2.5
+          "tp_atr_mult": 2.0,
+          "adx_min": 25,
+          "ema_trend_period": 70,
+          "max_spread_pips": 5.0
         }
       }
     },
     "AUDCAD": {
-      "bb_period": 25,
+      "bb_period": 15,
       "bb_std": 1.5,
-      "min_squeeze_bars": 5,
-      "sl_atr_mult": 1.0,
-      "tp1_atr_mult": 1.5,
-      "tp_atr_mult": 2.0,
+      "min_squeeze_bars": 7,
+      "max_squeeze_bars": 20,
+      "sl_atr_mult": 1.5,
+      "tp_atr_mult": 2.5,
+      "adx_min": 20,
+      "ema_trend_period": 70,
+      "max_spread_pips": 5.0,
       "by_regime": {
         "quiet": {
-          "bb_period": 15,
-          "bb_std": 2.5,
+          "bb_period": 20,
+          "bb_std": 2.0,
           "min_squeeze_bars": 5,
+          "max_squeeze_bars": 20,
           "sl_atr_mult": 1.0,
-          "tp1_atr_mult": 1.5,
-          "tp_atr_mult": 3.0
+          "tp_atr_mult": 2.0,
+          "adx_min": 20,
+          "ema_trend_period": 70,
+          "max_spread_pips": 5.0
         }
       }
     },
