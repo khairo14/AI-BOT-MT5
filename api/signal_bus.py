@@ -248,10 +248,26 @@ class SignalBus:
 
         # ── Dedup guard: skip if same symbol+direction+strategy+mode already active ──
         mode = signal.get("trading_mode", "")
+
         _dedup_key = (
             signal.get("symbol"), signal.get("strategy"),
             signal.get("direction"), mode,
         )
+        def _signal_score(s: dict) -> float:
+            try:
+                return float(s.get("score") or s.get("confidence") or 0.0)
+            except Exception:
+                return 0.0
+
+        def _same_symbol_mode(a: dict, b: dict) -> bool:
+            return (
+                normalize_symbol(a.get("symbol", "")) == normalize_symbol(b.get("symbol", ""))
+                and a.get("trading_mode", "") == b.get("trading_mode", "")
+            )
+
+        _new_score = _signal_score(signal)
+        _conflict_margin = 0.08  # 8 points if score/confidence is 0-1 scale
+
         # LOGIC-2: check the fast in-memory set FIRST — catches concurrent calls
         # within the same event-loop tick before the queue scan below.
         if _dedup_key in self._pending_keys:
@@ -292,8 +308,7 @@ class SignalBus:
                 for pos in open_positions:
                     if (
                         (_bot_magic is None or pos.get("magic") == _bot_magic)
-                        and pos.get("symbol") == sym
-                        and pos.get("type", "").upper() == direction
+                        and normalize_symbol(pos.get("symbol", "")) == normalize_symbol(sym)
                         and str(pos.get("comment", "")).startswith(mode_prefix)
                     ):
                         logger.debug(
@@ -301,7 +316,22 @@ class SignalBus:
                             f"— open {direction} {mode} position already exists"
                         )
                         # IMPROVE-4: surface rejection reason
-                        signal["rejection_reason"] = f"Open {direction} {mode} position already exists for {sym}"
+                        _raw_type = pos.get("type", "")
+                        if isinstance(_raw_type, str):
+                            open_dir = _raw_type.upper()
+                        else:
+                            open_dir = "BUY" if int(_raw_type) == 0 else "SELL"
+
+                        if open_dir == direction:
+                            signal["rejection_reason"] = (
+                                f"Open {direction} {mode} position already exists for {sym}"
+                            )
+                        else:
+                            signal["rejection_reason"] = (
+                                f"Opposite-direction conflict: open {open_dir} {mode} "
+                                f"position already exists for {sym}; new {direction} rejected"
+                            )
+
                         return signal
         except Exception:
             pass
@@ -323,6 +353,87 @@ class SignalBus:
         except Exception as _sj_exc:
             logger.debug(f"Signal journal write failed: {_sj_exc}")
 
+        # ── Arbitration: same symbol + same mode must have only one winner ──
+        for existing in list(self.queue.values()):
+            if existing.get("status") not in ("pending", "executing"):
+                continue
+
+            if not _same_symbol_mode(existing, signal):
+                continue
+
+            existing_dir = str(existing.get("direction", "")).upper()
+            new_dir = str(signal.get("direction", "")).upper()
+            existing_score = _signal_score(existing)
+
+            # Same direction: highest score wins.
+            if existing_dir == new_dir:
+                if _new_score > existing_score:
+                    existing["status"] = "rejected"
+                    existing["rejection_reason"] = (
+                        f"Replaced by higher-score {new_dir} signal "
+                        f"({_new_score:.2f} > {existing_score:.2f})"
+                    )
+                    self._pending_keys.discard((
+                        existing.get("symbol"),
+                        existing.get("strategy"),
+                        existing.get("direction"),
+                        existing.get("trading_mode"),
+                    ))
+                    self.archive.append(dict(existing))
+                    logger.info(
+                        f"SignalBus arbitration: replaced lower-score same-direction signal "
+                        f"{existing.get('symbol')} {existing_dir} {existing_score:.2f} "
+                        f"with {signal.get('strategy')} {_new_score:.2f}"
+                    )
+                    continue
+
+                signal["rejection_reason"] = (
+                    f"Lower-score same-direction signal rejected "
+                    f"({_new_score:.2f} <= {existing_score:.2f})"
+                )
+                return signal
+
+            # Opposite direction: conflict arbitration.
+            score_gap = abs(_new_score - existing_score)
+            if score_gap < _conflict_margin:
+                signal["rejection_reason"] = (
+                    f"Direction conflict rejected: {new_dir} score {_new_score:.2f} "
+                    f"vs {existing_dir} score {existing_score:.2f}; gap too small"
+                )
+                existing["status"] = "rejected"
+                existing["rejection_reason"] = (
+                    f"Direction conflict rejected against {new_dir}; gap too small"
+                )
+                self._pending_keys.discard((
+                    existing.get("symbol"),
+                    existing.get("strategy"),
+                    existing.get("direction"),
+                    existing.get("trading_mode"),
+                ))
+                self.archive.append(dict(existing))
+                return signal
+
+            if _new_score > existing_score:
+                existing["status"] = "rejected"
+                existing["rejection_reason"] = (
+                    f"Lost direction arbitration to {new_dir} "
+                    f"({_new_score:.2f} > {existing_score:.2f})"
+                )
+                self._pending_keys.discard((
+                    existing.get("symbol"),
+                    existing.get("strategy"),
+                    existing.get("direction"),
+                    existing.get("trading_mode"),
+                ))
+                self.archive.append(dict(existing))
+                continue
+
+            signal["rejection_reason"] = (
+                f"Lost direction arbitration to existing {existing_dir} "
+                f"({existing_score:.2f} > {_new_score:.2f})"
+            )
+            return signal
+        
         exec_mode = self._get_exec_mode(mode)
         if exec_mode == "auto" and self._order_manager is not None:
             # ── RL gate — always active in auto mode, independent of the manual
