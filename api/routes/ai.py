@@ -335,6 +335,7 @@ async def reset_calibration():
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to clear calibration file: {exc}")
     return {"status": "reset", "message": "All calibration data cleared. Models now use raw sigmoid output."}
+
 # ───────────────────────────────────
 # RL Agent endpoints
 # ───────────────────────────────────
@@ -342,6 +343,7 @@ async def reset_calibration():
 def get_lstm_accuracy(
     trading_type: Optional[str] = Query(None),
     min_samples: int = Query(20),
+    account_login: Optional[int] = Query(None),
 ):
     """Return live LSTM prediction accuracy vs actual trade outcomes."""
     from ai.trade_memory import memory
@@ -351,6 +353,7 @@ def get_lstm_accuracy(
         min_samples=min_samples,
         live_only=True,
         mode=current_mode(),
+        account_login=account_login,
     )
 
 
@@ -359,6 +362,7 @@ def get_lstm_calibration(
     trading_type: Optional[str] = Query(None),
     min_samples: int = Query(20),
     bins: int = Query(10, ge=5, le=20),
+    account_login: Optional[int] = Query(None),
 ):
     """
     Return calibration curve data: predicted confidence vs actual win rate.
@@ -377,12 +381,13 @@ def get_lstm_calibration(
     from engine.account_store import current_mode
     _mode = current_mode()
     
-    # Get trades with confidence predictions — scoped to current account mode
+    # Get trades with confidence predictions — scoped to current account mode and optional account_login
     outcomes = memory.recent(
         n=memory.MAX_BUFFER,
         trading_type=trading_type,
         live_only=True,
         mode=_mode,
+        account_login=account_login,
     )
     
     # Filter for trades with confidence > 0 (some old trades may not have it)
@@ -451,6 +456,7 @@ def get_lstm_calibration(
         min_samples=min_samples,
         live_only=True,
         mode=_mode,
+        account_login=account_login,
     )
     
     return {
@@ -468,6 +474,7 @@ def get_lstm_calibration(
 def get_accuracy_history(
     trading_type: Optional[str] = Query(None),
     days: int = Query(30, ge=1, le=365),
+    account_login: Optional[int] = Query(None),
 ):
     """
     Return time-series history of LSTM prediction accuracy.
@@ -478,6 +485,7 @@ def get_accuracy_history(
     Args:
         trading_type: Optional filter for scalping | day_trading | swing
         days: Number of days of history to return (1-365, default 30)
+        account_login: Optional filter by specific MT5 account login number
     
     Returns:
         - snapshots: List of {timestamp, overall_accuracy, correct, total, by_symbol}
@@ -590,6 +598,7 @@ def get_accuracy_history(
 def get_confidence_distribution(
     trading_type: Optional[str] = Query(None),
     min_samples: int = Query(20),
+    account_login: Optional[int] = Query(None),
 ):
     """
     Return distribution of LSTM confidence predictions.
@@ -606,12 +615,13 @@ def get_confidence_distribution(
     from ai.trade_memory import memory
     from engine.account_store import current_mode
     
-    # Get trades with confidence predictions — scoped to current account mode
+    # Get trades with confidence predictions — scoped to current account mode and optional account_login
     outcomes = memory.recent(
         n=memory.MAX_BUFFER,
         trading_type=trading_type,
         live_only=True,
         mode=current_mode(),
+        account_login=account_login,
     )
     
     # Filter for trades with confidence > 0
@@ -795,10 +805,7 @@ def get_rl_history(
             "conf_thresh_change": round(last["conf_thresh"] - first["conf_thresh"], 3),
             "risk_factor_change": round(last["risk_factor"] - first["risk_factor"], 3),
             "updates_delta": last["n_updates"] - first["n_updates"],
-            "time_span_days": round((
-                datetime.fromisoformat(last["timestamp"].replace("Z", "+00:00")) -
-                datetime.fromisoformat(first["timestamp"].replace("Z", "+00:00"))
-            ).total_seconds() / 86400, 2),
+            "time_span_days": round((datetime.fromisoformat(last["timestamp"].replace("Z", "+00:00")) - datetime.fromisoformat(first["timestamp"].replace("Z", "+00:00"))).total_seconds() / 86400, 2),
         }
     else:
         trend = None
@@ -819,6 +826,7 @@ def get_win_rate_by_state(
     trading_type: TRADING_TYPE,
     min_samples: int = Query(5, ge=1),
     strategy_name: Optional[str] = Query(None, description="Filter by strategy (matches 'comment' field in trade memory)."),
+    account_login: Optional[int] = Query(None),
 ):
     """
     Return win rate breakdown by RL state bucket.
@@ -831,6 +839,7 @@ def get_win_rate_by_state(
     Args:
         trading_type: scalping | day_trading | swing
         min_samples: Minimum trades per state to include (default 5)
+        account_login: Optional filter by specific MT5 account login number
     
     Returns:
         - states: List of {state, win_rate, avg_profit, samples, state_components}
@@ -840,13 +849,14 @@ def get_win_rate_by_state(
     """
     from ai.trade_memory import memory
     
-    # Get trades for this trading type — scoped to current account mode
+    # Get trades for this trading type — scoped to current account mode and optional account_login
     from engine.account_store import current_mode as _cur_mode_rl
     outcomes = memory.recent(
         n=memory.MAX_BUFFER,
         trading_type=trading_type,
         live_only=True,
         mode=_cur_mode_rl(),
+        account_login=account_login,
     )
     
     # Filter by strategy if requested (trade_memory uses "strategy" field)
@@ -1048,12 +1058,13 @@ def rl_reset(
 
 
 # ───────────────────────────────────
-# Trade Memory endpoints
+# Trade Memory endpoints (UPDATED WITH account_login)
 # ───────────────────────────────────
 @router.get("/memory/drift")
 def memory_drift_detection(
     trading_type: Optional[TRADING_TYPE] = None,
     window: int = Query(30),
+    account_login: Optional[int] = Query(None),
 ):
     """Detect win rate drift using Page-Hinkley test."""
     from engine.account_store import current_mode
@@ -1062,12 +1073,14 @@ def memory_drift_detection(
         window=window,
         live_only=True,
         mode=current_mode(),
+        account_login=account_login,
     )
 
 @router.get("/memory/stability")
 def memory_ev_stability(
     trading_type: Optional[TRADING_TYPE] = None,
     window: int = Query(20),
+    account_login: Optional[int] = Query(None),
 ):
     """Return rolling EV stability trend across time windows."""
     from engine.account_store import current_mode
@@ -1076,13 +1089,22 @@ def memory_ev_stability(
         window=window,
         live_only=True,
         mode=current_mode(),
+        account_login=account_login,
     )
 
 @router.get("/memory/stats")
-def memory_stats(trading_type: Optional[TRADING_TYPE] = None):
+def memory_stats(
+    trading_type: Optional[TRADING_TYPE] = None,
+    account_login: Optional[int] = Query(None),
+):
     """Return aggregate win rate, avg P&L, SL/TP hit counts."""
     from engine.account_store import current_mode
-    return memory.stats(trading_type=trading_type, live_only=True, mode=current_mode())
+    return memory.stats(
+        trading_type=trading_type,
+        live_only=True,
+        mode=current_mode(),
+        account_login=account_login,
+    )
 
 @router.post("/memory/reload")
 def reload_trade_memory():
@@ -1095,6 +1117,7 @@ def reload_trade_memory():
 def memory_stats_by_regime(
     trading_type: Optional[TRADING_TYPE] = None,
     min_samples: int = Query(5),
+    account_login: Optional[int] = Query(None),
 ):
     """Return win rate and avg PnL broken down by market regime."""
     from engine.account_store import current_mode
@@ -1103,13 +1126,23 @@ def memory_stats_by_regime(
         min_samples=min_samples,
         live_only=True,
         mode=current_mode(),
+        account_login=account_login,
     )
 
 @router.get("/memory/recent")
-def memory_recent(n: int = 50, trading_type: Optional[TRADING_TYPE] = None):
+def memory_recent(
+    n: int = 50,
+    trading_type: Optional[TRADING_TYPE] = None,
+    account_login: Optional[int] = Query(None),
+):
     """Return the last N trade outcomes, newest last."""
     from engine.account_store import current_mode
-    return memory.recent(n=min(n, 500), trading_type=trading_type, mode=current_mode())
+    return memory.recent(
+        n=min(n, 500),
+        trading_type=trading_type,
+        mode=current_mode(),
+        account_login=account_login,
+    )
 
 
 # ── LSTM Prediction Cache ───────────────────────────────────────────────────
@@ -1311,4 +1344,3 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
 
     asyncio.create_task(_bg_task())
     return {"status": "queued", "detail": "Optimizer running in background — poll /ai/optimizer/status"}
-
