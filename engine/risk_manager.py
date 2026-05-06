@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from loguru import logger
+from engine.account_store import current_account_login, current_mode
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
 _STATE_PATH = Path(__file__).parent.parent / "data" / "risk_state.json"
@@ -84,6 +85,26 @@ class RiskManager:
         if config is None:
             self._load_state()
 
+    def _state_path(self) -> Path:
+        """
+        Per-account risk state isolation.
+        Prevents demo/live or multiple MT5 accounts from sharing
+        drawdown/circuit-breaker state.
+        """
+        try:
+            login = str(current_account_login() or "unknown")
+        except Exception:
+            login = "unknown"
+
+        try:
+            mode = str(current_mode() or "unknown")
+        except Exception:
+            mode = "unknown"
+
+        return (
+            _STATE_PATH.parent /
+            f"risk_state_{mode}_{login}.json"
+        )
     # ------------------------------------------------------------------
     # State Persistence
     # ------------------------------------------------------------------
@@ -109,13 +130,14 @@ class RiskManager:
                     for k, v in self._strategy_paused.items()
                 },
             }
-            _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            state_path = self._state_path()
+            state_path.parent.mkdir(parents=True, exist_ok=True)
             _serialised = json.dumps(state)
-            fd, _tmp = tempfile.mkstemp(dir=str(_STATE_PATH.parent), suffix=".tmp")
+            fd, _tmp = tempfile.mkstemp(dir=str(state_path.parent), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as _f:
                     _f.write(_serialised)
-                os.replace(_tmp, _STATE_PATH)
+                os.replace(_tmp, state_path)
             except Exception:
                 try:
                     os.unlink(_tmp)
@@ -127,10 +149,10 @@ class RiskManager:
 
     def _load_state(self) -> None:
         """Restore circuit breaker state from disk if available."""
-        if not _STATE_PATH.exists():
+        if not self._state_path().exists():
             return
         try:
-            state = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+            state = json.loads(self._state_path().read_text(encoding="utf-8"))
             self._daily_halted       = bool(state.get("daily_halted", False))
             self._weekly_halted      = bool(state.get("weekly_halted", False))
             self._day_start_balance  = state.get("day_start_balance")
