@@ -622,9 +622,12 @@ class OrderManager:
                 trading_type=trading_type,
                 account_mode=current_mode(),
                 comment=reason,
+                strategy=pos.comment or reason,
                 event="close",
                 close_time=datetime.now(tz=timezone.utc).isoformat(),
                 account_login=current_account_login(),
+                account_type="",
+                user_id="default",
             )
         except Exception as _je:
             logger.debug(f"Journal write failed for close #{ticket}: {_je}")

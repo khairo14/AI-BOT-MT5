@@ -222,8 +222,8 @@ class RiskManager:
         _sl      = sl      if sl      is not None else sl_price
 
         if _balance is None or _entry is None or _sl is None:
-            logger.error("calculate_lot_size: missing balance/entry/sl — using min_lot")
-            return min_lot
+            logger.error("calculate_lot_size: missing balance/entry/sl — rejecting trade")
+            return 0.0
 
         risk_pct = risk_pct or self._config["risk_per_trade_pct"]
         max_risk_pct = self._config["max_risk_per_trade_pct"]
@@ -267,13 +267,13 @@ class RiskManager:
         lot = math.floor(raw_lot / lot_step) * lot_step
         lot = round(lot, 8)
 
-        # Detect when broker minimum lot exceeds intended risk
+        # Detect when broker minimum lot would exceed intended risk.
         if raw_lot > 0 and lot < min_lot:
             actual_risk_pct = (min_lot / raw_lot) * risk_pct
             logger.warning(
-                f"Lot size {raw_lot:.5f} is below broker minimum {min_lot} — "
-                f"clamping to {min_lot}. Actual risk will be {actual_risk_pct:.2f}% "
-                f"(target {risk_pct:.2f}%). Consider widening SL or reducing position on a larger balance."
+                f"Lot size {raw_lot:.5f} is below broker minimum {min_lot}. "
+                f"Minimum lot would risk {actual_risk_pct:.2f}% "
+                f"(target {risk_pct:.2f}%). Rejecting trade instead of forcing min_lot."
             )
 
         if lot < min_lot:
