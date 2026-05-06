@@ -89,8 +89,6 @@ class WeeklyBreakout(BaseStrategy):
         adx_ok    = curr_adx >= p["adx_threshold"]
         out_pips  = curr_atr * p["atr_break_mult"]
 
-        buffer = p["entry_buffer_pips"] * 0.0001  # convert pips
-
         # Volume confirmation: breakout bar must show expanded volume
         vol_ok = True
         vol_mult = p.get("vol_confirm_mult", 1.2)
@@ -103,7 +101,7 @@ class WeeklyBreakout(BaseStrategy):
         bull_break = (
             curr_close > pw_high + out_pips
             and curr_hist > 0
-            and prev_hist > 0                          # MACD histogram positive & growing
+            and curr_hist > prev_hist                         
             and adx_ok
             and vol_ok
         )
@@ -111,7 +109,7 @@ class WeeklyBreakout(BaseStrategy):
         bear_break = (
             curr_close < pw_low - out_pips
             and curr_hist < 0
-            and prev_hist < 0                          # MACD histogram negative
+            and curr_hist < prev_hist                          
             and adx_ok
             and vol_ok
         )
@@ -132,6 +130,8 @@ class WeeklyBreakout(BaseStrategy):
             sl_dist = abs(entry - sl)
             tp1   = round(entry + sl_dist * p["tp1_rr"], 5)
             tp2   = round(entry + sl_dist * p["tp_rr"], 5)
+            if self._sl_too_close("BUY", entry, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -153,6 +153,8 @@ class WeeklyBreakout(BaseStrategy):
             sl_dist = abs(sl - entry)
             tp1   = round(entry - sl_dist * p["tp1_rr"], 5)
             tp2   = round(entry - sl_dist * p["tp_rr"], 5)
+            if self._sl_too_close("SELL", entry, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",

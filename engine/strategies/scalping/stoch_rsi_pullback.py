@@ -37,6 +37,8 @@ DEFAULT_PARAMS = {
     "rr": 2.5,               # full close at 2.5R
     "max_spread_pips": 2.0,
     "vol_confirm_mult": 1.2,  # volume must exceed 20-bar avg × this (0 = disabled)
+    "adx_period": 14,
+    "adx_min": 18,
 }
 
 
@@ -61,6 +63,14 @@ class StochRSIPullback(BaseStrategy):
         ema_fast  = ta.trend.EMAIndicator(close, window=p["ema_fast"]).ema_indicator()
         ema_mid   = ta.trend.EMAIndicator(close, window=p["ema_mid"]).ema_indicator()
         ema_slow  = ta.trend.EMAIndicator(close, window=p["ema_slow"]).ema_indicator()
+
+        adx_ind = ta.trend.ADXIndicator(high, low, close, window=p["adx_period"])
+        curr_adx = adx_ind.adx().iloc[-1]
+
+        adx_ok = (not pd.isna(curr_adx)) and (curr_adx >= p["adx_min"])
+
+        if not adx_ok:
+            return self._no_signal()
 
         curr_ema_fast = ema_fast.iloc[-1]
         curr_ema_mid  = ema_mid.iloc[-1]
@@ -108,6 +118,8 @@ class StochRSIPullback(BaseStrategy):
             "downtrend": bool(downtrend),
             "atr":       round(float(curr_atr), 5),
             "vol_ok":    bool(vol_ok),
+            "adx":       round(float(curr_adx), 2) if not pd.isna(curr_adx) else None,
+            "adx_ok":    bool(adx_ok),
         }
 
         sl_dist = curr_atr * p["sl_atr_mult"]

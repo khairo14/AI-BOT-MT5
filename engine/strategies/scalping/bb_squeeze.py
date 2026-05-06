@@ -35,6 +35,7 @@ DEFAULT_PARAMS = {
     # EMA trend filter — breakout must align with the medium-term trend direction
     "ema_trend_period": 50,
     "require_trend_align": True,
+    "atr_period": 14,
 }
 
 
@@ -63,7 +64,7 @@ class BBSqueeze(BaseStrategy):
         mid   = bb.bollinger_mavg()
         width = upper - lower
 
-        atr = ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range()
+        atr = ta.volatility.AverageTrueRange(high, low, close, window=p["atr_period"]).average_true_range()
 
         # ROC as momentum direction
         roc = close.pct_change(periods=p["roc_period"]) * 100

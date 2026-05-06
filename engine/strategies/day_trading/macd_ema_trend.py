@@ -132,6 +132,8 @@ class MACDEMATrend(BaseStrategy):
             sl  = round(curr_close - sl_dist, 5)
             tp1 = round(curr_close + sl_dist * p["tp1_rr"], 5)
             tp2 = round(curr_close + sl_dist * p["tp2_rr"], 5)
+            if self._sl_too_close("BUY", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="BUY",
@@ -152,6 +154,8 @@ class MACDEMATrend(BaseStrategy):
             sl  = round(curr_close + sl_dist, 5)
             tp1 = round(curr_close - sl_dist * p["tp1_rr"], 5)
             tp2 = round(curr_close - sl_dist * p["tp2_rr"], 5)
+            if self._sl_too_close("SELL", curr_close, sl):
+                return self._no_signal(indicators)
             return StrategyResult(
                 signal=Signal(
                     direction="SELL",

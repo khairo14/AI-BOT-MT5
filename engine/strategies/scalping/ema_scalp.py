@@ -37,6 +37,8 @@ DEFAULT_PARAMS = {
     # EMA separation filter — crossover must have real momentum, not just noise
     # Minimum gap between fast and slow EMA expressed as ATR fraction
     "ema_sep_mult": 0.1,         # require |ema_fast - ema_slow| > ATR × this
+    "sell_rsi_min": 35,
+    "sell_rsi_max": 60,
 }
 
 
@@ -167,8 +169,8 @@ class EMAScalp(BaseStrategy):
             )
 
         # --- SELL ---
-        sell_rsi_min = 100 - p["rsi_max"]
-        sell_rsi_max = 100 - p["rsi_min"]
+        sell_rsi_min = p.get("sell_rsi_min", 35)
+        sell_rsi_max = p.get("sell_rsi_max", 60)
         if (
             bear_cross
             and bias == "BEAR"

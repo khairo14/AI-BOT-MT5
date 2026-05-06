@@ -21,7 +21,7 @@ class Signal:
     strategy: str = ""
     symbol: str = ""
     timeframe: str = ""
-    confidence: float = 0.0  # 0–100, populated by AI scorer in Phase 6
+    confidence: float = 0.0
     comment: str = ""
 
     @property
@@ -74,6 +74,11 @@ class BaseStrategy(ABC):
         Scales with price: covers 5-digit pairs (EUR/USD) and 3-digit (USD/JPY).
         Prevents "Invalid stops" rejections from tight scalping SLs.
         """
+        # TODO:
+        # Replace price-scaled fallback with symbol-aware MT5 stop-level logic
+        # using symbol_info.trade_stops_level × point.
+        # Current implementation is a generic safety fallback only.
+
         return close * 0.00050  # ~50 pts on 1.0 pairs, ~55 pts on 110 USDJPY
 
     def _sl_too_close(self, direction: str, entry: float, sl: float) -> bool:

@@ -29,6 +29,7 @@ DEFAULT_PARAMS = {
     "atr_vol_filter": 0.8,    # min ATR as fraction of avg. 0 = disabled (useful for London open)
     "session_open":  7,        # UTC hour window start — London open. Both 0 = all-session (disabled)
     "session_close": 21,       # UTC hour window end   — NY session end
+    "max_breakout_extension_atr": 0.8,
 }
 
 
@@ -118,9 +119,10 @@ class SRBreakout(BaseStrategy):
                     pass
 
         buffer = curr_atr * p["sl_buffer_atr"]
+        max_ext = curr_atr * p["max_breakout_extension_atr"]
 
         # Bullish breakout: close breaks above resistance
-        if resistance and curr_close > resistance and curr_rsi > p["rsi_confirm"] and vol_ok:
+        if ( resistance and curr_close > resistance and (curr_close - resistance) <= max_ext and curr_rsi > p["rsi_confirm"] and vol_ok ):
             if p["retest_mode"]:
                 # In retest mode: signal fires when price comes back to retest the broken level
                 prev_close = close.iloc[-2]
@@ -156,7 +158,7 @@ class SRBreakout(BaseStrategy):
             )
 
         # Bearish breakout: close breaks below support
-        if support and curr_close < support and curr_rsi < (100 - p["rsi_confirm"]) and vol_ok:
+        if ( support and curr_close < support and (support - curr_close) <= max_ext and curr_rsi < (100 - p["rsi_confirm"]) and vol_ok ):
             if p["retest_mode"]:
                 prev_close = close.iloc[-2]
                 if not (prev_close > support and curr_close < (support + buffer)):
