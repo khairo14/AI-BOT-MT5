@@ -8,7 +8,8 @@ import {
   setExecutionMode,
   patchRiskConfig,
   patchAppConfig,
-  switchMode,
+  switchAccount,
+  fetchAccounts,
   fetchRiskStatus,
   resetDrawdown,
   resetConsecutiveLosses,
@@ -144,7 +145,6 @@ export default function SettingsPage() {
       ]);
       setExecModes(exec);
       setRisk(riskData as unknown as Record<string, unknown>);
-      // Use actual MT5 connection mode, not app.json (which may be stale)
       setTradingMode((modeData as { mode: "paper" | "live" }).mode ?? "paper");
       const nf = (riskData as unknown as Record<string, unknown>).news_filter as Record<string, unknown> | undefined;
       const sf = (riskData as unknown as Record<string, unknown>).session_filter as Record<string, unknown> | undefined;
@@ -198,15 +198,31 @@ export default function SettingsPage() {
   const saveApp = async () => {
     setAppSaving(true);
     try {
-      // Switch MT5 account mode via the proper endpoint (not just app.json)
-      const currentMode = await fetchAccountMode();
-      if (currentMode.mode !== tradingMode) {
-        await switchMode(tradingMode, false);
+      // Get current account info and available accounts
+      const [currentMode, accountsResp] = await Promise.all([
+        fetchAccountMode(),
+        fetchAccounts(),
+      ]);
+      
+      // Find matching account for the target mode
+      const targetAccount = accountsResp.accounts.find(
+        acc => tradingMode === "live" ? acc.type !== "demo" : acc.type === "demo"
+      );
+      
+      if (!targetAccount) {
+        throw new Error(`No ${tradingMode} account found. Please add one in .env configuration.`);
       }
+      
+      // Switch if needed
+      if (currentMode.mode !== tradingMode) {
+        await switchAccount(targetAccount.login, false);
+      }
+      
       await patchRiskConfig({
         news_filter: { enabled: newsFilter },
         session_filter: { enabled: sessionFilter },
       } as never);
+      
       setAppSaved(true);
       setTimeout(() => setAppSaved(false), 2500);
       pushNotification({ type: "success", title: "App settings saved", message: "" });

@@ -26,18 +26,46 @@ interface Props {
   mode: TradingMode;
   label: string;
   icon: string;
-  symbolGroups: SymbolGroup[];
   defaultSymbol: string;
   defaultTimeframe: string;
   timeframes: string[];
   strategyNames: string[];
 }
 
+// Helper function to categorize symbols
+function categorizeSymbol(sym: string): string {
+  const upper = sym.toUpperCase();
+  
+  const forexEndings = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"];
+  if (sym.length === 6 && forexEndings.some(end => upper.endsWith(end))) {
+    const majors = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"];
+    return majors.includes(upper) ? "Forex Majors" : "Forex Minors";
+  }
+  
+  if (upper.includes("BTC") || upper.includes("ETH") || upper.includes("XRP") || 
+      upper.includes("SOL") || upper.includes("ADA") || upper.includes("DOGE")) {
+    return "Crypto";
+  }
+  
+  if (upper.includes("US100") || upper.includes("US30") || upper.includes("US500") || 
+      upper.includes("SPX") || upper.includes("NAS") || upper.includes("GER") || 
+      upper.includes("UK100") || upper.includes("DAX")) {
+    return "Indices";
+  }
+  
+  if (upper.includes("GOLD") || upper.includes("XAU") || upper.includes("SILVER") || 
+      upper.includes("XAG") || upper.includes("OIL") || upper.includes("BRENT") || 
+      upper.includes("NGAS")) {
+    return "Commodities";
+  }
+  
+  return "Stocks";
+}
+
 export default function TradingModePage({
   mode,
   label,
   icon,
-  symbolGroups,
   defaultSymbol,
   defaultTimeframe,
   timeframes,
@@ -75,44 +103,8 @@ export default function TradingModePage({
   };
   const removeCustomMA = (id: string) => setCustomMAs((prev) => prev.filter((m) => m.id !== id));
 
-  // Auto-categorize symbols by type
-  const categorizeSymbol = (sym: string): string => {
-    const upper = sym.toUpperCase();
-    
-    // Forex pairs (6 chars ending with currency codes)
-    const forexEndings = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"];
-    if (sym.length === 6 && forexEndings.some(end => upper.endsWith(end))) {
-      const majors = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"];
-      return majors.includes(upper) ? "Forex Majors" : "Forex Minors";
-    }
-    
-    // Crypto
-    if (upper.includes("BTC") || upper.includes("ETH") || upper.includes("XRP") || 
-        upper.includes("SOL") || upper.includes("ADA") || upper.includes("DOGE")) {
-      return "Crypto";
-    }
-    
-    // Indices
-    if (upper.includes("US100") || upper.includes("US30") || upper.includes("US500") || 
-        upper.includes("SPX") || upper.includes("NAS") || upper.includes("GER") || 
-        upper.includes("UK100") || upper.includes("DAX")) {
-      return "Indices";
-    }
-    
-    // Commodities
-    if (upper.includes("GOLD") || upper.includes("XAU") || upper.includes("SILVER") || 
-        upper.includes("XAG") || upper.includes("OIL") || upper.includes("BRENT") || 
-        upper.includes("NGAS")) {
-      return "Commodities";
-    }
-    
-    // Stocks (everything else)
-    return "Stocks";
-  };
-
-  // Generate dynamic symbol groups from scanner symbols + hardcoded fallback
+  // Generate dynamic symbol groups from scanner symbols only (no hardcoded fallback)
   const dynamicSymbolGroups: SymbolGroup[] = (() => {
-    // Group scanner symbols by category
     const grouped: Record<string, string[]> = {};
     scannerSymbols.forEach(sym => {
       const category = categorizeSymbol(sym);
@@ -120,32 +112,13 @@ export default function TradingModePage({
       if (!grouped[category].includes(sym)) grouped[category].push(sym);
     });
     
-    // Convert to SymbolGroup array
-    const scannerGroups = Object.entries(grouped).map(([label, symbols]) => ({
+    const priorityOrder = ["Forex Majors", "Forex Minors", "Crypto", "Commodities", "Indices", "Stocks"];
+    const groups = Object.entries(grouped).map(([label, symbols]) => ({
       label,
       symbols: symbols.sort()
     }));
     
-    // Merge with hardcoded groups (add missing symbols from hardcoded groups)
-    const merged = [...scannerGroups];
-    symbolGroups.forEach(hardcodedGroup => {
-      const existingGroup = merged.find(g => g.label === hardcodedGroup.label);
-      if (existingGroup) {
-        // Add any missing symbols from hardcoded to existing group
-        hardcodedGroup.symbols.forEach(sym => {
-          if (!existingGroup.symbols.includes(sym)) {
-            existingGroup.symbols.push(sym);
-          }
-        });
-      } else {
-        // Add entire hardcoded group if category doesn't exist
-        merged.push(hardcodedGroup);
-      }
-    });
-    
-    // Sort groups by priority
-    const priorityOrder = ["Forex Majors", "Forex Minors", "Crypto", "Commodities", "Indices", "Stocks"];
-    return merged.sort((a, b) => {
+    return groups.sort((a, b) => {
       const aIdx = priorityOrder.indexOf(a.label);
       const bIdx = priorityOrder.indexOf(b.label);
       return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
@@ -184,9 +157,12 @@ export default function TradingModePage({
         const m = cfg[mode] ?? {};
         setScannerEnabled(m.enabled ?? false);
         setScannerSymbols(m.symbols ?? []);
+        // Set default symbol if current symbol not in scanner list and scanner has symbols
+        if (m.symbols && m.symbols.length > 0 && !m.symbols.includes(symbol)) {
+          setSymbol(m.symbols[0]);
+        }
       })
       .catch(() => {});
-    // Load live broker symbols once on mount
     fetchAvailableSymbols()
       .then((res) => setAvailableSymbols(res.symbols))
       .catch(() => {});
@@ -527,7 +503,6 @@ export default function TradingModePage({
               </div>
             ))}
           </div>
-          {/* Custom MA builder */}
           <div className="border-t border-gray-800 px-4 py-3 flex items-center gap-3 flex-wrap">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest shrink-0">Custom MA</p>
             <input
@@ -575,9 +550,9 @@ export default function TradingModePage({
           />
         </div>
 
-        {/* Trade panel */}
+        {/* Trade panel - without symbolGroups prop */}
         <div className="xl:col-span-1">
-          <TradePanel mode={mode} defaultSymbol={symbol} symbolGroups={symbolGroups} execMode={execMode} />
+          <TradePanel mode={mode} defaultSymbol={symbol} execMode={execMode} />
         </div>
       </div>
 

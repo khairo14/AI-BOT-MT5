@@ -1,5 +1,5 @@
 """
-Account routes — balance, equity, margin, mode switching.
+Account routes — balance, equity, margin, account switching.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,14 +7,14 @@ from loguru import logger
 from pydantic import BaseModel
 
 from api.dependencies import get_client
-from engine.account_store import current_mode, save_mode
+from engine.account_store import current_mode, current_account_login, current_account_type, save_account, _get_all_accounts
 from engine.mt5_client import MT5Client
 
 router = APIRouter()
 
 
-class SwitchModeRequest(BaseModel):
-    mode: str          # "paper" or "live"
+class SwitchAccountRequest(BaseModel):
+    login: int
     force: bool = False  # skip open-position guard
 
 
@@ -24,30 +24,39 @@ def get_account(client: MT5Client = Depends(get_client)):
     info = client.get_account_info()
     if not info:
         raise HTTPException(status_code=500, detail="Failed to fetch account info")
+    info["account_type"] = current_account_type()
     return info
 
 
 @router.get("/mode")
 def get_mode():
     """Return the active trading mode without a full account fetch."""
-    return {"mode": current_mode()}
+    return {"mode": current_mode(), "login": current_account_login(), "type": current_account_type()}
 
 
-@router.post("/switch-mode")
-def switch_mode(body: SwitchModeRequest, client: MT5Client = Depends(get_client)):
+@router.get("/accounts")
+def list_accounts():
+    """Return all configured accounts from .env (passwords masked)."""
+    accounts = _get_all_accounts()
+    safe = []
+    for acc in accounts:
+        a = dict(acc)
+        a.pop("password", None)
+        safe.append(a)
+    return {
+        "accounts": safe,
+        "current": current_account_login(),
+    }
+
+
+@router.post("/switch-account")
+def switch_account(body: SwitchAccountRequest, client: MT5Client = Depends(get_client)):
     """
-    Switch between paper (demo) and live trading accounts.
+    Switch to a specific MT5 account by login number.
 
     Blocks if there are open positions unless force=true is passed.
     Also pauses the strategy runner while the reconnection happens.
     """
-    mode = body.mode.lower()
-    if mode not in ("paper", "live"):
-        raise HTTPException(status_code=400, detail="mode must be 'paper' or 'live'")
-
-    if mode == client.trading_mode:
-        return {"status": "no_change", "mode": mode}
-
     # Guard: refuse to switch while positions are open (unless forced)
     if not body.force:
         positions = client.get_open_positions() or []
@@ -57,7 +66,7 @@ def switch_mode(body: SwitchModeRequest, client: MT5Client = Depends(get_client)
                 detail={
                     "error": "open_positions",
                     "message": (
-                        f"Cannot switch to {mode.upper()} — "
+                        f"Cannot switch accounts — "
                         f"{len(positions)} open position(s) on current account. "
                         "Close all positions first or pass force=true."
                     ),
@@ -67,49 +76,45 @@ def switch_mode(body: SwitchModeRequest, client: MT5Client = Depends(get_client)
 
     # Pause runner loop during reconnection
     try:
-        from api.runner_loop import pause_runner, resume_runner  # type: ignore[attr-defined]
+        from api.runner_loop import pause_runner, resume_runner
         pause_runner()
     except (ImportError, AttributeError):
         pass
 
-    success = client.switch_mode(mode)
+    success = client.switch_account(body.login)
 
     try:
-        from api.runner_loop import resume_runner  # noqa: F811
+        from api.runner_loop import resume_runner
         resume_runner()
     except (ImportError, AttributeError):
         pass
 
     if not success:
-        raise HTTPException(status_code=500, detail=f"Failed to connect to {mode} MT5 account")
+        raise HTTPException(status_code=500, detail=f"Failed to connect to account {body.login}")
 
-    # After a successful mode switch, clear any circuit-breakers that were set
-    # in the previous mode (e.g. drawdown losses on paper shouldn't block live)
+    # After a successful account switch, clear circuit-breakers from previous account
     try:
         from api.main import get_risk_manager
         _rm = get_risk_manager()
         if _rm is not None:
             _rm.reset_for_mode_switch()
-            # LIVE-1: re-seed the new account's balance immediately so daily drawdown
-            # protection is active from the first trade, not only after the first close.
-            # main.py seeds on startup but does NOT re-seed on mid-session mode switches.
             _new_acct = client.get_account_info()
             if _new_acct and _new_acct.get("balance"):
                 _rm.update_balance(float(_new_acct["balance"]))
     except Exception:
         pass
 
-    # Reload RL agents for the new account mode (C-2 fix)
+    # Reload RL agents for the new account mode
     try:
         from ai.rl_agent import rl_manager
-        rl_manager.switch_mode(mode)
+        rl_manager.switch_mode(client.trading_mode)
     except Exception:
         pass
 
     info = client.get_account_info() or {}
     return {
-        "status":  "switched",
-        "mode":    mode,
+        "status": "switched",
+        "login": body.login,
         "account": info,
     }
 
@@ -133,7 +138,6 @@ def reconnect_mt5():
     success = client.reconnect()
     if not success:
         raise HTTPException(status_code=503, detail="MT5 reconnect failed — check terminal is running.")
-    # Re-wire SignalBus so order execution continues to work after reconnect
     try:
         from engine.order_manager import OrderManager
         from api.signal_bus import bus
@@ -151,4 +155,3 @@ def get_price(symbol: str, client: MT5Client = Depends(get_client)):
     if not price:
         raise HTTPException(status_code=404, detail=f"No price data for: {symbol}")
     return price
-

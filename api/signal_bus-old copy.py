@@ -638,7 +638,7 @@ class SignalBus:
                 fill_price = signal.get("fill_price")
                 try:
                     from engine.trade_journal import trade_journal
-                    from engine.account_store import current_mode, current_account_login
+                    from engine.account_store import current_mode
                     trade_journal.log(
                         ticket=ticket or 0,
                         symbol=signal["symbol"],
@@ -655,7 +655,6 @@ class SignalBus:
                         comment=signal.get("strategy", ""),
                         event="open",
                         confidence=float(signal.get("confidence") or 0.5),
-                        account_login=current_account_login(),
                     )
                 except Exception:
                     pass
@@ -876,7 +875,7 @@ class SignalBus:
                 # Journal: record trade open
                 try:
                     from engine.trade_journal import trade_journal
-                    from engine.account_store import current_mode, current_account_login
+                    from engine.account_store import current_mode
                     trade_journal.log(
                         ticket=result.ticket,
                         symbol=signal["symbol"],
@@ -897,7 +896,6 @@ class SignalBus:
                         slippage=result.slippage,
                         execution_time_ms=result.execution_time_ms,
                         spread_pips=result.spread_pips,
-                        account_login=current_account_login(),
                     )
                 except Exception:
                     pass
@@ -1113,7 +1111,7 @@ async def recover_unclosed_trades(client) -> None:
     from engine.trade_journal import trade_journal
     from ai.trade_memory import memory, TradeOutcome
     from ai.rl_agent import rl_manager
-    from engine.account_store import current_mode, current_account_login
+    from engine.account_store import current_mode
 
     unclosed = trade_journal.get_unclosed_tickets()
     if not unclosed:
@@ -1216,7 +1214,6 @@ async def recover_unclosed_trades(client) -> None:
             close_time=close_time,
             swap=getattr(deal, "swap", None),
             commission=getattr(deal, "commission", None),
-            account_login=current_account_login(),
         )
 
         # Feed to trade memory and RL
@@ -1380,8 +1377,6 @@ async def recover_unclosed_trades(client) -> None:
             _trading_type_untracked = "day_trading"
         # Write an open-event so future restarts see this position in the journal
         try:
-            from engine.trade_journal import trade_journal
-            from engine.account_store import current_mode, current_account_login
             trade_journal.log(
                 ticket=_ticket,
                 symbol=_symbol,
@@ -1395,7 +1390,6 @@ async def recover_unclosed_trades(client) -> None:
                 account_mode=current_mode(),
                 comment=_comment,
                 event="open",
-                account_login=current_account_login(),
             )
         except Exception as _jw:
             logger.debug(f"Recovery: journal write failed for untracked #{_ticket}: {_jw}")
@@ -1920,7 +1914,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             # Journal: update with close data
             try:
                 from engine.trade_journal import trade_journal
-                from engine.account_store import current_mode, current_account_login
+                from engine.account_store import current_mode
                 # Extract swap and commission from the closing MT5 deal
                 _deal_swap       = getattr(deal, "swap", None)
                 _deal_commission = getattr(deal, "commission", None)
@@ -1940,7 +1934,6 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     close_time=close_time,
                     swap=_deal_swap,
                     commission=_deal_commission,
-                    account_login=current_account_login(),
                 )
             except Exception as _je:
                 logger.warning(f"Journal write failed for #{ticket}: {_je}")

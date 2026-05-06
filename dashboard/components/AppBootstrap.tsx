@@ -1,24 +1,34 @@
 "use client";
-import { useEffect } from "react";
-import { fetchAccount, fetchAppConfig, fetchSignals, fetchPositions } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { fetchAccount, fetchAppConfig, fetchSignals, fetchPositions, fetchScannerConfig } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import { useWebSocket } from "@/hooks/useWebSocket";
 
-// all symbols that could be streamed across all modes (must match XM broker names)
-const ALL_SYMBOLS = [
-  "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD","EURJPY","GBPJPY",
-  "GOLD","SILVER","OILCash","BRENTCash","NGASCash",
-  "US30Cash","US100Cash","US500Cash","GER40Cash","UK100Cash",
-  "BTCUSD","ETHUSD","XRPUSD","SOLUSD",
-  "Tesla","Nvidia","Apple","Microsoft","Amazon","Google","Facebook","Netflix","AdvMicroDev",
-];
-
 export default function AppBootstrap() {
   const { setAccount, setConfig, setSignals, setPositions } = useBotStore();
+  const [wsSymbols, setWsSymbols] = useState<string[]>([]);
+
+  // Load scanner config and extract symbols for WebSocket
+  useEffect(() => {
+    const loadScannerSymbols = async () => {
+      try {
+        const scannerConfig = await fetchScannerConfig();
+        const allSymbols = [
+          ...(scannerConfig.scalping?.symbols || []),
+          ...(scannerConfig.day_trading?.symbols || []),
+          ...(scannerConfig.swing?.symbols || []),
+        ];
+        setWsSymbols([...new Set(allSymbols)]);
+      } catch (err) {
+        console.error("Failed to load scanner symbols:", err);
+        setWsSymbols([]);
+      }
+    };
+    loadScannerSymbols();
+  }, []);
 
   // boot: fetch initial data + request browser notification permission
   useEffect(() => {
-    // Request browser notification permission once
     if (typeof Notification !== "undefined" && Notification.permission === "default") {
       Notification.requestPermission();
     }
@@ -28,7 +38,6 @@ export default function AppBootstrap() {
     fetchSignals().then(setSignals).catch(() => {});
     fetchPositions().then(setPositions).catch(() => {});
 
-    // poll account + positions every 5s; signals every 15s to catch any WS-missed updates
     const interval = setInterval(() => {
       fetchAccount().then(setAccount).catch(() => {});
       fetchPositions().then(setPositions).catch(() => {});
@@ -36,10 +45,10 @@ export default function AppBootstrap() {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  // WebSocket live feed
-  useWebSocket(ALL_SYMBOLS);
+  // Only connect WebSocket if we have symbols to subscribe to
+  useWebSocket(wsSymbols);
 
   return null;
 }

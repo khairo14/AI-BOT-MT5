@@ -1,8 +1,0 @@
-{
-  "created_at": "2026-04-14T11:37:34.936381+00:00",
-  "accuracy": 0.5097,
-  "bars_used": 141078,
-  "trading_type": "scalping",
-  "ensemble_size": 3,
-  "note": "frozen anchor \u2014 never auto-overwritten"
-}

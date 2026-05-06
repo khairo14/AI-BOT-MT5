@@ -465,6 +465,7 @@ class RLAgent:
                             f"risk_factor={self._risk_factor:.2f} "
                             f"n_updates={self._n_updates}"
                         )
+                        self._force_save()
                     except Exception as exc:
                         logger.warning(f"RL: could not bootstrap live from paper [{self.trading_type}]: {exc}")
             return
@@ -500,6 +501,7 @@ class RLAgent:
                 f"RL agent loaded [{self.trading_type}/{self._mode}]: "
                 f"conf_thresh={self._conf_thresh:.2f} "
                 f"risk_factor={self._risk_factor:.2f}"
+                f"n_updates={self._n_updates}"
             )
         except Exception as exc:
             logger.warning(f"RL agent could not load [{self.trading_type}/{self._mode}]: {exc}")
@@ -561,6 +563,10 @@ class RLAgentManager:
         Called by the account route after a successful mode switch so the correct
         Q-tables are loaded and live/paper learning remains isolated.
         """
+        # Save current agents before switching
+        for ag in self._agents.values():
+            ag.shutdown()
+
         self._mode = new_mode
         self._agents = {
             f"{strategy}_{trading_type}": RLAgent(trading_type, mode=new_mode, strategy_name=strategy)

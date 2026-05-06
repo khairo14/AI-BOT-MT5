@@ -2060,6 +2060,50 @@
           "session_close": 21
         }
       }
+    },
+    "NZDCHF": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.0,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0,
+      "session_open": 2,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 50,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.8,
+          "tp_rr": 3.0,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0,
+          "session_open": 7,
+          "session_close": 22
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 2,
+          "session_close": 0
+        }
+      }
     }
   },
   "fibonacci_rsi": {
@@ -4147,6 +4191,29 @@
           "tp_rr": 3.0
         }
       }
+    },
+    "EURGBP": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
     }
   },
   "ema_scalp": {
@@ -4435,20 +4502,26 @@
   },
   "bb_squeeze": {
     "GBPUSD": {
-      "bb_period": 15,
+      "bb_period": 25,
       "bb_std": 1.5,
       "min_squeeze_bars": 7,
+      "max_squeeze_bars": 0,
       "sl_atr_mult": 1.0,
-      "tp1_atr_mult": 1.5,
-      "tp_atr_mult": 2.0,
+      "tp_atr_mult": 2.5,
+      "adx_min": 15,
+      "ema_trend_period": 50,
+      "max_spread_pips": 4.0,
       "by_regime": {
         "quiet": {
-          "bb_period": 15,
+          "bb_period": 25,
           "bb_std": 1.5,
           "min_squeeze_bars": 7,
+          "max_squeeze_bars": 0,
           "sl_atr_mult": 1.0,
-          "tp1_atr_mult": 1.5,
-          "tp_atr_mult": 2.0
+          "tp_atr_mult": 2.5,
+          "adx_min": 15,
+          "ema_trend_period": 50,
+          "max_spread_pips": 4.0
         }
       }
     },
@@ -4493,36 +4566,50 @@
       }
     },
     "OILCash": {
-      "bb_period": 25,
-      "bb_std": 2.5,
-      "min_squeeze_bars": 7,
-      "sl_atr_mult": 1.0,
-      "tp_atr_mult": 3.0,
+      "bb_period": 15,
+      "bb_std": 2.0,
+      "min_squeeze_bars": 3,
+      "max_squeeze_bars": 20,
+      "sl_atr_mult": 1.5,
+      "tp_atr_mult": 2.5,
+      "adx_min": 25,
+      "ema_trend_period": 70,
+      "max_spread_pips": 3.0,
       "by_regime": {
         "quiet": {
-          "bb_period": 25,
-          "bb_std": 2.5,
-          "min_squeeze_bars": 7,
-          "sl_atr_mult": 1.0,
-          "tp_atr_mult": 3.0
+          "bb_period": 15,
+          "bb_std": 2.0,
+          "min_squeeze_bars": 3,
+          "max_squeeze_bars": 20,
+          "sl_atr_mult": 1.5,
+          "tp_atr_mult": 2.5,
+          "adx_min": 25,
+          "ema_trend_period": 70,
+          "max_spread_pips": 3.0
         }
       }
     },
     "USDJPY": {
-      "bb_period": 25,
+      "bb_period": 15,
       "bb_std": 2.5,
-      "min_squeeze_bars": 5,
-      "sl_atr_mult": 1.0,
-      "tp1_atr_mult": 1.5,
-      "tp_atr_mult": 2.0,
+      "min_squeeze_bars": 3,
+      "max_squeeze_bars": 0,
+      "sl_atr_mult": 2.0,
+      "tp_atr_mult": 3.0,
+      "adx_min": 25,
+      "ema_trend_period": 70,
+      "max_spread_pips": 3.0,
       "by_regime": {
         "quiet": {
-          "bb_period": 25,
+          "bb_period": 15,
           "bb_std": 2.5,
-          "min_squeeze_bars": 5,
-          "sl_atr_mult": 1.0,
-          "tp1_atr_mult": 1.5,
-          "tp_atr_mult": 2.0
+          "min_squeeze_bars": 3,
+          "max_squeeze_bars": 0,
+          "sl_atr_mult": 2.0,
+          "tp_atr_mult": 3.0,
+          "adx_min": 25,
+          "ema_trend_period": 70,
+          "max_spread_pips": 3.0
         }
       }
     },
@@ -4835,6 +4922,30 @@
           "vwap_std_window": 20,
           "atr_vol_filter": 1.0,
           "atr_period": 20
+        }
+      }
+    },
+    "USDCHF": {
+      "sigma_entry": 2.0,
+      "sigma_sl": 3.0,
+      "rsi_period": 9,
+      "rsi_oversold": 28,
+      "rsi_overbought": 72,
+      "min_rr_to_vwap": 1.0,
+      "vwap_std_window": 15,
+      "atr_vol_filter": 2.0,
+      "atr_period": 10,
+      "by_regime": {
+        "quiet": {
+          "sigma_entry": 1.2,
+          "sigma_sl": 2.0,
+          "rsi_period": 14,
+          "rsi_oversold": 28,
+          "rsi_overbought": 65,
+          "min_rr_to_vwap": 0.4,
+          "vwap_std_window": 15,
+          "atr_vol_filter": 2.0,
+          "atr_period": 14
         }
       }
     }

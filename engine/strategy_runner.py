@@ -1,6 +1,6 @@
 """
 Strategy Runner / Dispatcher
-Loads strategies from config/strategies.json + config/symbols.json,
+Loads strategies from config/strategies.json,
 fetches OHLCV data for each symbol, runs the assigned strategies,
 validates signals through RiskManager, and emits them to either
 auto-execution (OrderManager) or the manual-confirmation signal queue.
@@ -298,7 +298,7 @@ class StrategyRunner:
         self.execution_mode = execution_mode
 
         self._strategies_cfg: dict = self._load_json("strategies.json")
-        self._symbols_cfg: dict    = self._load_json("symbols.json")
+        self._symbols_cfg: dict    = {}
         self._cfg_loaded_at: float = _time.monotonic()
 
         # Pending signals for manual confirmation (populated when mode == "manual")
@@ -691,7 +691,7 @@ class StrategyRunner:
         _now_cfg = _time.monotonic()
         if _now_cfg - self._cfg_loaded_at >= 5.0:
             self._strategies_cfg = self._load_json("strategies.json")
-            self._symbols_cfg    = self._load_json("symbols.json")
+            self._symbols_cfg    = {}
             self._cfg_loaded_at  = _now_cfg
         new_signals: list[StrategySignal] = []
         symbols = symbols_override if symbols_override is not None else self._enabled_symbols(trading_type)
@@ -853,7 +853,7 @@ class StrategyRunner:
             )
             try:
                 from engine.trade_journal import trade_journal
-                from engine.account_store import current_mode
+                from engine.account_store import current_mode, current_account_login
                 trade_journal.log(
                     ticket=result.ticket or 0,
                     symbol=sig.symbol,
@@ -872,6 +872,7 @@ class StrategyRunner:
                     slippage=result.slippage,
                     execution_time_ms=result.execution_time_ms,
                     spread_pips=result.spread_pips,
+                    account_login=current_account_login(),
                 )
             except Exception as _je:
                 logger.warning(f"Journal write failed for {sig.strategy}/{sig.symbol}: {_je}")

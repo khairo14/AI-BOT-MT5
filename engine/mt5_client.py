@@ -14,7 +14,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from loguru import logger
 
-from engine.account_store import load_mode, save_mode
+from engine.account_store import load_account
 
 load_dotenv()
 
@@ -44,8 +44,12 @@ class MT5Client:
         self._connected = False
         self._lock = threading.RLock()  # RLock allows re-entrant acquisition (needed by OrderManager)
         # account_store takes priority over env var so dashboard switches survive restarts
-        self._trading_mode = load_mode()
+            # Load credentials FIRST
         self._credentials = self._load_credentials()
+
+        acc_type = self._credentials.get("type", "")
+        self._trading_mode = "paper" if acc_type == "demo" else "live"
+
 
     @property
     def trading_mode(self) -> str:
@@ -56,18 +60,18 @@ class MT5Client:
     # ------------------------------------------------------------------
 
     def _load_credentials(self) -> dict:
-        mode = self._trading_mode
-        if mode == "live":
-            return {
-                "login":    int(os.getenv("MT5_LIVE_LOGIN", 0)),
-                "password": os.getenv("MT5_LIVE_PASSWORD", ""),
-                "server":   os.getenv("MT5_LIVE_SERVER", ""),
-            }
-        return {
-            "login":    int(os.getenv("MT5_DEMO_LOGIN", 0)),
-            "password": os.getenv("MT5_DEMO_PASSWORD", ""),
-            "server":   os.getenv("MT5_DEMO_SERVER", ""),
-        }
+        demo_accounts = json.loads(os.getenv("MT5_DEMO_ACCOUNTS", "[]"))
+        live_accounts = json.loads(os.getenv("MT5_LIVE_ACCOUNTS", "[]"))
+        all_accounts = demo_accounts + live_accounts
+        
+        # Get current account from account_mode.json (single source of truth)
+        current_account = load_account()
+        current_login = current_account.get("login", 0)
+
+        for acc in all_accounts:
+            if acc["login"] == current_login:
+                return acc
+        return all_accounts[0] if all_accounts else {}
 
     def connect(self) -> bool:
         """Initialize MT5 and log in. Returns True on success."""
@@ -93,8 +97,8 @@ class MT5Client:
         self._connected = True
         info = mt5.account_info()
         logger.info(
-            f"Connected to MT5 | Mode: {self._trading_mode.upper()} | "
-            f"Account: {info.login} | Server: {info.server} | "
+            f"Connected to MT5 | Login: {info.login} | "
+            f"Type: {self._credentials.get('type', 'unknown')} | "
             f"Balance: {info.balance} {info.currency}"
         )
         return True
@@ -138,18 +142,21 @@ class MT5Client:
         logger.info("MT5 reconnected successfully.")
         return True
 
-    def switch_mode(self, mode: str) -> bool:
-        """Switch between 'paper' and 'live' trading modes."""
-        mode = mode.lower()
-        if mode not in ("paper", "live"):
-            logger.error(f"Invalid trading mode: {mode}")
-            return False
-        self.disconnect()
-        self._trading_mode = mode
+    def switch_account(self, login: int) -> bool:
+        """Switch to a specific MT5 account by login number."""
+        self.disconnect()     
+        
+        # Reload credentials for the new account
         self._credentials = self._load_credentials()
+        
+        # Determine trading mode for backward compat
+        acc_type = self._credentials.get("type", "")
+        self._trading_mode = "paper" if acc_type == "demo" else "live"
+        
         success = self.connect()
         if success:
-            save_mode(mode)   # persist so restart resumes with this mode
+            from engine.account_store import save_account
+            save_account(login, acc_type)
         return success
 
     # ------------------------------------------------------------------
@@ -400,18 +407,35 @@ class MT5Client:
         from datetime import datetime, timedelta, timezone as _tz
 
         with self._lock:
-            deals = mt5.history_deals_get(position=position_ticket)
-        if deals:
-            return list(deals)
+            # FIRST: Try date-range lookup for recent trades (last 7 days)
+            # This works more reliably on XM than position lookup
+            to_dt = datetime.now(_tz.utc) + timedelta(hours=24)
+            from_dt = to_dt - timedelta(days=9)
+            recent_deals = mt5.history_deals_get(from_dt, to_dt)
 
-        # Fallback: load last 30 days of history and filter by position_id
-        to_dt   = datetime.now(_tz.utc)
-        from_dt = to_dt - timedelta(days=60)
-        with self._lock:
+            if recent_deals:
+                for d in recent_deals:
+                    entry_type = "IN" if d.entry == mt5.DEAL_ENTRY_IN else "OUT" if d.entry == mt5.DEAL_ENTRY_OUT else "UNKNOWN"
+                    logger.info(f"  Deal: ticket={d.ticket}, pos_id={d.position_id}, order={d.order}, profit={d.profit}, entry={entry_type}")
+                
+                matches = [d for d in recent_deals if d.position_id == position_ticket or d.order == position_ticket]
+                if matches:
+                    for m in matches:
+                        logger.info(f"MATCH: ticket={m.ticket}, profit={m.profit}, entry={'OUT' if m.entry == mt5.DEAL_ENTRY_OUT else 'IN'}")
+                    return matches
+            
+            # SECOND: Try position-based lookup (works for older trades)
+            deals = mt5.history_deals_get(position=position_ticket)
+            if deals:
+                return list(deals)
+            
+            # THIRD: Extended search (last 90 days)
+            from_dt = to_dt - timedelta(days=90)
             all_deals = mt5.history_deals_get(from_dt, to_dt)
-        if not all_deals:
-            return []
-        return [d for d in all_deals if d.position_id == position_ticket]
+            if not all_deals:
+                return []
+            
+            return [d for d in all_deals if d.position_id == position_ticket or d.order == position_ticket]
 
     # ------------------------------------------------------------------
     # Context manager support

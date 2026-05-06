@@ -19,7 +19,7 @@ class PerformanceReporter:
     def __init__(self, journal_path: str = "data/trade_journal.jsonl"):
         self.journal_path = Path(journal_path)
         
-    def load_trades(self, days: int = None, mode: str = None) -> List[Dict[str, Any]]:
+    def load_trades(self, days: int = None, mode: str = None, account_login: int = None) -> List[Dict[str, Any]]:
         """Load all trades, optionally filtered by date and account mode."""
         trades = []
         cutoff = datetime.now() - timedelta(days=days) if days else None
@@ -28,7 +28,7 @@ class PerformanceReporter:
         # their true net P&L (partial_close profit + runner close profit).
         try:
             from engine.trade_journal import trade_journal as _tj
-            merged = _tj.get_closed_merged(account=mode or "all", limit=50_000)
+            merged = _tj.get_closed_merged(account=mode or "all", limit=50_000, account_login=account_login)
         except Exception:
             merged = []
 
@@ -141,9 +141,9 @@ class PerformanceReporter:
             ),
         }
     
-    def generate_report(self, days: int = None, mode: str = None) -> Dict[str, Any]:
+    def generate_report(self, days: int = None, mode: str = None, account_login: int = None) -> Dict[str, Any]:
         """Generate full performance report"""
-        trades = self.load_trades(days, mode=mode)
+        trades = self.load_trades(days, mode=mode, account_login=account_login)
         overall_metrics = self.calculate_metrics(trades)
         by_symbol = self.breakdown_by_symbol(trades)
         by_type = self.breakdown_by_trading_type(trades)

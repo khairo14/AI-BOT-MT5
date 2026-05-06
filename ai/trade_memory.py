@@ -51,6 +51,7 @@ class TradeOutcome:
     lstm_predicted_direction: Optional[str] = None  # "BUY" or "SELL" — LSTM prediction at signal time
     regime:          Optional[str] = None   # market regime at signal time (e.g. "trending_bull")
     rl_state:        Optional[str] = None   # RL state bucket at signal time (e.g. "med_high_active_low_tight")
+    account_login:   int = 0
     extra:           dict = field(default_factory=dict)
 
 class TradeMemory:
@@ -79,7 +80,7 @@ class TradeMemory:
         with open(MEMORY_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-    def recent(self, n: int = 200, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None) -> list[dict]:
+    def recent(self, n: int = 200, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None, account_login: Optional[int] = None) -> list[dict]:
         """Return the last N outcomes, optionally filtered by trading_type and/or mode.
         live_only=True excludes backtest entries so RL/optimizer aren't skewed by re-runs."""
         with self._lock:
@@ -88,13 +89,15 @@ class TradeMemory:
             data = [d for d in data if d.get("trading_type") == trading_type]
         if mode:
             data = [d for d in data if d.get("mode", "live") == mode]
+        if account_login is not None:
+            data = [d for d in data if d.get("account_login", 0) == account_login]
         if live_only:
             data = [d for d in data if d.get("extra", {}).get("source") != "backtest"]
         return data[-n:]
 
-    def stats(self, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None, exclude_manual: bool = False) -> dict:
+    def stats(self, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None, exclude_manual: bool = False, account_login: Optional[int] = None) -> dict:
         """Aggregate stats used by the RL agent and dashboard."""
-        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, mode=mode)
+        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, mode=mode, account_login=account_login)
         if exclude_manual:
             outcomes = [o for o in outcomes if o.get("outcome") in ("tp_hit", "sl_hit")]
         if not outcomes:
@@ -136,6 +139,7 @@ class TradeMemory:
         min_samples: int = 20,
         live_only: bool = True,
         mode: Optional[str] = None,
+        account_login: Optional[int] = None,
     ) -> dict:
         """
         Compute live LSTM prediction accuracy by comparing lstm_predicted_direction
@@ -154,6 +158,7 @@ class TradeMemory:
             trading_type=trading_type,
             live_only=live_only,
             mode=mode,
+            account_login=account_login,
         )
         # Only consider trades where LSTM prediction was recorded
         tracked = [

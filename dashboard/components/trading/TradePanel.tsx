@@ -1,15 +1,18 @@
 "use client";
 import { useState, useEffect } from "react";
-import { placeOrder } from "@/lib/api";
+import { placeOrder, fetchScannerConfig } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 import type { TradingMode, ExecutionMode, Signal } from "@/types";
-import type { SymbolGroup } from "@/components/dashboard/TradingModePage";
 
 interface Props {
   mode: TradingMode;
   defaultSymbol: string;
-  symbolGroups: SymbolGroup[];
   execMode: ExecutionMode;
+}
+
+interface SymbolOption {
+  symbol: string;
+  category: string;
 }
 
 function ConfidenceBadge({ value }: { value: number }) {
@@ -24,15 +27,87 @@ function ConfidenceBadge({ value }: { value: number }) {
   );
 }
 
-export default function TradePanel({ mode, defaultSymbol, symbolGroups, execMode }: Props) {
+// Categorize symbol for grouping in dropdown
+function categorizeSymbol(sym: string): string {
+  const upper = sym.toUpperCase();
+  
+  const forexEndings = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"];
+  if (sym.length === 6 && forexEndings.some(end => upper.endsWith(end))) {
+    const majors = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"];
+    return majors.includes(upper) ? "Forex Majors" : "Forex Minors";
+  }
+  
+  if (upper.includes("BTC") || upper.includes("ETH") || upper.includes("XRP") || 
+      upper.includes("SOL") || upper.includes("ADA") || upper.includes("DOGE")) {
+    return "Crypto";
+  }
+  
+  if (upper.includes("US100") || upper.includes("US30") || upper.includes("US500") || 
+      upper.includes("SPX") || upper.includes("NAS") || upper.includes("GER") || 
+      upper.includes("UK100") || upper.includes("DAX")) {
+    return "Indices";
+  }
+  
+  if (upper.includes("GOLD") || upper.includes("XAU") || upper.includes("SILVER") || 
+      upper.includes("XAG") || upper.includes("OIL") || upper.includes("BRENT") || 
+      upper.includes("NGAS")) {
+    return "Commodities";
+  }
+  
+  return "Other";
+}
+
+export default function TradePanel({ mode, defaultSymbol, execMode }: Props) {
   const { ticks, signals, pushNotification } = useBotStore();
   const [symbol, setSymbol] = useState(defaultSymbol);
   const [direction, setDirection] = useState<"buy" | "sell">("buy");
   const [sl, setSl] = useState("20");
   const [tp, setTp] = useState("40");
   const [loading, setLoading] = useState(false);
+  const [scannerSymbols, setScannerSymbols] = useState<SymbolOption[]>([]);
+  const [loadingSymbols, setLoadingSymbols] = useState(true);
 
-  const allSymbols = symbolGroups.flatMap((g) => g.symbols);
+  // Load scanner config for this mode
+  useEffect(() => {
+    const loadSymbols = async () => {
+      setLoadingSymbols(true);
+      try {
+        const scannerConfig = await fetchScannerConfig();
+        const modeConfig = scannerConfig[mode];
+        const symbols = modeConfig?.symbols || [];
+        
+        // Group by category
+        const grouped = new Map<string, Set<string>>();
+        symbols.forEach(sym => {
+          const cat = categorizeSymbol(sym);
+          if (!grouped.has(cat)) grouped.set(cat, new Set());
+          grouped.get(cat)!.add(sym);
+        });
+        
+        const options: SymbolOption[] = [];
+        // Sort categories by priority
+        const priority = ["Forex Majors", "Forex Minors", "Crypto", "Commodities", "Indices", "Other"];
+        for (const cat of priority) {
+          if (grouped.has(cat)) {
+            const syms = Array.from(grouped.get(cat)!).sort();
+            syms.forEach(s => options.push({ symbol: s, category: cat }));
+          }
+        }
+        setScannerSymbols(options);
+        
+        // Set default symbol if current symbol not in list
+        if (symbols.length > 0 && !symbols.includes(symbol)) {
+          setSymbol(symbols[0]);
+        }
+      } catch (err) {
+        console.error("Failed to load scanner symbols:", err);
+      } finally {
+        setLoadingSymbols(false);
+      }
+    };
+    loadSymbols();
+  }, [mode, defaultSymbol]);
+
   const tick = ticks[symbol];
 
   // Find the top pending signal for the current symbol in this mode
@@ -44,7 +119,6 @@ export default function TradePanel({ mode, defaultSymbol, symbolGroups, execMode
   useEffect(() => {
     if (!activeSignal) return;
     setDirection(activeSignal.direction);
-    // Convert absolute SL/TP to pips approximation for display
     if (tick && activeSignal.entry && activeSignal.sl && activeSignal.tp) {
       const pipFactor = symbol.includes("JPY") ? 100 : 10000;
       const slPips = Math.abs(activeSignal.entry - activeSignal.sl) * pipFactor;
@@ -52,7 +126,7 @@ export default function TradePanel({ mode, defaultSymbol, symbolGroups, execMode
       setSl(slPips.toFixed(1));
       setTp(tpPips.toFixed(1));
     }
-  }, [activeSignal?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSignal?.id]);
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -77,6 +151,25 @@ export default function TradePanel({ mode, defaultSymbol, symbolGroups, execMode
       setLoading(false);
     }
   };
+
+  // Group symbols by category for display
+  const groupedSymbols: Map<string, string[]> = new Map();
+  scannerSymbols.forEach(({ symbol: sym, category }) => {
+    if (!groupedSymbols.has(category)) groupedSymbols.set(category, []);
+    groupedSymbols.get(category)!.push(sym);
+  });
+
+  if (loadingSymbols) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+        <div className="animate-pulse">
+          <div className="h-4 bg-gray-800 rounded w-24 mb-4"></div>
+          <div className="h-10 bg-gray-800 rounded mb-3"></div>
+          <div className="h-10 bg-gray-800 rounded"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
@@ -151,9 +244,9 @@ export default function TradePanel({ mode, defaultSymbol, symbolGroups, execMode
           onChange={(e) => setSymbol(e.target.value)}
           className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
         >
-          {symbolGroups.map((grp) => (
-            <optgroup key={grp.label} label={grp.label}>
-              {grp.symbols.map((s) => (
+          {Array.from(groupedSymbols.entries()).map(([category, syms]) => (
+            <optgroup key={category} label={category}>
+              {syms.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </optgroup>
@@ -225,9 +318,9 @@ export default function TradePanel({ mode, defaultSymbol, symbolGroups, execMode
         {loading ? "Placing..." : execMode === "manual" ? "Place Order" : "Execute"}
       </button>
 
-      {allSymbols.length > 0 && (
+      {scannerSymbols.length > 0 && (
         <p className="text-[10px] text-gray-700 text-center">
-          {allSymbols.length} symbols available · {mode.replace("_", " ")}
+          {scannerSymbols.length} symbols available · {mode.replace("_", " ")}
         </p>
       )}
     </div>

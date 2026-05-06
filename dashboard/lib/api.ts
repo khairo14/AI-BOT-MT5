@@ -23,11 +23,18 @@ export const api = axios.create({ baseURL: BASE, timeout: 10_000 });
 export const fetchAccount = (): Promise<AccountInfo> =>
   api.get("/account/").then((r) => r.data);
 
-export const fetchAccountMode = (): Promise<{ mode: "paper" | "live" }> =>
+export const fetchAccountMode = (): Promise<{ mode: "paper" | "live"; login: number; type: string }> =>
   api.get("/account/mode").then((r) => r.data);
 
-export const switchMode = (mode: "paper" | "live", force = false): Promise<SwitchModeResponse> =>
-  api.post("/account/switch-mode", { mode, force }).then((r) => r.data);
+// NEW: Fetch all configured MT5 accounts
+export const fetchAccounts = (): Promise<{
+  accounts: Array<{ login: number; server: string; type: string; broker_name?: string }>;
+  current: number;
+}> => api.get("/account/accounts").then((r) => r.data);
+
+// NEW: Switch to specific account by login
+export const switchAccount = (login: number, force = false): Promise<SwitchModeResponse> =>
+  api.post("/account/switch-account", { login, force }).then((r) => r.data);
 
 export const fetchPrice = (symbol: string): Promise<{ bid: number; ask: number }> =>
   api.get(`/account/price/${symbol}`).then((r) => r.data);
@@ -525,10 +532,15 @@ export interface ProfitabilityReport {
   };
 }
 
-export const fetchProfitabilityReport = (days?: number, account?: string): Promise<ProfitabilityReport> => {
+export const fetchProfitabilityReport = (
+  days?: number,
+  account?: string,
+  accountLogin?: number
+): Promise<ProfitabilityReport> => {
   const params = new URLSearchParams();
   if (days) params.append("days", String(days));
   if (account && account !== "all") params.append("account", account);
+  if (accountLogin) params.append("account_login", String(accountLogin));
   const qs = params.toString();
   return api.get(`/profitability/${qs ? `?${qs}` : ""}`).then((r) => r.data);
 };

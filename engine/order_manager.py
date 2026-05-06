@@ -510,6 +510,29 @@ class OrderManager:
             f"Reason: {reason} | Close price: {price}"
         )
         
+        try:
+            from engine.trade_journal import trade_journal
+            from engine.account_store import current_mode, current_account_login
+            from datetime import datetime, timezone
+            trade_journal.log(
+                ticket=ticket,
+                symbol=pos.symbol,
+                direction="BUY" if pos.type == mt5.ORDER_TYPE_BUY else "SELL",
+                volume=pos.volume,
+                entry=pos.price_open,
+                sl=pos.sl,
+                tp=pos.tp if pos.tp else None,
+                profit=pos.profit,
+                trading_type="",  # Can be derived from comment if needed
+                account_mode=current_mode(),
+                comment=reason,
+                event="close",
+                close_time=datetime.now(tz=timezone.utc).isoformat(),
+                account_login=current_account_login(),
+            )
+        except Exception as _je:
+            logger.debug(f"Journal write failed for close #{ticket}: {_je}")
+    
         # Notify user of position closed
         notification_manager.add(
             type="position_closed",
@@ -637,7 +660,8 @@ class OrderManager:
         # journal, stats, RL agent, and win-rate all see the correct figure.
         try:
             from engine.trade_journal import trade_journal
-            from engine.account_store import current_mode
+            from engine.account_store import current_mode, current_account_login
+
             from datetime import datetime, timezone
             _partial_profit: float | None = None
             _partial_swap: float | None = None
@@ -667,6 +691,7 @@ class OrderManager:
                 close_time=datetime.now(tz=timezone.utc).isoformat(),
                 swap=_partial_swap,
                 commission=_partial_commission,
+                account_login=current_account_login(),
             )
         except Exception as _je:
             logger.debug(f"partial_close journal write failed for #{ticket}: {_je}")

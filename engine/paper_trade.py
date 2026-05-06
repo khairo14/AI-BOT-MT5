@@ -186,7 +186,7 @@ class PaperTradeEngine:
                         self._history = self._history[-_HISTORY_MAX:]
                 try:
                     from engine.trade_journal import trade_journal
-                    from engine.account_store import current_mode
+                    from engine.account_store import current_mode, current_account_login
                     from datetime import datetime, timezone
                     trade_journal.log(
                         ticket=ticket,
@@ -204,6 +204,7 @@ class PaperTradeEngine:
                         close_time=datetime.fromtimestamp(
                             pos.close_time, tz=timezone.utc
                         ).isoformat(),
+                        account_login=current_account_login(),
                     )
                 except Exception as _je:
                     logger.warning(f"Journal write failed for paper #{ticket}: {_je}")

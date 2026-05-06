@@ -13,6 +13,7 @@ router = APIRouter(tags=["Profitability"])
 async def get_profitability_report(
     days: int = Query(None, description="Filter trades by last N days"),
     account: str = Query("all", description="Filter by account: paper, live, or all"),
+    account_login: int = Query(None, description="Filter by specific MT5 account login number"),
 ):
     """
     Get comprehensive profitability report
@@ -26,17 +27,18 @@ async def get_profitability_report(
     """
     reporter = PerformanceReporter()
     mode = None if account == "all" else account
-    return reporter.generate_report(days, mode=mode)
+    return reporter.generate_report(days, mode=mode, account_login=account_login)
 
 
 @router.get("/status")
 async def get_profitability_status(
     account: str = Query("all", description="Filter by account: paper, live, or all"),
+    account_login: int = Query(None, description="Filter by specific MT5 account login number"),
 ):
     """Quick check of profitability metrics and success criteria"""
     reporter = PerformanceReporter()
     mode = None if account == "all" else account
-    report = reporter.generate_report(mode=mode)
+    report = reporter.generate_report(mode=mode , account_login=account_login)
     return {
         "task": "Profitability Validation",
         "status": report["task_2_status"]["status"],

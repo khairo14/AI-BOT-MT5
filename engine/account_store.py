@@ -1,12 +1,11 @@
 """
-Account store — persists the active trading mode (paper/live) to disk.
+Account store — persists the active trading account to disk.
 
-config/account_mode.json is written every time the mode is changed via the API
-or start-up, so restarts always resume with the last chosen mode.
+config/account_mode.json stores {"login": <account_number>, "type": "<account_type>"}
+This survives restarts so the bot reconnects to the last chosen account.
 
 The .env file is the authoritative source at first boot; account_mode.json
-takes precedence on subsequent starts so that dashboard-initiated mode switches
-survive a restart without needing to edit .env.
+takes precedence on subsequent starts.
 """
 
 from __future__ import annotations
@@ -16,45 +15,50 @@ import os
 import tempfile
 from pathlib import Path
 
-from typing import Literal, Optional
-
 from loguru import logger
 
-AccountMode = Literal["paper", "live"]
-
 _STORE_PATH = Path(__file__).parent.parent / "config" / "account_mode.json"
-_VALID_MODES = frozenset({"paper", "live"})
 
 
-def load_mode() -> AccountMode:
+def _get_all_accounts() -> list[dict]:
+    """Load all configured accounts from .env."""
+    demo = json.loads(os.getenv("MT5_DEMO_ACCOUNTS", "[]"))
+    live = json.loads(os.getenv("MT5_LIVE_ACCOUNTS", "[]"))
+    return demo + live
+
+
+def load_account() -> dict:
     """
-    Return the active trading mode.
-
+    Return the active account as {login, type}.
+    
     Priority:
       1. config/account_mode.json (set by last dashboard switch)
-      2. TRADING_MODE env var
-      3. "paper" (safe default)
+      2. MT5_CURRENT_ACCOUNT env var
+      3. First account in the list (safe default)
     """
     if _STORE_PATH.exists():
         try:
             data = json.loads(_STORE_PATH.read_text())
-            mode = data.get("mode", "").lower()
-            if mode in _VALID_MODES:
-                return mode  # type: ignore[return-value]
+            if "login" in data:
+                return data
         except Exception:
             pass
 
-    env_mode = os.getenv("TRADING_MODE", "paper").lower()
-    return env_mode if env_mode in _VALID_MODES else "paper"  # type: ignore[return-value]
+    current = int(os.getenv("MT5_CURRENT_ACCOUNT", "0"))
+    for acc in _get_all_accounts():
+        if acc["login"] == current:
+            return {"login": acc["login"], "type": acc["type"]}
+    
+    accounts = _get_all_accounts()
+    if accounts:
+        return {"login": accounts[0]["login"], "type": accounts[0]["type"]}
+    return {"login": 0, "type": "unknown"}
 
 
-def save_mode(mode: str) -> None:
-    """Persist the active mode to disk. Raises ValueError on invalid input."""
-    mode = mode.lower()
-    if mode not in _VALID_MODES:
-        raise ValueError(f"Invalid trading mode: {mode!r}. Must be 'paper' or 'live'.")
+def save_account(login: int, account_type: str) -> None:
+    """Persist the active account to disk."""
     _STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    data = json.dumps({"mode": mode}, indent=2)
+    data = json.dumps({"login": login, "type": account_type}, indent=2)
     fd, tmp = tempfile.mkstemp(dir=_STORE_PATH.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -66,10 +70,22 @@ def save_mode(mode: str) -> None:
         except OSError:
             pass
         raise
-    os.environ["TRADING_MODE"] = mode
-    logger.info(f"Trading mode saved: {mode.upper()}")
+    os.environ["MT5_CURRENT_ACCOUNT"] = str(login)
+    logger.info(f"Account saved: {login} ({account_type})")
 
 
-def current_mode() -> AccountMode:
-    """Convenience alias for load_mode()."""
-    return load_mode()
+def current_account_login() -> int:
+    return load_account().get("login", 0)
+
+
+def current_account_type() -> str:
+    return load_account().get("type", "unknown")
+
+
+def is_demo() -> bool:
+    return current_account_type() == "demo"
+
+
+def current_mode() -> str:
+    """Backward compat — returns 'paper' for demo, 'live' otherwise."""
+    return "paper" if is_demo() else "live"

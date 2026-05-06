@@ -2,8 +2,8 @@
 Trade Journal — append-only JSONL store for all bot-executed trades.
 
 Every trade placed by the bot (auto or manual approval) is appended here
-with its account_mode tag ("paper" / "live"), so the dashboard can show
-a unified, filterable history across both accounts.
+with its account_mode tag ("paper" / "live") and account_login, so the
+dashboard can show a unified, filterable history across all accounts.
 
 Storage: data/trade_journal.jsonl (one JSON object per line)
 
@@ -13,9 +13,10 @@ Usage:
     trade_journal.log(ticket=12345, symbol="EURUSD", direction="buy",
                       volume=0.1, entry=1.0850, sl=1.0820, tp=1.0910,
                       profit=None, trading_type="scalping",
-                      account_mode="paper", comment="EMAScalp")
+                      account_mode="paper", account_login=1301109267,
+                      comment="EMAScalp")
 
-    entries = trade_journal.get(account="paper", limit=50)
+    entries = trade_journal.get(account="paper", account_login=1301109267, limit=50)
 """
 
 from __future__ import annotations
@@ -58,7 +59,7 @@ class TradeJournal:
         comment: str = "",
         open_time: Optional[str] = None,
         close_time: Optional[str] = None,
-        event: Literal["open", "close"] = "open",
+        event: Literal["open", "close", "partial_close"] = "open",
         confidence: Optional[float] = None,
         expected_price: Optional[float] = None,
         slippage: Optional[float] = None,
@@ -68,6 +69,7 @@ class TradeJournal:
         commission: Optional[float] = None,
         tp2: Optional[float] = None,
         tp3: Optional[float] = None,
+        account_login: int = 0,
     ) -> None:
         """Append a trade event to the journal."""
         record = {
@@ -83,20 +85,17 @@ class TradeJournal:
             "profit":       profit,
             "trading_type": trading_type,
             "account_mode": account_mode,
+            "account_login": account_login,
             "comment":      comment,
             "event":        event,
-            # open events default open_time to now(); close/other events store null
-            # so the dashboard always uses the open event as the authoritative source.
             "open_time":    (open_time or datetime.now(tz=timezone.utc).isoformat()) if event == "open" else open_time,
             "close_time":   close_time,
             "logged_at":    datetime.now(tz=timezone.utc).isoformat(),
             "confidence":   confidence,
-            # Execution quality metrics (Task 26)
             "expected_price":    expected_price,
             "slippage":          slippage,
             "execution_time_ms": execution_time_ms,
             "spread_pips":       spread_pips,
-            # Swap and commission (LIVE-5)
             "swap":              swap,
             "commission":        commission,
         }
@@ -113,15 +112,17 @@ class TradeJournal:
         trading_type: Optional[str] = None,
         event: Optional[str] = None,
         limit: int = 100,
+        account_login: Optional[int] = None,
     ) -> list[dict]:
         """
         Read journal entries, newest first.
 
         Args:
-            account:      "paper", "live", or "all"
-            trading_type: "scalping", "day_trading", "swing", or None
-            event:        "open", "close", or None
-            limit:        max entries to return
+            account:       "paper", "live", or "all"
+            trading_type:  "scalping", "day_trading", "swing", or None
+            event:         "open", "close", or None
+            limit:         max entries to return
+            account_login: filter by specific MT5 account number
         """
         if not self._path.exists():
             return []
@@ -142,6 +143,8 @@ class TradeJournal:
                 continue
             if account != "all" and record.get("account_mode") != account:
                 continue
+            if account_login is not None and record.get("account_login") != account_login:
+                continue
             if trading_type and record.get("trading_type") != trading_type:
                 continue
             if event and record.get("event") != event:
@@ -152,13 +155,10 @@ class TradeJournal:
 
         return results
 
-    def stats(self, account: str = "all") -> dict:
+    def stats(self, account: str = "all", account_login: Optional[int] = None) -> dict:
         """Return summary stats for the given account filter."""
-        from datetime import datetime, timezone
-        entries = self.get(account=account, limit=10_000)
-        # Include partial_close events with a real profit so today_pnl and
-        # total_profit reflect the true net (partial TP profit + runner close).
-        closed  = [
+        entries = self.get(account=account, limit=10_000, account_login=account_login)
+        closed = [
             e for e in entries
             if e.get("event") in ("close", "partial_close") and e.get("profit") is not None
         ]
@@ -175,9 +175,6 @@ class TradeJournal:
             if (e.get("close_time") or e.get("logged_at") or "")[:10] == today_str
         ]
 
-        # For win/loss counting and trade count, group by ticket so a partial_close
-        # + close on the same ticket counts as ONE trade (not two). Sum their profits
-        # to determine the net outcome.
         from collections import defaultdict
         _ticket_profit: dict = defaultdict(float)
         _ticket_tt: dict = {}
@@ -186,7 +183,7 @@ class TradeJournal:
             if e.get("trading_type"):
                 _ticket_tt[e["ticket"]] = e["trading_type"]
 
-        _net_trades = list(_ticket_profit.items())  # [(ticket, net_profit), ...]
+        _net_trades = list(_ticket_profit.items())
         wins   = [t for t, p in _net_trades if p > 0]
         losses = [t for t, p in _net_trades if p <= 0]
 
@@ -209,27 +206,18 @@ class TradeJournal:
             "today_pnl":    round(sum(e["profit"] or 0 for e in today), 2),
         }
 
-
     def get_closed_merged(
         self,
         account: str = "all",
         trading_type: Optional[str] = None,
         limit: int = 10_000,
+        account_login: Optional[int] = None,
     ) -> list[dict]:
-        """
-        Return one dict per closed ticket with the true net profit.
-
-        For trades that used a partial TP (partial_close event followed by a
-        close event), the partial_close profit is summed into the close entry
-        so callers see the real net P&L without double-counting.
-
-        Returned list is sorted newest-close-first.
-        """
-        all_entries = self.get(account=account, limit=limit)
+        """Return one dict per closed ticket with the true net profit."""
+        all_entries = self.get(account=account, limit=limit, account_login=account_login)
         if trading_type:
             all_entries = [e for e in all_entries if e.get("trading_type") == trading_type]
 
-        # Accumulate partial_close profits per ticket
         partial_profit: dict[int, float] = {}
         for e in all_entries:
             if e.get("event") == "partial_close" and e.get("profit") is not None:
@@ -237,25 +225,21 @@ class TradeJournal:
                 if ticket is not None:
                     partial_profit[ticket] = partial_profit.get(ticket, 0.0) + float(e["profit"])
 
-        # Collect close entries, inject summed partial profit
         merged: list[dict] = []
         for e in all_entries:
             if e.get("event") == "close" and e.get("profit") is not None:
                 ticket = e.get("ticket")
-                extra  = partial_profit.get(ticket, 0.0)
+                extra = partial_profit.get(ticket, 0.0)
                 if extra != 0.0:
-                    e = dict(e)  # shallow copy — don't mutate the original
+                    e = dict(e)
                     e["profit"] = round(float(e["profit"]) + extra, 2)
                 merged.append(e)
 
         return merged
 
     def get_unclosed_tickets(self) -> list[dict]:
-        """
-        Return a list of journal "open" entry dicts that have no matching
-        "close" entry for the same ticket.  Used at startup to recover
-        close events that were lost when the server restarted.
-        """
+        """Return a list of journal "open" entry dicts that have no matching
+        "close" entry for the same ticket."""
         if not self._path.exists():
             return []
 
@@ -281,7 +265,7 @@ class TradeJournal:
             if record.get("event") == "close":
                 closed_tickets.add(ticket)
             elif record.get("event") == "open":
-                opened[ticket] = record   # last open wins if somehow duplicated
+                opened[ticket] = record
 
         return [v for k, v in opened.items() if k not in closed_tickets]
 

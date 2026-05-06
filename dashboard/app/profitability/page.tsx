@@ -1,19 +1,72 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchProfitabilityReport, type ProfitabilityReport } from "@/lib/api";
+import { fetchProfitabilityReport, fetchAccounts, type ProfitabilityReport } from "@/lib/api";
+
+// Helper Components - MUST be defined OUTSIDE the main component
+function CriteriaCard({
+  label,
+  value,
+  met,
+  progress,
+}: {
+  label: string;
+  value: string;
+  met: boolean;
+  progress: number;
+}) {
+  return (
+    <div className={`bg-gray-900 border rounded-xl p-4 ${met ? "border-green-500/30" : "border-gray-800"}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <div className="text-xl">{met ? "✅" : "⏳"}</div>
+        <div className="text-xs text-gray-400 uppercase">{label}</div>
+      </div>
+      <div className="text-2xl font-bold mb-2">{value}</div>
+      <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+        <div
+          className={`h-full transition-all ${met ? "bg-green-500" : "bg-yellow-500"}`}
+          style={{ width: `${Math.min(progress, 100)}%` }}
+        ></div>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  return (
+    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+      <div className="text-xs text-gray-400 uppercase mb-1">{label}</div>
+      <div className={`text-lg font-bold ${color || "text-gray-100"}`}>{value}</div>
+    </div>
+  );
+}
 
 export default function ProfitabilityPage() {
   const [report, setReport] = useState<ProfitabilityReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<"all" | "paper" | "live">("all");
+  const [selectedAccountLogin, setSelectedAccountLogin] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<Array<{ login: number; server: string; type: string; broker_name?: string }>>([]);
   const [exporting, setExporting] = useState(false);
 
-  const loadReport = async (days?: number, account?: string) => {
+  // Load available accounts
+  useEffect(() => {
+    const loadAccounts = async () => {
+      try {
+        const response = await fetchAccounts();
+        setAccounts(response.accounts);
+      } catch (err) {
+        console.error("Failed to load accounts:", err);
+      }
+    };
+    loadAccounts();
+  }, []);
+
+  const loadReport = async (days?: number, account?: string, accountLogin?: number | null) => {
     setLoading(true);
     try {
-      const data = await fetchProfitabilityReport(days, account);
+      const data = await fetchProfitabilityReport(days, account, accountLogin ?? undefined);
       setReport(data);
     } catch (err) {
       console.error("Failed to load profitability report:", err);
@@ -32,6 +85,9 @@ export default function ProfitabilityPage() {
       if (selectedPeriod) {
         params.append("days", selectedPeriod.toString());
       }
+      if (selectedAccountLogin) {
+        params.append("account_login", selectedAccountLogin.toString());
+      }
 
       const response = await fetch(`http://localhost:8000/trades/journal/export?${params.toString()}`);
       
@@ -39,14 +95,12 @@ export default function ProfitabilityPage() {
         throw new Error(`Export failed: ${response.statusText}`);
       }
 
-      // Get filename from Content-Disposition header or generate default
       const contentDisposition = response.headers.get("Content-Disposition");
       const filenameMatch = contentDisposition?.match(/filename=(.+)/);
       const filename = filenameMatch
         ? filenameMatch[1].replace(/"/g, "")
         : `trades_${format === "csv" ? "export.csv" : "export.xlsx"}`;
 
-      // Download file
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -65,8 +119,8 @@ export default function ProfitabilityPage() {
   };
 
   useEffect(() => {
-    loadReport(selectedPeriod || undefined, selectedAccount);
-  }, [selectedPeriod, selectedAccount]);
+    loadReport(selectedPeriod || undefined, selectedAccount, selectedAccountLogin);
+  }, [selectedPeriod, selectedAccount, selectedAccountLogin]);
 
   if (loading) {
     return (
@@ -96,9 +150,9 @@ export default function ProfitabilityPage() {
     <div className="p-4 sm:p-6 lg:p-8 w-full">
       {/* Header */}
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-3xl font-bold">� Profitability Report</h1>
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-3">
+          <h1 className="text-3xl font-bold">📊 Profitability Report</h1>
+          <div className="flex items-center gap-3 flex-wrap">
             <select
               value={selectedPeriod || "all"}
               onChange={(e) => setSelectedPeriod(e.target.value === "all" ? null : Number(e.target.value))}
@@ -109,17 +163,39 @@ export default function ProfitabilityPage() {
               <option value="14">Last 14 Days</option>
               <option value="30">Last 30 Days</option>
             </select>
+
+            {/* Account mode filter */}
             <select
               value={selectedAccount}
               onChange={(e) => setSelectedAccount(e.target.value as "all" | "paper" | "live")}
               className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm"
             >
-              <option value="all">All Accounts</option>
+              <option value="all">All Modes</option>
               <option value="paper">Paper Only</option>
               <option value="live">Live Only</option>
             </select>
+
+            {/* Account login filter - specific MT5 accounts */}
+            {accounts.length > 0 && (
+              <select
+                value={selectedAccountLogin ?? ""}
+                onChange={(e) => setSelectedAccountLogin(e.target.value ? Number(e.target.value) : null)}
+                className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm"
+              >
+                <option value="">All Accounts</option>
+                {accounts.map((acc) => (
+                  <option key={acc.login} value={acc.login}>
+                    {acc.login} ({acc.type === "demo" ? "Demo" : "Live"})
+                    {acc.broker_name ? ` - ${acc.broker_name}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+
             <div className="h-6 border-l border-gray-700"></div>
-            <button              onClick={() => handleExport("csv")}
+
+            <button
+              onClick={() => handleExport("csv")}
               disabled={exporting}
               className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
             >
@@ -132,7 +208,8 @@ export default function ProfitabilityPage() {
             >
               {exporting ? "⏳" : "📊"} Excel
             </button>
-            <button              onClick={() => loadReport(selectedPeriod || undefined, selectedAccount)}
+            <button
+              onClick={() => loadReport(selectedPeriod || undefined, selectedAccount, selectedAccountLogin)}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
             >
               🔄 Refresh
@@ -287,44 +364,6 @@ export default function ProfitabilityPage() {
           </table>
         </div>
       </div>
-    </div>
-  );
-}
-
-// Helper Components
-function CriteriaCard({
-  label,
-  value,
-  met,
-  progress,
-}: {
-  label: string;
-  value: string;
-  met: boolean;
-  progress: number;
-}) {
-  return (
-    <div className={`bg-gray-900 border rounded-xl p-4 ${met ? "border-green-500/30" : "border-gray-800"}`}>
-      <div className="flex items-center gap-2 mb-2">
-        <div className="text-xl">{met ? "✅" : "⏳"}</div>
-        <div className="text-xs text-gray-400 uppercase">{label}</div>
-      </div>
-      <div className="text-2xl font-bold mb-2">{value}</div>
-      <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-        <div
-          className={`h-full transition-all ${met ? "bg-green-500" : "bg-yellow-500"}`}
-          style={{ width: `${Math.min(progress, 100)}%` }}
-        ></div>
-      </div>
-    </div>
-  );
-}
-
-function MetricCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
-  return (
-    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-3">
-      <div className="text-xs text-gray-400 uppercase mb-1">{label}</div>
-      <div className={`text-lg font-bold ${color || "text-gray-100"}`}>{value}</div>
     </div>
   );
 }
