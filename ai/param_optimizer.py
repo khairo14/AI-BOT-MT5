@@ -149,6 +149,7 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "adx_min":            [15, 20, 25],  # new
         "ema_trend_period":   [30, 50, 70],
         "max_spread_pips":    [3.0, 4.0, 5.0],
+        "atr_period":         [10, 14, 20],
     },
     "vwap_reversion": {
         "sigma_entry":       [1.0, 1.2, 1.5, 2.0],
@@ -170,6 +171,7 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "tp1_rr":               [1.5, 2.0],      # must be ≥ risk_reward_min 1.5 (scalping)
         "rr":                   [2.0, 2.5, 3.0], # tp2 full close
         "max_spread_pips":      [2.0, 3.0, 4.0],
+        "adx_min":              [15, 18, 22],
     },
     "macd_ema_trend": {
         "macd_fast":           [9, 12],
@@ -197,6 +199,7 @@ PARAM_GRIDS: dict[str, dict[str, list]] = {
         "atr_vol_filter":   [0, 0.6, 0.8],    # 0 = disable ATR floor (helps London open entries)
         "session_open":     [0, 2, 7],         # 0=all-day, 2=Tokyo open, 7=London open
         "session_close":    [0, 21, 22],       # 0=all-day, 21=NY end, 22=forex daily close
+        "max_breakout_extension_atr": [0.5, 0.8, 1.2],
     },
     "rsi_divergence": {
         "rsi_period":           [10, 14, 18],

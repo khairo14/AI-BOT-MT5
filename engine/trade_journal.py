@@ -264,8 +264,8 @@ class TradeJournal:
             except Exception:
                 return []
 
-        opened: dict[int, dict] = {}
-        closed_tickets: set[int] = set()
+        opened: dict[tuple, dict] = {}
+        closed_tickets: set[tuple] = set()
 
         for line in lines:
             if not line.strip():
@@ -275,12 +275,18 @@ class TradeJournal:
             except json.JSONDecodeError:
                 continue
             ticket = record.get("ticket")
+            account_login = record.get("account_login")
+            account_mode = record.get("account_mode")
+
             if ticket is None:
                 continue
+
+            trade_key = (account_mode, account_login, ticket)
+
             if record.get("event") == "close":
-                closed_tickets.add(ticket)
+                closed_tickets.add(trade_key)
             elif record.get("event") == "open":
-                opened[ticket] = record
+                opened[trade_key] = record
 
         return [v for k, v in opened.items() if k not in closed_tickets]
 
