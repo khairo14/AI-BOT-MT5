@@ -76,34 +76,16 @@ _MIN_FRACTION_ABOVE          = 0.60   # 60% of models must pass
 # ---------------------------------------------------------------------------
 
 def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
-    """Return (symbol, trading_type) pairs from:
-    1. config/symbols.json  — static baseline symbols
-    2. config/scanner.json  — scanner-discovered symbols currently active per mode
-    Union ensures LSTM models exist for every symbol the bot may actually trade.
-    """
-    symbols_cfg = json.loads((config_dir / "symbols.json").read_text(encoding="utf-8"))
+    """Return (symbol, trading_type) pairs from scanner.json (primary) and symbols.json (fallback)."""
     jobs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
 
-    for trading_type in ("scalping", "day_trading", "swing"):
-        if _SKIP_SCALPING and trading_type == "scalping":
-            logger.info("Skipping scalping — run_retrain_scalping.py handles these")
-            continue
-        for entry in symbols_cfg.get(trading_type, []):
-            if entry.get("enabled", True):
-                key = (entry["symbol"], trading_type)
-                if key not in seen:
-                    jobs.append(key)
-                    seen.add(key)
-
-    # Also include scanner-discovered symbols so models exist for them too
+    # Primary: scanner.json (dynamic live symbols)
     scanner_path = config_dir / "scanner.json"
     if scanner_path.exists():
         try:
             scanner_cfg = json.loads(scanner_path.read_text(encoding="utf-8"))
             for trading_type in ("scalping", "day_trading", "swing"):
-                if _SKIP_SCALPING and trading_type == "scalping":
-                    continue
                 for sym in scanner_cfg.get(trading_type, {}).get("symbols", []):
                     if sym:
                         key = (sym, trading_type)
@@ -111,10 +93,25 @@ def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
                             jobs.append(key)
                             seen.add(key)
         except Exception as exc:
-            logger.warning(f"Could not read scanner.json for symbol list: {exc}")
+            logger.warning(f"Could not read scanner.json: {exc}")
+
+    # Fallback: symbols.json (static baseline)
+    symbols_path = config_dir / "symbols.json"
+    if symbols_path.exists():
+        try:
+            symbols_cfg = json.loads(symbols_path.read_text(encoding="utf-8"))
+            for trading_type in ("scalping", "day_trading", "swing"):
+                for entry in symbols_cfg.get(trading_type, []):
+                    if entry.get("enabled", True):
+                        sym = entry["symbol"]
+                        key = (sym, trading_type)
+                        if key not in seen:
+                            jobs.append(key)
+                            seen.add(key)
+        except Exception as exc:
+            logger.warning(f"Could not read symbols.json: {exc}")
 
     return jobs
-
 
 def _wait_batch(active_keys: set[str]) -> set[str]:
     """Return keys that finished since last check (non-blocking poll)."""

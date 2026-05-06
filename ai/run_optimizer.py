@@ -95,42 +95,43 @@ def _run_job(args: tuple) -> tuple:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_jobs(config_dir: Path) -> list[tuple[str, str, str]]:
-    """Return (strategy, symbol, trading_type) jobs from:
-    1. config/scanner.json  — dynamic live symbol list per mode (primary)
-    2. config/symbols.json  — static baseline (merged as fallback/supplement)
-    Union ensures optimizer covers every symbol the bot may actually trade.
-    """
-    symbols_cfg = json.loads((config_dir / "symbols.json").read_text(encoding="utf-8"))
-    jobs: list[tuple[str, str, str]] = []
-    for trading_type, strategies in _STRATEGIES.items():
-        seen_syms: set[str] = set()
-        active_symbols: list[str] = []
+def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
+    """Return (symbol, trading_type) pairs from scanner.json (primary) and symbols.json (fallback)."""
+    jobs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
 
-        # Primary: scanner.json (the live dynamic list)
-        scanner_path = config_dir / "scanner.json"
-        if scanner_path.exists():
-            try:
-                scanner_cfg = json.loads(scanner_path.read_text(encoding="utf-8"))
+    # Primary: scanner.json (dynamic live symbols)
+    scanner_path = config_dir / "scanner.json"
+    if scanner_path.exists():
+        try:
+            scanner_cfg = json.loads(scanner_path.read_text(encoding="utf-8"))
+            for trading_type in ("scalping", "day_trading", "swing"):
                 for sym in scanner_cfg.get(trading_type, {}).get("symbols", []):
-                    if sym and sym not in seen_syms:
-                        active_symbols.append(sym)
-                        seen_syms.add(sym)
-            except Exception as exc:
-                logger.warning(f"Could not read scanner.json for symbol list: {exc}")
+                    if sym:
+                        key = (sym, trading_type)
+                        if key not in seen:
+                            jobs.append(key)
+                            seen.add(key)
+        except Exception as exc:
+            logger.warning(f"Could not read scanner.json: {exc}")
 
-        # Supplement: symbols.json static baseline
-        for s in symbols_cfg.get(trading_type, []):
-            sym = s.get("symbol")
-            if sym and s.get("enabled", True) and sym not in seen_syms:
-                active_symbols.append(sym)
-                seen_syms.add(sym)
+    # Fallback: symbols.json (static baseline)
+    symbols_path = config_dir / "symbols.json"
+    if symbols_path.exists():
+        try:
+            symbols_cfg = json.loads(symbols_path.read_text(encoding="utf-8"))
+            for trading_type in ("scalping", "day_trading", "swing"):
+                for entry in symbols_cfg.get(trading_type, []):
+                    if entry.get("enabled", True):
+                        sym = entry["symbol"]
+                        key = (sym, trading_type)
+                        if key not in seen:
+                            jobs.append(key)
+                            seen.add(key)
+        except Exception as exc:
+            logger.warning(f"Could not read symbols.json: {exc}")
 
-        for symbol in active_symbols:
-            for strategy in strategies:
-                jobs.append((strategy, symbol, trading_type))
     return jobs
-
 
 # ---------------------------------------------------------------------------
 # Main
