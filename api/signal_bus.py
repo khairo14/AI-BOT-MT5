@@ -183,6 +183,25 @@ class SignalBus:
                     if now >= exp:
                         sig["status"] = "expired"
                         sig["rejection_reason"] = "Signal expired — market conditions may have changed"
+                        
+                        try:
+                            signal_journal.record({
+                                "signal_id": sig.get("id") or sid,
+                                "symbol_raw": sig.get("symbol"),
+                                "symbol_normalized": normalize_symbol(sig.get("symbol", "")),
+                                "strategy": sig.get("strategy"),
+                                "mode": sig.get("trading_mode", ""),
+                                "direction": sig.get("direction"),
+                                "confidence": float(sig.get("confidence") or 0.0),
+                                "score": float(sig.get("score") or 0.0),
+                                "status": "expired",
+                                "reason": sig.get("rejection_reason"),
+                                "account_type": sig.get("account_type", ""),
+                                "user_id": sig.get("user_id", "default"),
+                            })
+                        except Exception:
+                            pass
+
                         logger.info(f"Signal expired: #{sid[:8]} {sig.get('symbol')} {sig.get('strategy')}")
                         # LOGIC-2: release fast-dedup key on expiry
                         _ek = (sig.get("symbol"), sig.get("strategy"), sig.get("direction"), sig.get("trading_mode"))
@@ -287,6 +306,23 @@ class SignalBus:
         except Exception:
             pass
 
+        try:
+            signal_journal.record({
+                "signal_id": signal.get("id"),
+                "symbol_raw": signal.get("symbol"),
+                "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
+                "strategy": signal.get("strategy"),
+                "mode": mode,
+                "direction": signal.get("direction"),
+                "confidence": float(signal.get("confidence") or 0.0),
+                "score": float(signal.get("score") or 0.0),
+                "status": "generated",
+                "account_type": signal.get("account_type", ""),
+                "user_id": signal.get("user_id", "default"),
+            })
+        except Exception as _sj_exc:
+            logger.debug(f"Signal journal write failed: {_sj_exc}")
+
         exec_mode = self._get_exec_mode(mode)
         if exec_mode == "auto" and self._order_manager is not None:
             # ── RL gate — always active in auto mode, independent of the manual
@@ -312,6 +348,25 @@ class SignalBus:
                 signal["rejection_reason"] = (
                     f"Confidence {conf:.0%} below RL threshold for {mode}"
                 )
+
+                try:
+                    signal_journal.record({
+                        "signal_id": signal.get("id"),
+                        "symbol_raw": signal.get("symbol"),
+                        "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
+                        "strategy": signal.get("strategy"),
+                        "mode": mode,
+                        "direction": signal.get("direction"),
+                        "confidence": float(signal.get("confidence") or 0.0),
+                        "score": float(signal.get("score") or 0.0),
+                        "status": "rejected",
+                        "reason": signal.get("rejection_reason"),
+                        "account_type": signal.get("account_type", ""),
+                        "user_id": signal.get("user_id", "default"),
+                    })
+                except Exception:
+                    pass
+
                 return signal
 
             # ── Hard numeric floor — only when confidence_filter_enabled=true ─
@@ -332,6 +387,25 @@ class SignalBus:
                     signal["rejection_reason"] = (
                         f"Confidence {conf:.0%} below floor {_threshold:.0%}"
                     )
+
+                    try:
+                        signal_journal.record({
+                            "signal_id": signal.get("id"),
+                            "symbol_raw": signal.get("symbol"),
+                            "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
+                            "strategy": signal.get("strategy"),
+                            "mode": mode,
+                            "direction": signal.get("direction"),
+                            "confidence": float(signal.get("confidence") or 0.0),
+                            "score": float(signal.get("score") or 0.0),
+                            "status": "rejected",
+                            "reason": signal.get("rejection_reason"),
+                            "account_type": signal.get("account_type", ""),
+                            "user_id": signal.get("user_id", "default"),
+                        })
+                    except Exception:
+                        pass
+
                     return signal
                 
             # ── Swing auto mode: pending-then-auto-execute ───────────────────
@@ -704,6 +778,25 @@ class SignalBus:
                                     f"Stale signal: price already {_progress:.0%} to TP "
                                     f"(limit {_max_prog:.0%})"
                                 )
+
+                                try:
+                                    signal_journal.record({
+                                        "signal_id": signal.get("id"),
+                                        "symbol_raw": signal.get("symbol"),
+                                        "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
+                                        "strategy": signal.get("strategy"),
+                                        "mode": trading_mode,
+                                        "direction": signal.get("direction"),
+                                        "confidence": float(signal.get("confidence") or 0.0),
+                                        "score": float(signal.get("score") or 0.0),
+                                        "status": "rejected",
+                                        "reason": signal.get("rejection_reason"),
+                                        "account_type": signal.get("account_type", ""),
+                                        "user_id": signal.get("user_id", "default"),
+                                    })
+                                except Exception:
+                                    pass
+
                                 logger.info(
                                     f"SignalBus stale-entry blocked: {signal.get('symbol')} "
                                     f"{_dir} progress_to_tp={_progress:.2f} "
@@ -805,6 +898,24 @@ class SignalBus:
                                 f"— order blocked to protect funds"
                             )
                             signal["rejection_reason"] = err
+                            try:
+                                signal_journal.record({
+                                    "signal_id": signal.get("id"),
+                                    "symbol_raw": signal.get("symbol"),
+                                    "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
+                                    "strategy": signal.get("strategy"),
+                                    "mode": trading_mode,
+                                    "direction": signal.get("direction"),
+                                    "confidence": float(signal.get("confidence") or 0.0),
+                                    "score": float(signal.get("score") or 0.0),
+                                    "status": "rejected",
+                                    "reason": signal.get("rejection_reason"),
+                                    "account_type": signal.get("account_type", ""),
+                                    "user_id": signal.get("user_id", "default"),
+                                })
+                            except Exception:
+                                pass
+
                             logger.warning(
                                 f"SignalBus spread-guard blocked: "
                                 f"{signal.get('symbol')} — {err}"
@@ -1228,6 +1339,9 @@ async def recover_unclosed_trades(client) -> None:
         trade_journal.log(
             ticket=ticket,
             symbol=symbol,
+            strategy=entry.get("strategy") or entry.get("comment", ""),
+            account_type=entry.get("account_type", ""),
+            user_id=entry.get("user_id", "default"),
             direction=entry.get("direction", "buy"),
             volume=float(entry.get("volume") or 0.01),
             entry=entry_px,
@@ -1275,7 +1389,11 @@ async def recover_unclosed_trades(client) -> None:
             outcome = TradeOutcome(
                 ticket=ticket,
                 symbol=symbol,
-                strategy=entry.get("comment", "unknown"),
+                symbol_raw=entry.get("symbol_raw") or symbol,
+                symbol_normalized=entry.get("symbol_normalized") or normalize_symbol(symbol),
+                account_type=entry.get("account_type", ""),
+                user_id=entry.get("user_id", "default"),
+                strategy=entry.get("strategy") or entry.get("comment", "unknown"),
                 trading_type=trading_type,
                 direction=direction,
                 confidence=float(entry.get("confidence") or 0.5),
@@ -1958,8 +2076,12 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
 
             outcome = TradeOutcome(
                 ticket=ticket,
-                symbol=signal["symbol"],
-                strategy=signal.get("strategy", "unknown"),
+                symbol=signal.get("symbol", ""),
+                symbol_raw=signal.get("symbol_raw") or signal.get("symbol", ""),
+                symbol_normalized=signal.get("symbol_normalized") or normalize_symbol(signal.get("symbol", "")),
+                account_type=signal.get("account_type", ""),
+                user_id=signal.get("user_id", "default"),
+                strategy=signal.get("strategy") or "unknown",
                 trading_type=signal.get("trading_mode", "day_trading"),
                 direction=direction,
                 confidence=float(signal.get("confidence") or 0.5),
@@ -1984,6 +2106,16 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             )
             memory.record(outcome)
 
+            trade_state_store.update(
+                account_login,
+                ticket,
+                closed=True,
+                closed_at=close_time,
+                final_outcome=outcome_type,
+                final_profit=profit,
+                last_event="closed",
+            )
+
             # Journal: update with close data
             try:
                 from engine.trade_journal import trade_journal
@@ -1993,8 +2125,8 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 _deal_commission = getattr(deal, "commission", None)
                 trade_journal.log(
                     ticket=ticket,
-                    symbol=signal["symbol"],
-                    direction=signal["direction"],
+                    symbol=signal.get("symbol", ""),
+                    direction=signal.get("direction", ""),
                     volume=float(signal.get("lot_size", 0.01)),
                     entry=entry_px,
                     sl=sl,
@@ -2008,6 +2140,9 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     swap=_deal_swap,
                     commission=_deal_commission,
                     account_login=current_account_login(),
+                    strategy=signal.get("strategy") or "",
+                    account_type=signal.get("account_type", ""),
+                    user_id=signal.get("user_id", "default"),
                 )
             except Exception as _je:
                 logger.warning(f"Journal write failed for #{ticket}: {_je}")
