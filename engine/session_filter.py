@@ -7,7 +7,7 @@ Each category has an open/close time in UTC (or server time) and valid days.
 Usage:
     from engine.session_filter import session_filter
 
-    allowed, reason = session_filter.is_open(symbol="TSLA.OQ", category="stock")
+    allowed, reason = session_filter.is_open(symbol="TSLA.OQ")
     if not allowed:
         logger.info(f"Market closed: {reason}")
 
@@ -30,26 +30,90 @@ from loguru import logger
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
 UTC = timezone.utc
 
-# Symbol → session category mapping
-_SYMBOL_CATEGORY: dict[str, str] = {}   # built lazily from symbols.json
+# TTL cache for risk.json — read at most once every 30 seconds
+_cfg_cache: dict = {}
+_cfg_loaded_at: float = 0.0
+_CFG_TTL = 30.0
+_cfg_lock = threading.Lock()
 
-_SYMBOLS_PATH = Path(__file__).parent.parent / "config" / "symbols.json"
+
+def _load_cfg() -> dict:
+    """Load risk.json session_filter config with TTL cache."""
+    global _cfg_cache, _cfg_loaded_at
+    now = _time.monotonic()
+    if now - _cfg_loaded_at < _CFG_TTL:
+        return _cfg_cache
+    with _cfg_lock:
+        if now - _cfg_loaded_at < _CFG_TTL:
+            return _cfg_cache
+        try:
+            with open(CONFIG_PATH) as f:
+                _cfg_cache = json.load(f).get("session_filter", {})
+        except Exception:
+            _cfg_cache = {}
+        _cfg_loaded_at = now
+    return _cfg_cache
 
 
-def _load_symbol_categories() -> dict[str, str]:
-    """Build a flat symbol→category map from symbols.json."""
-    if not _SYMBOLS_PATH.exists():
-        return {}
-    try:
-        with open(_SYMBOLS_PATH) as f:
-            data = json.load(f)
-        result: dict[str, str] = {}
-        for _mode, symbols in data.items():
-            for s in symbols:
-                result[s["symbol"].upper()] = s.get("category", "forex")
-        return result
-    except Exception:
-        return {}
+def _detect_category_from_symbol(symbol: str) -> str:
+    """
+    Dynamically detect asset category from symbol name.
+    This is the sole method of category detection - no config files needed.
+    """
+    # Strip common suffixes (#, ., _, -) for detection
+    clean = symbol.upper().rstrip("#+*!._-")
+    
+    # Crypto - trade 24/7
+    crypto = {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "DOT", "LTC", "BNB", "XLM", "ETC", "GRT"}
+    if any(c in clean for c in crypto):
+        return "crypto"
+    
+    # US Stocks (company names) - follow NYSE/NASDAQ hours
+    stocks = {"TSLA", "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC"}
+    if any(stk in clean for stk in stocks):
+        return "stock"
+    
+    # US Indices - follow CME/NYSE hours
+    us_indices = {"US30", "US100", "US500", "SPX", "NAS", "NDX"}
+    if any(idx in clean for idx in us_indices):
+        return "us_index"
+    
+    # EU Indices - follow EU market hours
+    eu_indices = {"GER40", "DAX", "UK100", "FRA40", "EU50"}
+    if any(idx in clean for idx in eu_indices):
+        return "eu_index"
+    
+    # Commodities (Gold, Silver, Oil, Gas) - follow COMEX/NYMEX hours
+    commodities = {"GOLD", "XAU", "SILVER", "XAG", "OIL", "BRENT", "WTI", "NGAS"}
+    if any(cmd in clean for cmd in commodities):
+        return "commodity"
+    
+    # Forex - check if the stripped symbol is a 6-letter forex pair OR contains currency codes
+    # Remove any remaining non-letter characters after stripping common suffixes
+    forex_chars = ''.join(c for c in clean if c.isalpha())
+    
+    # Standard forex: 6 letters (e.g., EURUSD, GBPJPY)
+    if len(forex_chars) == 6:
+        # Check if it's a valid currency pair structure (3 letters + 3 letters)
+        first_three = forex_chars[:3]
+        last_three = forex_chars[3:]
+        # Basic currency codes
+        currencies = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "SGD", "HKD", "NOK", "SEK"}
+        if first_three in currencies and last_three in currencies:
+            return "forex"
+    
+    # Also detect if symbol contains common currency pairs (e.g., contains "EUR" and "USD")
+    # This catches symbols like "EURUSD#", "GBPUSD.", "EURGBP_i"
+    if ("EUR" in clean and "USD" in clean) or \
+       ("GBP" in clean and "USD" in clean) or \
+       ("USD" in clean and "JPY" in clean) or \
+       ("AUD" in clean and "USD" in clean) or \
+       ("USD" in clean and "CAD" in clean) or \
+       ("NZD" in clean and "USD" in clean):
+        return "forex"
+    
+    # Default to forex for anything else
+    return "forex"
 
 
 # ── US market holiday helpers ──────────────────────────────────────────────────
@@ -124,13 +188,14 @@ def _us_market_holidays(year: int) -> frozenset:
 class SessionFilter:
     """
     Checks whether a symbol's market is currently open.
-    Reads session schedule from risk.json and symbol categories from symbols.json.
+    Reads session schedule from risk.json and detects categories from symbol name.
+    No external config files required.
     """
 
     def __init__(self):
-        self._sym_cat = _load_symbol_categories()
-        self._sym_cat_lock = threading.Lock()
-        self._sym_cat_loaded_at: float = _time.monotonic()
+        # Category cache to avoid repeated detection
+        self._category_cache: dict[str, str] = {}
+        self._cache_lock = threading.Lock()
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -139,7 +204,7 @@ class SessionFilter:
         Returns (is_open, reason).
         Always returns (True, "") if session_filter.enabled = false.
         """
-        cfg = self._load_cfg()
+        cfg = _load_cfg()  # Use cached config
         if not cfg.get("enabled", True):
             return True, ""
 
@@ -167,10 +232,7 @@ class SessionFilter:
         current = now.time().replace(second=0, microsecond=0)
 
         if open_t <= close_t:
-            # LOGIC-4: use exclusive close boundary — at exactly close_t the session
-            # is considered closed.  Without this, a session closing at 17:00 would
-            # remain "open" for the entire 17:00:xx minute because second=0 rounding
-            # maps any 17:00:xx timestamp to time(17, 0) which is == close_t.
+            # use exclusive close boundary — at exactly close_t the session is considered closed
             in_session = open_t <= current < close_t
         else:
             # Overnight session (wraps midnight) — exclusive on the morning close side
@@ -183,6 +245,7 @@ class SessionFilter:
         return True, ""
 
     def category_for(self, symbol: str) -> str:
+        """Return the detected category for a symbol."""
         return self._get_category(symbol)
 
     def status(self, symbols: list[str]) -> dict:
@@ -195,26 +258,37 @@ class SessionFilter:
             for sym in symbols
         }
 
+    def clear_cache(self) -> None:
+        """Clear the category detection cache."""
+        with self._cache_lock:
+            self._category_cache.clear()
+
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _get_category(self, symbol: str) -> str:
-        clean = symbol.upper().rstrip("#+*!")
-        with self._sym_cat_lock:
-            if not self._sym_cat or _time.monotonic() - self._sym_cat_loaded_at > 300:
-                self._sym_cat = _load_symbol_categories()
-                self._sym_cat_loaded_at = _time.monotonic()
-        return self._sym_cat.get(clean, "forex")
+        """Return category for symbol, using cache and dynamic detection."""
+        # Normalize: strip suffixes for consistent caching
+        clean = symbol.upper().rstrip("#+*!._-")
+        
+        with self._cache_lock:
+            if clean in self._category_cache:
+                return self._category_cache[clean]
+            
+            # Pass the cleaned symbol to detection function
+            cat = _detect_category_from_symbol(clean)
+            self._category_cache[clean] = cat
+            return cat
 
     @staticmethod
     def _category_to_session(cat: str) -> str:
         return {
-            "stock":    "us_stocks",
-            "us_index": "us_indices",
-            "eu_index": "eu_indices",
-            "index":    "eu_indices",   # legacy fallback
+            "stock":     "us_stocks",
+            "us_index":  "us_indices",
+            "eu_index":  "eu_indices",
+            "index":     "eu_indices",   # legacy fallback
             "commodity": "commodities",
-            "forex":    "forex",
-            "crypto":   "crypto",
+            "forex":     "forex",
+            "crypto":    "crypto",
         }.get(cat, "forex")
 
     @staticmethod
@@ -230,22 +304,18 @@ class SessionFilter:
         if days_spec == "all":
             return True
         wd = dt.weekday()   # 0=Mon … 6=Sun
+        if wd > 4:
+            return False   # weekend
+        
         if days_spec == "mon-fri":
-            if wd > 4:
-                return False   # weekend
             # For US equity and index categories, also block on US market holidays
             if category in ("stock", "us_index"):
                 return dt.date() not in _us_market_holidays(dt.year)
+            # EU indices have weekend closures but no holiday calendar
+            if category == "eu_index":
+                return True  # Only weekends matter for EU
             return True
         return True
-
-    @staticmethod
-    def _load_cfg() -> dict:
-        try:
-            with open(CONFIG_PATH) as f:
-                return json.load(f).get("session_filter", {})
-        except Exception:
-            return {}
 
 
 # Application-level singleton

@@ -178,7 +178,6 @@ def _currencies_for(symbol: str) -> list[str]:
 
     # Step 3b: generic 6-char pair auto-detection — handles any forex cross or
     # crypto-to-crypto pair not explicitly listed (e.g. a new XM symbol added
-    # to symbols.json without updating this file).
     # Split as BASE[3] + QUOTE[3] and return both if both are known currency codes.
     _KNOWN_CCY = {
         "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",

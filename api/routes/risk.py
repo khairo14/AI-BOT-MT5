@@ -18,17 +18,71 @@ router = APIRouter()
 _SYMBOLS_PATH = Path(__file__).parent.parent.parent / "config" / "symbols.json"
 
 
+def _detect_category_from_symbol(symbol: str) -> str:
+    """
+    Dynamically detect asset category from symbol name (fallback when symbols.json missing).
+    """
+    clean = symbol.upper().rstrip("#+*!._-")
+    
+    # Crypto
+    crypto = {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "DOT", "LTC", "BNB", "XLM", "ETC", "GRT"}
+    if any(c in clean for c in crypto):
+        return "crypto"
+    
+    # US Stocks
+    stocks = {"TSLA", "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC", "ADV"}
+    if any(stk in clean for stk in stocks):
+        return "stock"
+    
+    # US Indices
+    us_indices = {"US30", "US100", "US500", "SPX", "NAS", "NDX"}
+    if any(idx in clean for idx in us_indices):
+        return "us_index"
+    
+    # EU Indices
+    eu_indices = {"GER40", "DAX", "UK100", "FRA40", "EU50"}
+    if any(idx in clean for idx in eu_indices):
+        return "eu_index"
+    
+    # Commodities
+    commodities = {"GOLD", "XAU", "SILVER", "XAG", "OIL", "BRENT", "WTI", "NGAS"}
+    if any(cmd in clean for cmd in commodities):
+        return "commodity"
+    
+    # Forex (6 letters)
+    letters = ''.join(c for c in clean if c.isalpha())
+    if len(letters) == 6:
+        currencies = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "SGD", "HKD"}
+        first_three = letters[:3]
+        last_three = letters[3:]
+        if first_three in currencies and last_three in currencies:
+            return "forex"
+    
+    return "forex"
+
+
 def _all_symbols() -> list[tuple[str, str]]:
-    """Return [(symbol, category), ...] for every symbol in symbols.json."""
+    """
+    Return [(symbol, category), ...] for symbols.
+    Uses symbols.json if available, otherwise returns empty list with warning.
+    Session filter will fall back to dynamic detection.
+    """
     if not _SYMBOLS_PATH.exists():
+        # Return empty list - session_filter will detect categories dynamically
         return []
+    
     try:
         with open(_SYMBOLS_PATH) as f:
             data = json.load(f)
         result: list[tuple[str, str]] = []
+        seen: set[str] = set()
         for _mode, symbols in data.items():
             for s in symbols:
-                result.append((s["symbol"], s.get("category", "forex")))
+                sym = s.get("symbol") if isinstance(s, dict) else s
+                if sym and sym not in seen:
+                    seen.add(sym)
+                    cat = s.get("category", "forex") if isinstance(s, dict) else "forex"
+                    result.append((sym, cat))
         return result
     except Exception:
         return []
@@ -104,11 +158,12 @@ def news_status():
 @router.get("/sessions")
 def sessions_status():
     """
-    Returns open/closed market-session status for every configured symbol.
+    Returns open/closed market-session status for symbols.
+    Uses dynamic category detection when symbols.json is missing.
 
     Each entry:
       - symbol:    e.g. "EURUSD"
-      - category:  e.g. "forex"
+      - category:  e.g. "forex" (detected dynamically)
       - open:      True if market is currently open
       - reason:    Human-readable explanation when closed
     """
@@ -116,17 +171,46 @@ def sessions_status():
 
     result = []
     seen: set[str] = set()
-    for sym, cat in _all_symbols():
-        if sym in seen:
-            continue
-        seen.add(sym)
-        is_open, reason = session_filter.is_open(sym, cat)
-        result.append({
-            "symbol":   sym,
-            "category": cat,
-            "open":     is_open,
-            "reason":   reason,
-        })
+
+    # Try to get symbols from config first
+    symbols_from_config = _all_symbols()
+    
+    if symbols_from_config:
+        # Use configured symbols
+        for sym, cat in symbols_from_config:
+            if sym in seen:
+                continue
+            seen.add(sym)
+            is_open, reason = session_filter.is_open(sym, cat)
+            result.append({
+                "symbol":   sym,
+                "category": cat,
+                "open":     is_open,
+                "reason":   reason,
+            })
+    else:
+        # No symbols.json - use a reasonable default set of symbols to check
+        # These are the most commonly traded symbols
+        default_symbols = [
+            "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD",
+            "EURGBP", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY",
+            "GOLD", "SILVER", "OILCash", "BRENTCash", "NGASCash",
+            "US30Cash", "US100Cash", "US500Cash", "GER40Cash", "UK100Cash",
+            "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD",
+        ]
+        for sym in default_symbols:
+            if sym in seen:
+                continue
+            seen.add(sym)
+            # Let session_filter detect category dynamically
+            is_open, reason = session_filter.is_open(sym)
+            cat = session_filter.category_for(sym)
+            result.append({
+                "symbol":   sym,
+                "category": cat,
+                "open":     is_open,
+                "reason":   reason,
+            })
 
     return {"sessions": result, "count": len(result)}
 

@@ -200,7 +200,7 @@ def place_order(
     # Journal: record manually placed trade
     try:
         from engine.trade_journal import trade_journal
-        from engine.account_store import current_mode
+        from engine.account_store import current_mode, current_account_login
         trade_journal.log(
             ticket=result.ticket or 0,
             symbol=body.symbol,
@@ -214,6 +214,7 @@ def place_order(
             account_mode=current_mode(),
             comment=body.comment,
             event="open",
+            account_login=current_account_login(),
         )
     except Exception:
         pass
@@ -222,7 +223,7 @@ def place_order(
     if result.ticket:
         try:
             import asyncio
-            from api.signal_bus import _poll_outcome, bus
+            from api.signal_bus import _poll_outcome
             _fake_signal = {
                 "symbol":       body.symbol,
                 "direction":    direction,
@@ -331,37 +332,53 @@ def get_trailing_stops():
 
 
 # ---------------------------------------------------------------------------
-# Trade Journal (Phase 9)
+# Trade Journal (Phase 9) - UPDATED with account_login filter
 # ---------------------------------------------------------------------------
 
 @router.get("/journal")
 def get_journal(
-    account: str = Query("all",  description="paper | live | all"),
+    account: str = Query("all", description="paper | live | all"),
+    account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
     trading_type: Optional[str] = Query(None, description="scalping | day_trading | swing"),
     event: Optional[str] = Query(None, description="open | close"),
     limit: int = Query(100, ge=1, le=1000),
 ):
     """
     Return bot trade journal entries (local JSONL store).
-    Supports filtering by account mode, trading type, and event type.
+    Supports filtering by account mode, specific account login, trading type, and event type.
     """
     from engine.trade_journal import trade_journal
 
     if account not in ("paper", "live", "all"):
         raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
 
-    entries = trade_journal.get(account=account, trading_type=trading_type, event=event, limit=limit)
+    # If account_login is provided, use it (overrides account mode filter)
+    if account_login is not None:
+        entries = trade_journal.get(
+            account="all",  # Don't filter by mode when using specific login
+            trading_type=trading_type,
+            event=event,
+            limit=limit,
+            account_login=account_login,
+        )
+    else:
+        entries = trade_journal.get(
+            account=account,
+            trading_type=trading_type,
+            event=event,
+            limit=limit,
+        )
 
     # Ensure every close event has its paired open event in the response.
-    # Without this, long-lived trades (e.g. swing trades held for days) whose open
-    # event is older than `limit` will show the wrong entry time in the dashboard
-    # (the dashboard merge falls back to the close event's open_time = logged_at).
     if event != "open":
-        open_tickets  = {e["ticket"] for e in entries if e.get("event") == "open"}
+        open_tickets = {e["ticket"] for e in entries if e.get("event") == "open"}
         close_tickets = {e["ticket"] for e in entries if e.get("event") == "close"}
         missing = close_tickets - open_tickets
         if missing:
-            all_opens = trade_journal.get(account=account, event="open", limit=10_000)
+            if account_login is not None:
+                all_opens = trade_journal.get(account="all", event="open", limit=10_000, account_login=account_login)
+            else:
+                all_opens = trade_journal.get(account=account, event="open", limit=10_000)
             paired = [e for e in all_opens if e["ticket"] in missing]
             entries = list(entries) + paired
             entries.sort(key=lambda x: x.get("logged_at", ""), reverse=True)
@@ -369,13 +386,14 @@ def get_journal(
     return {
         "entries": entries,
         "count":   len(entries),
-        "filter":  {"account": account, "trading_type": trading_type, "event": event},
+        "filter":  {"account": account, "account_login": account_login, "trading_type": trading_type, "event": event},
     }
 
 
 @router.get("/journal/stats")
 def get_journal_stats(
     account: str = Query("all", description="paper | live | all"),
+    account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
 ):
     """Return win/loss/profit summary from the trade journal."""
     from engine.trade_journal import trade_journal
@@ -383,9 +401,15 @@ def get_journal_stats(
     if account not in ("paper", "live", "all"):
         raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
 
-    paper_stats = trade_journal.stats(account="paper")
-    live_stats  = trade_journal.stats(account="live")
-    all_stats   = trade_journal.stats(account="all")
+    # If account_login is provided, use it for all stats
+    if account_login is not None:
+        paper_stats = trade_journal.stats(account="paper", account_login=account_login)
+        live_stats = trade_journal.stats(account="live", account_login=account_login)
+        all_stats = trade_journal.stats(account="all", account_login=account_login)
+    else:
+        paper_stats = trade_journal.stats(account="paper")
+        live_stats = trade_journal.stats(account="live")
+        all_stats = trade_journal.stats(account="all")
 
     return {
         "paper": paper_stats,
@@ -397,6 +421,7 @@ def get_journal_stats(
 @router.get("/journal/export")
 def export_journal(
     account: str = Query("all", description="paper | live | all"),
+    account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
     trading_type: Optional[str] = Query(None, description="scalping | day_trading | swing"),
     days: Optional[int] = Query(None, description="Filter trades from last N days"),
     format: str = Query("csv", description="csv | excel"),
@@ -418,8 +443,22 @@ def export_journal(
     if format not in ("csv", "excel"):
         raise HTTPException(status_code=400, detail="format must be 'csv' or 'excel'")
 
-    # Get all closed trades (both open and close events)
-    entries = trade_journal.get(account=account, trading_type=trading_type, event=None, limit=10_000)
+    # Get all closed trades
+    if account_login is not None:
+        entries = trade_journal.get(
+            account="all",
+            trading_type=trading_type,
+            event=None,
+            limit=10_000,
+            account_login=account_login,
+        )
+    else:
+        entries = trade_journal.get(
+            account=account,
+            trading_type=trading_type,
+            event=None,
+            limit=10_000,
+        )
     
     # Filter by date if specified
     if days:
@@ -449,7 +488,6 @@ def export_journal(
         open_evt = events["open"]
         close_evt = events["close"]
         
-        # Parse timestamps
         open_time = open_evt.get("logged_at", "")
         close_time = close_evt.get("logged_at", "")
         
@@ -471,14 +509,15 @@ def export_journal(
             "Trading Type": open_evt.get("trading_type", ""),
             "Strategy": open_evt.get("strategy", ""),
             "Volume": close_evt.get("volume", 0.0),
-            "Entry Price": open_evt.get("price", 0.0),
-            "Exit Price": close_evt.get("price", 0.0),
+            "Entry Price": open_evt.get("entry", 0.0),
+            "Exit Price": close_evt.get("entry", 0.0),
             "Stop Loss": open_evt.get("sl", 0.0),
             "Take Profit": open_evt.get("tp", 0.0),
             "Profit": close_evt.get("profit", 0.0),
-            "Pips": close_evt.get("pips", 0.0),
+            "Pips": close_evt.get("profit_pips", 0.0),
             "Confidence": open_evt.get("confidence", 0.0),
-            "Account": close_evt.get("account", ""),
+            "Account Login": close_evt.get("account_login", ""),
+            "Account Mode": close_evt.get("account_mode", ""),
             "Comment": close_evt.get("comment", ""),
         })
     
@@ -486,7 +525,6 @@ def export_journal(
     export_rows.sort(key=lambda x: x["Close Time"], reverse=True)
     
     if format == "csv":
-        # Generate CSV
         output = io.StringIO()
         if export_rows:
             writer = csv.DictWriter(output, fieldnames=export_rows[0].keys())
@@ -503,7 +541,6 @@ def export_journal(
         )
     
     else:  # excel
-        # Generate Excel using openpyxl
         try:
             from openpyxl import Workbook
             from openpyxl.styles import Font, PatternFill, Alignment
@@ -519,11 +556,9 @@ def export_journal(
         ws.title = "Trade Journal"
         
         if export_rows:
-            # Write header
             headers = list(export_rows[0].keys())
             ws.append(headers)
             
-            # Style header row
             header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
             header_font = Font(bold=True, color="FFFFFF")
             for cell in ws[1]:
@@ -531,11 +566,10 @@ def export_journal(
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             
-            # Write data rows
             for row in export_rows:
                 ws.append(list(row.values()))
             
-            # Color-code profit column (green for positive, red for negative)
+            # Color-code profit column
             profit_col_idx = headers.index("Profit") + 1
             green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
             red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
@@ -563,7 +597,6 @@ def export_journal(
                 adjusted_width = min(max_length + 2, 50)
                 ws.column_dimensions[column_letter].width = adjusted_width
         
-        # Save to bytes buffer
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)

@@ -6,6 +6,7 @@ Outputs top 20 per trading type, grouped and scored by volatility, spread, trend
 import json
 import os
 import threading
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, asdict
@@ -79,9 +80,6 @@ class MarketScanner:
     def __init__(self, mt5_client: MT5Client):
         self.mt5 = mt5_client
         self._lock = threading.RLock()
-        # Dedicated lock that serialises concurrent scan_all() calls so that:
-        # a) only one full scan runs at a time (prevents MT5 overload)
-        # b) cache read + write is atomic (no TOCTOU gap)
         self._scan_lock = threading.Lock()
         self._cache: Optional[ScanSummary] = None
         self._cache_time: Optional[datetime] = None
@@ -101,23 +99,12 @@ class MarketScanner:
     # -----------------------------------------------------------------------
     
     def scan_all(self, force_refresh: bool = False) -> ScanSummary:
-        """
-        Scan all available symbols across all enabled trading types.
-        Returns grouped and ranked results.
-
-        Args:
-            force_refresh: If True, bypass cache and rescan
-        """
-        # Fast path: return cache without acquiring _scan_lock
+        """Scan all available symbols across all enabled trading types."""
         if not force_refresh and self._is_cache_valid():
             logger.info("Returning cached scan results")
             return self._cache
 
-        # Serialize concurrent scans — only one thread runs the expensive scan;
-        # others wait, then pick up the fresh cache on release.
         with self._scan_lock:
-            # Re-check cache after acquiring lock: a concurrent scan may have
-            # already completed while we were waiting.
             if not force_refresh and self._is_cache_valid():
                 logger.info("Returning cached scan results (post-lock recheck)")
                 return self._cache
@@ -125,7 +112,6 @@ class MarketScanner:
             start_time = datetime.now(timezone.utc)
             logger.info("Starting market scan...")
 
-            # Get all available symbols from MT5
             all_symbols = self._get_all_symbols()
             if not all_symbols:
                 logger.error("No symbols available from MT5")
@@ -133,7 +119,6 @@ class MarketScanner:
 
             logger.info(f"Found {len(all_symbols)} symbols from MT5")
 
-            # Scan each trading type
             results_by_type = {}
             total_passed = 0
 
@@ -149,7 +134,6 @@ class MarketScanner:
                 total_passed += len(results)
                 logger.info(f"  → {len(results)} symbols passed {trading_type} criteria")
 
-            # Create summary
             end_time = datetime.now(timezone.utc)
             duration = (end_time - start_time).total_seconds()
 
@@ -162,7 +146,6 @@ class MarketScanner:
                 config_hash=self._compute_config_hash()
             )
 
-            # Update cache — atomic write while holding _scan_lock
             self._cache = summary
             self._cache_time = start_time
 
@@ -195,29 +178,109 @@ class MarketScanner:
     # -----------------------------------------------------------------------
     
     def _get_all_symbols(self) -> List[str]:
-        """Get all tradeable symbols from MT5 via the MT5Client wrapper so that
-        mutual exclusion with the trading engine's MT5 calls is guaranteed."""
+        """Get all tradeable symbols from MT5."""
         symbols_info = self.mt5.get_all_symbols()
         if not symbols_info:
             logger.error("mt5.get_all_symbols() returned empty list")
             return []
         
-        # Filter to tradeable symbols, exclude those in blacklist
         exclude_list = self.cfg.get("exclude_symbols", [])
         tradeable = []
         
         for sym in symbols_info:
             # Must be visible and tradeable
-            if not sym.visible or sym.trade_mode == mt5.SYMBOL_TRADE_MODE_DISABLED:
+            trade_mode = getattr(sym, 'trade_mode', 4)
+            if trade_mode not in (mt5.SYMBOL_TRADE_MODE_FULL, mt5.SYMBOL_TRADE_MODE_LONGONLY, mt5.SYMBOL_TRADE_MODE_SHORTONLY):
                 continue
             
             # Skip excluded symbols
-            if sym.name in exclude_list:
+            if getattr(sym, 'name', '') in exclude_list:
                 continue
             
             tradeable.append(sym.name)
         
         return tradeable
+    
+    # -----------------------------------------------------------------------
+    # Dynamic Category Detection
+    # -----------------------------------------------------------------------
+    
+    @staticmethod
+    def _detect_category_by_name(symbol: str) -> str:
+        """Fallback category detection from symbol name (handles suffixes)."""
+        # Strip common suffixes (#, ., _, -, *)
+        clean = symbol.upper().rstrip("#+*!._-")
+        # Remove anything that's not a letter for forex detection
+        letters = ''.join(c for c in clean if c.isalpha())
+        
+        # Crypto
+        crypto = {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "DOT", "LTC", "BNB", "XLM", "ETC", "GRT"}
+        if any(c in clean for c in crypto):
+            return "crypto"
+        
+        # US Indices
+        us_indices = {"US30", "US100", "US500", "SPX", "NAS", "NDX"}
+        if any(idx in clean for idx in us_indices):
+            return "indices"
+        
+        # EU Indices
+        eu_indices = {"GER40", "DAX", "UK100", "FRA40", "EU50"}
+        if any(idx in clean for idx in eu_indices):
+            return "indices"
+        
+        # Commodities
+        commodities = {"GOLD", "XAU", "SILVER", "XAG", "OIL", "BRENT", "WTI", "NGAS"}
+        if any(cmd in clean for cmd in commodities):
+            return "commodity"
+        
+        # Stocks (company names)
+        stocks = {"TSLA", "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC", "ADV"}
+        if any(stk in clean for stk in stocks):
+            return "stock"
+        
+        # Forex: 6 letters (e.g., EURUSD, GBPJPY) OR contains currency pair pattern
+        if len(letters) == 6:
+            currencies = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "SGD", "HKD"}
+            first_three = letters[:3]
+            last_three = letters[3:]
+            if first_three in currencies and last_three in currencies:
+                return "forex"
+        
+        # Also detect by currency code presence
+        if ("EUR" in clean and "USD" in clean) or \
+           ("GBP" in clean and "USD" in clean) or \
+           ("USD" in clean and "JPY" in clean) or \
+           ("AUD" in clean and "USD" in clean):
+            return "forex"
+        
+        # Default
+        return "forex"
+    
+    @staticmethod
+    def _get_category_from_path(path: str, symbol: str = "") -> str:
+        """Determine symbol category dynamically from MT5's symbol group path."""
+        if path:
+            segments = path.split("\\")
+            first = segments[0].lower() if segments else ""
+            
+            if first == "forex":
+                return "forex"
+            if first in ("cryptocurrencies", "crypto"):
+                return "crypto"
+            if first == "stocks":
+                return "stock"
+            if first == "indices":
+                return "indices"
+            if first == "derivatives":
+                for seg in segments:
+                    s = seg.lower()
+                    if s in ("indices", "index"):
+                        return "indices"
+                    if s in ("metals", "metal") or s in ("energies", "energy"):
+                        return "commodity"
+        
+        # Fallback to name-based detection
+        return MarketScanner._detect_category_by_name(symbol)
     
     # -----------------------------------------------------------------------
     # Scanning by Trading Type
@@ -229,9 +292,7 @@ class MarketScanner:
         trading_type: str,
         type_cfg: dict
     ) -> List[ScanResult]:
-        """
-        Scan symbols for a specific trading type, apply criteria, rank, and return top N.
-        """
+        """Scan symbols for a specific trading type."""
         criteria = type_cfg["criteria"]
         weights = type_cfg["weights"]
         timeframe = type_cfg["timeframe"]
@@ -241,27 +302,26 @@ class MarketScanner:
         results = []
         
         for symbol in symbols:
-            # Fetch symbol info ONCE — used by category detection and metrics
             sym_info = self.mt5.get_symbol_info(symbol)
             if not sym_info:
                 continue
             
-            # Dynamic category from MT5 path
-            category = self._get_category_from_path(sym_info.get("path", ""))
+            # Dynamic category from path or name
+            category = self._get_category_from_path(sym_info.get("path", ""), symbol)
             if not category:
                 continue
             
-            # Check if category is enabled in config
+            # Check if category is enabled
             cat_cfg = self.cfg["categories"].get(category)
             if not cat_cfg or not cat_cfg.get("enabled"):
                 continue
             
-            # Enforce allowed_categories for this trading type
+            # Enforce allowed categories for this trading type
             allowed = type_cfg.get("allowed_categories")
             if allowed and category not in allowed:
                 continue
             
-            # Calculate all metrics — pass the already-fetched sym_info
+            # Calculate metrics
             metrics = self._calculate_metrics(
                 symbol, timeframe, lookback_bars, category, cat_cfg, sym_info
             )
@@ -273,10 +333,9 @@ class MarketScanner:
             if not self._passes_criteria(metrics, criteria):
                 continue
             
-            # Calculate component scores
+            # Calculate scores
             scores = self._calculate_scores(metrics, criteria, weights)
             
-            # Create scan result
             result = ScanResult(
                 symbol=symbol,
                 category=category,
@@ -302,7 +361,6 @@ class MarketScanner:
             
             results.append(result)
         
-        # Sort by composite score (descending) and return top N
         results.sort(key=lambda x: x.composite_score, reverse=True)
         return results[:max_results]
     
@@ -317,56 +375,38 @@ class MarketScanner:
         lookback_bars: int,
         category: str,
         cat_cfg: dict,
-        sym_info: dict,  # NEW: pre-fetched from caller
+        sym_info: dict,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Calculate all raw metrics for a symbol.
-        Returns None if data unavailable or calculation fails.
-        """
+        """Calculate all raw metrics for a symbol."""
         try:
-            # Get symbol info
-            if not sym_info:
-                return None
-
-            # Skip symbols whose market is currently closed according to MT5.
-            # trade_mode: 0=disabled, 1=longonly, 2=shortonly, 3=closeonly, 4=full.
-            # We require at least one direction to be openable (1, 2, or 4).
-            # mode 3 (closeonly) means the broker is winding down — don't open new trades.
+            # Get symbol info - ensure point has a fallback
+            point = sym_info.get("point", 0.00001)
+            if point == 0:
+                point = 0.00001  # fallback for instruments with point=0
+            
+            # Check trade mode
             _trade_mode = sym_info.get("trade_mode", 4)
             if _trade_mode not in (1, 2, 4):
-                logger.debug(f"Scanner: skipping {symbol} — trade_mode={_trade_mode} (market closed)")
+                logger.debug(f"Scanner: skipping {symbol} — trade_mode={_trade_mode}")
                 return None
 
             # Get OHLCV data
             df = self.mt5.get_ohlcv(symbol, timeframe, lookback_bars)
-            if df is None or len(df) < 50:  # Need minimum bars for indicators
+            if df is None or len(df) < 50:
                 return None
             
-            # Calculate ATR (14-period) in pips
-            atr_pips = self._calculate_atr(df, 14, sym_info["point"], cat_cfg["pip_multiplier"])
+            # Pip multiplier from category config
+            pip_mult = cat_cfg.get("pip_multiplier", 10) if cat_cfg else 10
             
-            # Spread
-            spread_pips = sym_info["spread_pips"]
-            
-            # ADX (14-period)
+            # Calculate metrics
+            atr_pips = self._calculate_atr(df, 14, point, pip_mult)
+            spread_pips = sym_info.get("spread_pips", 0.0)
             adx = self._calculate_adx(df, 14)
-            
-            # Daily volume (approximate from tick volume)
             daily_volume = float(df["volume"].tail(24).sum()) if len(df) >= 24 else 0.0
-            
-            # Volatility percentile (last 30 bars vs full lookback)
             volatility_percentile = self._calculate_volatility_percentile(df, 30)
-            
-            # Liquidity score (0-10 based on volume and spread)
             liquidity_score = self._calculate_liquidity_score(daily_volume, spread_pips, sym_info)
-            
-            # Momentum score (RSI + ROC combination)
             momentum_score = self._calculate_momentum_score(df)
-            
-            # Current price
             current_price = float(df["close"].iloc[-1])
-            
-            # Trading hours check
             trading_hours_active = self._is_trading_hours(symbol, category, sym_info)
             
             return {
@@ -378,7 +418,7 @@ class MarketScanner:
                 "liquidity_score": liquidity_score,
                 "momentum_score": momentum_score,
                 "current_price": current_price,
-                "pip_value": sym_info["pip_value"],
+                "pip_value": sym_info.get("pip_value", 1.0),
                 "trading_hours_active": trading_hours_active,
             }
         
@@ -401,7 +441,7 @@ class MarketScanner:
         )
         
         atr = np.mean(tr[-period:]) if len(tr) >= period else np.mean(tr)
-        atr_pips = (atr / point) * pip_mult
+        atr_pips = (atr / point) * pip_mult if point > 0 else atr * 10000
         return round(atr_pips, 2)
     
     def _calculate_adx(self, df: pd.DataFrame, period: int = 14) -> float:
@@ -410,7 +450,6 @@ class MarketScanner:
         low = df["low"].values
         close = df["close"].values
         
-        # Calculate +DM and -DM
         plus_dm = np.zeros(len(high))
         minus_dm = np.zeros(len(high))
         
@@ -423,7 +462,6 @@ class MarketScanner:
             if low_diff > high_diff and low_diff > 0:
                 minus_dm[i] = low_diff
         
-        # Calculate True Range
         tr = np.zeros(len(high))
         for i in range(1, len(high)):
             tr[i] = max(
@@ -432,23 +470,22 @@ class MarketScanner:
                 abs(low[i] - close[i-1])
             )
         
-        # Smooth with Wilder's moving average
         atr = self._wilder_smooth(tr, period)
-        # Add epsilon to prevent division by zero
         plus_di = 100 * self._wilder_smooth(plus_dm, period) / (atr + 1e-10)
         minus_di = 100 * self._wilder_smooth(minus_dm, period) / (atr + 1e-10)
         
-        # Calculate DX and ADX
         dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
         adx = self._wilder_smooth(dx, period)
         
-        return round(float(adx[-1]), 2)
+        return round(float(adx[-1]), 2) if len(adx) > 0 else 0.0
     
     def _wilder_smooth(self, data: np.ndarray, period: int) -> np.ndarray:
         """Wilder's smoothing (EMA-like with alpha=1/period)."""
         result = np.zeros_like(data)
-        result[period-1] = np.mean(data[:period])
+        if len(data) < period:
+            return result
         
+        result[period-1] = np.mean(data[:period])
         for i in range(period, len(data)):
             result[i] = (result[i-1] * (period - 1) + data[i]) / period
         
@@ -457,15 +494,11 @@ class MarketScanner:
     def _calculate_volatility_percentile(self, df: pd.DataFrame, recent_window: int) -> float:
         """Calculate what percentile the recent volatility is vs historical."""
         if len(df) < recent_window * 2:
-            return 50.0  # Default to median
+            return 50.0
         
-        # Calculate rolling ATR
         returns = df["close"].pct_change().values[1:]
-        
-        # Recent volatility (last N bars)
         recent_vol = np.std(returns[-recent_window:]) if len(returns) >= recent_window else 0
         
-        # Historical volatility distribution
         all_vols = [np.std(returns[max(0, i-recent_window):i]) 
                     for i in range(recent_window, len(returns), recent_window)]
         
@@ -475,53 +508,45 @@ class MarketScanner:
         percentile = (np.sum(np.array(all_vols) <= recent_vol) / len(all_vols)) * 100
         return round(percentile, 1)
     
-    def _calculate_liquidity_score(
-        self, 
-        volume: float, 
-        spread_pips: float,
-        sym_info: dict
-    ) -> float:
-        """
-        Calculate liquidity score (0-10) based on volume and spread.
-        Higher is better (high volume, low spread).
-        """
-        # Volume component (normalize to 0-5)
-        vol_score = min(5.0, (volume / 10000) * 5) if volume > 0 else 0
+    def _calculate_liquidity_score(self, volume: float, spread_pips: float, sym_info: dict) -> float:
+        """Calculate liquidity score (0-10) using percentile-based ranking."""
+        # Use percentile-based scoring instead of hardcoded scaling
+        # Normalize volume (use log scale)
+        vol_log = np.log(volume + 1) if volume > 0 else 0
+        # Normalize to 0-5 range (typical volume log range: 0-15)
+        vol_score = min(5.0, (vol_log / 15) * 5) if volume > 0 else 0
         
-        # Spread component (inverse, normalize to 0-5)
-        # Lower spread = better
-        max_acceptable_spread = 10.0
-        spread_score = max(0, 5.0 * (1 - spread_pips / max_acceptable_spread))
+        # Spread component (inverse)
+        max_acceptable_spread = 20.0
+        spread_score = max(0, 5.0 * (1 - min(1.0, spread_pips / max_acceptable_spread)))
         
         total = vol_score + spread_score
         return round(total, 1)
     
     def _calculate_momentum_score(self, df: pd.DataFrame) -> float:
-        """
-        Calculate momentum score (0-100) using RSI and ROC.
-        50 is neutral, >50 is bullish, <50 is bearish.
-        """
+        """Calculate momentum score (0-100) using RSI and ROC."""
         close = df["close"].values
         
-        # RSI (14-period)
         rsi = self._calculate_rsi(close, 14)
         
-        # Rate of Change (10-period)
         roc = ((close[-1] - close[-10]) / close[-10] * 100) if len(close) >= 10 else 0
         
-        # Combine (RSI 70%, ROC 30%)
-        momentum = 0.7 * rsi + 0.3 * (50 + roc)  # ROC scaled to 0-100 range
+        momentum = 0.7 * rsi + 0.3 * (50 + roc)
+        momentum = np.clip(momentum, 0, 100)
         
-        return round(np.clip(momentum, 0, 100), 1)
+        return round(momentum, 1)
     
     def _calculate_rsi(self, prices: np.ndarray, period: int = 14) -> float:
         """Calculate Relative Strength Index."""
+        if len(prices) < period + 1:
+            return 50.0
+        
         deltas = np.diff(prices)
         gains = np.where(deltas > 0, deltas, 0)
         losses = np.where(deltas < 0, -deltas, 0)
         
-        avg_gain = np.mean(gains[-period:]) if len(gains) >= period else 0
-        avg_loss = np.mean(losses[-period:]) if len(losses) >= period else 0
+        avg_gain = np.mean(gains[-period:])
+        avg_loss = np.mean(losses[-period:])
         
         if avg_loss == 0:
             return 100.0
@@ -538,9 +563,13 @@ class MarketScanner:
         
         now = datetime.now(timezone.utc)
         hour = now.hour
-        weekday = now.weekday()  # 0=Monday, 6=Sunday
+        weekday = now.weekday()
         
-        # Forex: 24/5 (closes Friday 22:00 UTC, opens Sunday 22:00 UTC)
+        # Crypto: 24/7
+        if category == "crypto":
+            return True
+        
+        # Forex: 24/5
         if category == "forex":
             if weekday == 6:  # Sunday
                 return hour >= 22
@@ -550,37 +579,27 @@ class MarketScanner:
                 return hour < 22
             return True
         
-        # Crypto: 24/7
-        if category == "crypto":
-            return True
-        
+        # Indices and Stocks: market hours
         if category in ("indices", "stock"):
             if weekday >= 5:
                 return False
             
-            region = None
-            if sym_info:
-                segments = sym_info.get("path", "").split("\\")
-                # Stocks: region is the second segment (Stocks\US\Tesla)
-                if segments and segments[0].lower() == "stocks" and len(segments) >= 2:
-                    region = segments[1].upper()
-                # Indices: infer region from profit currency
-                if region is None:
-                    currency = sym_info.get("currency_profit", "").upper()
-                    if currency == "USD": region = "US"
-                    elif currency == "EUR": region = "EU"
-                    elif currency in ("JPY", "AUD", "HKD", "SGD", "CNH"): region = "ASIA"
-                    elif currency == "GBP": region = "EU"
-                    elif currency == "ZAR": region = "ASIA"
-            
-            if region == "US":
+            # Try to determine region from symbol
+            clean = symbol.upper()
+            # US markets (14-21 UTC)
+            if any(x in clean for x in ("US30", "US100", "US500", "SPX", "NAS", "NDX")):
                 return 14 <= hour < 21
-            elif region == "EU":
+            # EU markets (8-17 UTC)
+            if any(x in clean for x in ("GER40", "DAX", "UK100", "FRA40", "EU50")):
                 return 8 <= hour < 17
-            elif region == "ASIA":
-                return 23 <= hour or hour < 8
-            return weekday < 5
+            # Asian markets (23-8 UTC)
+            if any(x in clean for x in ("JP225", "AUS200", "N225")):
+                return hour >= 23 or hour < 8
+            
+            # Default for indices
+            return 8 <= hour < 21
         
+        # Commodities: weekdays only
         if category == "commodity":
             return weekday < 5
         
@@ -593,31 +612,36 @@ class MarketScanner:
     def _passes_criteria(self, metrics: dict, criteria: dict) -> bool:
         """Check if metrics pass all criteria filters."""
         # ATR range
-        if not (criteria["atr_min_pips"] <= metrics["atr_pips"] <= criteria["atr_max_pips"]):
+        atr_min = criteria.get("atr_min_pips", 0)
+        atr_max = criteria.get("atr_max_pips", 999)
+        if not (atr_min <= metrics["atr_pips"] <= atr_max):
             return False
         
         # Spread threshold
-        if metrics["spread_pips"] > criteria["max_spread_pips"]:
+        if metrics["spread_pips"] > criteria.get("max_spread_pips", 999):
             return False
         
         # ADX range
-        if not (criteria["adx_min"] <= metrics["adx"] <= criteria["adx_max"]):
+        adx_min = criteria.get("adx_min", 0)
+        adx_max = criteria.get("adx_max", 100)
+        if not (adx_min <= metrics["adx"] <= adx_max):
             return False
         
         # Volume threshold
-        if metrics["daily_volume"] < criteria["min_daily_volume_lots"]:
+        if metrics["daily_volume"] < criteria.get("min_daily_volume_lots", 0):
             return False
         
         # Volatility percentile range
-        vol_pct = metrics["volatility_percentile"]
-        if not (criteria["volatility_percentile_min"] <= vol_pct <= criteria["volatility_percentile_max"]):
+        vol_min = criteria.get("volatility_percentile_min", 0)
+        vol_max = criteria.get("volatility_percentile_max", 100)
+        if not (vol_min <= metrics["volatility_percentile"] <= vol_max):
             return False
         
         # Liquidity score
-        if metrics["liquidity_score"] < criteria["liquidity_score_min"]:
+        if metrics["liquidity_score"] < criteria.get("liquidity_score_min", 0):
             return False
         
-        # Trading hours (if filter enabled)
+        # Trading hours
         if self.cfg["filters"].get("respect_trading_hours"):
             if not metrics["trading_hours_active"]:
                 return False
@@ -625,15 +649,12 @@ class MarketScanner:
         return True
     
     def _calculate_scores(self, metrics: dict, criteria: dict, weights: dict) -> dict:
-        """
-        Calculate normalized component scores and weighted composite score.
-        All scores are 0-100.
-        """
-        # Volatility score (higher ATR = higher score, up to max threshold)
+        """Calculate normalized component scores and weighted composite score."""
+        # Volatility score (higher ATR = higher score)
         vol_score = self._normalize_score(
             metrics["atr_pips"],
-            criteria["atr_min_pips"],
-            criteria["atr_max_pips"],
+            criteria.get("atr_min_pips", 0),
+            criteria.get("atr_max_pips", 100),
             inverse=False
         )
         
@@ -641,7 +662,7 @@ class MarketScanner:
         spread_score = self._normalize_score(
             metrics["spread_pips"],
             0,
-            criteria["max_spread_pips"],
+            criteria.get("max_spread_pips", 20),
             inverse=True
         )
         
@@ -649,12 +670,12 @@ class MarketScanner:
         trend_score = self._normalize_bell_curve(
             metrics["adx"],
             optimal=35,
-            min_val=criteria["adx_min"],
-            max_val=criteria["adx_max"]
+            min_val=criteria.get("adx_min", 0),
+            max_val=criteria.get("adx_max", 100)
         )
         
         # Liquidity score (already 0-10, scale to 0-100)
-        liquidity_score = metrics["liquidity_score"] * 10
+        liquidity_score = min(100, metrics["liquidity_score"] * 10)
         
         # Momentum score (already 0-100)
         momentum_score = metrics["momentum_score"]
@@ -677,15 +698,9 @@ class MarketScanner:
             "composite": round(composite, 1),
         }
     
-    def _normalize_score(
-        self, 
-        value: float, 
-        min_val: float, 
-        max_val: float, 
-        inverse: bool = False
-    ) -> float:
+    def _normalize_score(self, value: float, min_val: float, max_val: float, inverse: bool = False) -> float:
         """Normalize value to 0-100 scale."""
-        if max_val == min_val:
+        if max_val <= min_val:
             return 50.0
         
         normalized = (value - min_val) / (max_val - min_val)
@@ -696,28 +711,16 @@ class MarketScanner:
         
         return normalized * 100
     
-    def _normalize_bell_curve(
-        self,
-        value: float,
-        optimal: float,
-        min_val: float,
-        max_val: float
-    ) -> float:
-        """
-        Normalize with peak at optimal value, declining toward min/max.
-        Used for metrics like ADX where mid-range is best.
-        """
+    def _normalize_bell_curve(self, value: float, optimal: float, min_val: float, max_val: float) -> float:
+        """Normalize with peak at optimal value."""
         if value == optimal:
             return 100.0
         
-        # Distance from optimal
         if value < optimal:
-            # Scale from min to optimal (0 to 100)
             if optimal == min_val:
                 return 100.0
             normalized = (value - min_val) / (optimal - min_val)
         else:
-            # Scale from optimal to max (100 to 0)
             if max_val == optimal:
                 return 100.0
             normalized = 1 - (value - optimal) / (max_val - optimal)
@@ -728,37 +731,6 @@ class MarketScanner:
     # -----------------------------------------------------------------------
     # Utility
     # -----------------------------------------------------------------------
-    @staticmethod
-    def _get_category_from_path(path: str) -> Optional[str]:
-        """Determine symbol category dynamically from MT5's symbol group path.
-        
-        Reads the 'path' field from get_symbol_info() which contains the full
-        Market Watch tree path, e.g. 'Forex\\Standard Ultra Low\\Majors\\EURUSD#'
-        The second-to-last segment is the asset group.
-        """
-        if not path:
-            return None
-
-        segments = path.split("\\")
-        first = segments[0].lower() if segments else ""
-        
-        if first == "forex":
-            return "forex"
-        if first in ("cryptocurrencies", "crypto"):
-            return "crypto"
-        if first == "stocks":
-            return "stock"
-        if first == "indices":
-            return "indices"
-        # Derivatives group contains metals, energies, and cash indices
-        if first == "derivatives":
-            for seg in segments:
-                s = seg.lower()
-                if s in ("indices", "index"):
-                    return "indices"
-                if s in ("metals", "metal") or s in ("energies", "energy"):
-                    return "commodity"
-        return None
     
     def _is_cache_valid(self) -> bool:
         """Check if cached results are still valid."""
@@ -772,7 +744,6 @@ class MarketScanner:
     
     def _compute_config_hash(self) -> str:
         """Simple hash of config to detect changes."""
-        import hashlib
         cfg_str = json.dumps(self.cfg, sort_keys=True)
         return hashlib.md5(cfg_str.encode()).hexdigest()[:8]
     

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { fetchAnalyticsPerformance, fetchRegimeStatus, fetchExecutionQuality } from "@/lib/api";
+import { fetchAnalyticsPerformance, fetchRegimeStatus, fetchExecutionQuality, fetchAccounts } from "@/lib/api";
 import type { AnalyticsPerformance, BucketStats, ExecutionQualityMetrics } from "@/types";
+import { useBotStore } from "@/lib/store";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function fmt(n: number | undefined, decimals = 2): string {
@@ -122,7 +123,7 @@ function BreakdownTable({
               <th className="text-right px-2">Win%</th>
               <th className="text-right px-2">Profit</th>
               <th className="text-right px-2">Avg/Trade</th>
-            </tr>
+             </tr>
           </thead>
           <tbody>
             {rows.map(([label, s]) => (
@@ -331,7 +332,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
                   <th className="text-right px-2">Slippage</th>
                   <th className="text-right px-2">Spread</th>
                   <th className="text-right px-2">Exec Time</th>
-                </tr>
+                 </tr>
               </thead>
               <tbody>
                 {Object.entries(metrics.by_symbol)
@@ -370,7 +371,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
                   <th className="text-right px-2">Slippage</th>
                   <th className="text-right px-2">Spread</th>
                   <th className="text-right px-2">Exec Time</th>
-                </tr>
+                 </tr>
               </thead>
               <tbody>
                 {Object.entries(metrics.by_trading_type).map(([mode, data]) => (
@@ -399,33 +400,43 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
 
 // ── main page ─────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
+  const { account: currentAccount } = useBotStore();
   const [sectionTab, setSectionTab] = useState<typeof SECTION_TABS[number]>("overview");
   const [accountTab, setAccountTab]  = useState<typeof ACCOUNT_TABS[number]>("paper");
   const [modeTab,    setModeTab]     = useState<typeof MODE_TABS[number]>("all");
+  const [selectedAccountLogin, setSelectedAccountLogin] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<Array<{ login: number; type: string }>>([]);
   const [data,   setData]    = useState<AnalyticsPerformance | null>(null);
   const [regimes, setRegimes] = useState<Record<string, string>>({});
   const [executionQuality, setExecutionQuality] = useState<ExecutionQualityMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
+  // Load available accounts
+  useEffect(() => {
+    fetchAccounts()
+      .then(res => setAccounts(res.accounts))
+      .catch(() => {});
+  }, []);
+
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [perf, reg, exec] = await Promise.all([
-        fetchAnalyticsPerformance(accountTab, modeTab),
-        fetchRegimeStatus().catch(() => ({ regimes: {} })),
-        fetchExecutionQuality(accountTab, modeTab).catch(() => null),
-      ]);
-      setData(perf);
-      setRegimes(reg.regimes);
-      setExecutionQuality(exec);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load analytics");
-    } finally {
-      setLoading(false);
-    }
-  }, [accountTab, modeTab]);
+  setLoading(true);
+  setError(null);
+  try {
+    const [perf, reg, exec] = await Promise.all([
+      fetchAnalyticsPerformance(accountTab, modeTab, undefined), // limit is optional, pass undefined for default (5000)
+      fetchRegimeStatus().catch(() => ({ regimes: {} })),
+      fetchExecutionQuality(accountTab, modeTab).catch(() => null) // Fixed: account first, then tradingType
+    ]);
+    setData(perf);
+    setRegimes(reg.regimes);
+    setExecutionQuality(exec);
+  } catch (e: unknown) {
+    setError(e instanceof Error ? e.message : "Failed to load analytics");
+  } finally {
+    setLoading(false);
+  }
+}, [accountTab, modeTab]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -446,6 +457,23 @@ export default function AnalyticsPage() {
             Performance metrics, ratios, and failure analysis
           </p>
         </div>
+        
+        {/* Account selector */}
+        {accounts.length > 0 && (
+          <select
+            value={selectedAccountLogin ?? ""}
+            onChange={(e) => setSelectedAccountLogin(e.target.value ? Number(e.target.value) : null)}
+            className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm"
+          >
+            <option value="">All Accounts</option>
+            {accounts.map((acc) => (
+              <option key={acc.login} value={acc.login}>
+                {acc.login} ({acc.type === "demo" ? "Demo" : "Live"})
+              </option>
+            ))}
+          </select>
+        )}
+        
         <button
           onClick={load}
           disabled={loading}
@@ -516,110 +544,111 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      {sectionTab === "overview" && <>{error && (
-        <div className="bg-red-950/50 border border-red-800/50 rounded-xl px-4 py-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
-      {data?.message && !data.total_trades && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-10 text-center text-gray-500">
-          {data.message}
-        </div>
-      )}
-
-      {data && data.total_trades > 0 && (
-        <>
-          {/* Key stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label="Trades"       value={String(data.total_trades)} />
-            <StatCard label="Win Rate"     value={pct(data.win_rate)}
-              valueClass={data.win_rate >= 50 ? "text-green-400" : data.win_rate >= 40 ? "text-yellow-400" : "text-red-400"} />
-            <StatCard label="Total P&L"    value={profit(data.total_profit)}   valueClass={clsProfit(data.total_profit)} />
-            <StatCard label="Avg RR"       value={fmt(data.avg_rr)}            valueClass="text-blue-300" />
-            <StatCard label="Sharpe"       value={fmt(data.sharpe_ratio)}      valueClass={ratioColor(data.sharpe_ratio)} sub="annualised" />
-            <StatCard label="Sortino"      value={fmt(data.sortino_ratio)}     valueClass={ratioColor(data.sortino_ratio)} sub="annualised" />
-            <StatCard label="Max Drawdown" value={`${fmt(data.max_drawdown_pct)}%`}
-              valueClass={data.max_drawdown_pct > 15 ? "text-red-400" : data.max_drawdown_pct > 8 ? "text-yellow-400" : "text-green-400"} />
-            <StatCard label="Avg Win"      value={profit(data.avg_win)}        valueClass="text-green-400"
-              sub={`Loss: ${profit(data.avg_loss)}`} />
+      {sectionTab === "overview" && <>
+        {error && (
+          <div className="bg-red-950/50 border border-red-800/50 rounded-xl px-4 py-3 text-sm text-red-300">
+            {error}
           </div>
+        )}
 
-          {/* Equity curve */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <div className="flex justify-between items-center mb-2">
-              <h2 className="text-sm font-semibold text-gray-300">Equity Curve (Cumulative P&L)</h2>
-              <span className={`text-sm font-mono font-semibold ${clsProfit(equityFinal)}`}>
-                {profit(equityFinal)}
-              </span>
+        {data?.message && !data.total_trades && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-10 text-center text-gray-500">
+            {data.message}
+          </div>
+        )}
+
+        {data && data.total_trades > 0 && (
+          <>
+            {/* Key stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <StatCard label="Trades"       value={String(data.total_trades)} />
+              <StatCard label="Win Rate"     value={pct(data.win_rate)}
+                valueClass={data.win_rate >= 50 ? "text-green-400" : data.win_rate >= 40 ? "text-yellow-400" : "text-red-400"} />
+              <StatCard label="Total P&L"    value={profit(data.total_profit)}   valueClass={clsProfit(data.total_profit)} />
+              <StatCard label="Avg RR"       value={fmt(data.avg_rr)}            valueClass="text-blue-300" />
+              <StatCard label="Sharpe"       value={fmt(data.sharpe_ratio)}      valueClass={ratioColor(data.sharpe_ratio)} sub="annualised" />
+              <StatCard label="Sortino"      value={fmt(data.sortino_ratio)}     valueClass={ratioColor(data.sortino_ratio)} sub="annualised" />
+              <StatCard label="Max Drawdown" value={`${fmt(data.max_drawdown_pct)}%`}
+                valueClass={data.max_drawdown_pct > 15 ? "text-red-400" : data.max_drawdown_pct > 8 ? "text-yellow-400" : "text-green-400"} />
+              <StatCard label="Avg Win"      value={profit(data.avg_win)}        valueClass="text-green-400"
+                sub={`Loss: ${profit(data.avg_loss)}`} />
             </div>
-            <EquitySparkline points={data.equity_curve} />
-          </div>
 
-          {/* Trade quality bar */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <h3 className="text-sm font-semibold text-gray-300 mb-3">Trade Quality Distribution</h3>
-            <div className="flex gap-3 items-center">
-              {(() => {
-                const { high, medium, low } = data.trade_quality;
-                const total = high + medium + low || 1;
-                return (
-                  <>
-                    <div className="flex-1 flex h-6 rounded-lg overflow-hidden">
-                      {high   > 0 && <div style={{ width: `${high   / total * 100}%` }} className="bg-green-600 transition-all" title={`High confidence: ${high}`} />}
-                      {medium > 0 && <div style={{ width: `${medium / total * 100}%` }} className="bg-yellow-500 transition-all" title={`Medium: ${medium}`} />}
-                      {low    > 0 && <div style={{ width: `${low    / total * 100}%` }} className="bg-gray-600 transition-all" title={`Low / unknown: ${low}`} />}
-                    </div>
-                    <div className="flex gap-3 text-xs whitespace-nowrap">
-                      <span className="text-green-400">● High {high}</span>
-                      <span className="text-yellow-400">● Med {medium}</span>
-                      <span className="text-gray-400">● Low {low}</span>
-                    </div>
-                  </>
-                );
-              })()}
+            {/* Equity curve */}
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="text-sm font-semibold text-gray-300">Equity Curve (Cumulative P&L)</h2>
+                <span className={`text-sm font-mono font-semibold ${clsProfit(equityFinal)}`}>
+                  {profit(equityFinal)}
+                </span>
+              </div>
+              <EquitySparkline points={data.equity_curve} />
             </div>
-          </div>
 
-          {/* Regime status */}
-          {Object.keys(regimes).length > 0 && <RegimePanel regimes={regimes} />}
+            {/* Trade quality bar */}
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-gray-300 mb-3">Trade Quality Distribution</h3>
+              <div className="flex gap-3 items-center">
+                {(() => {
+                  const { high, medium, low } = data.trade_quality;
+                  const total = high + medium + low || 1;
+                  return (
+                    <>
+                      <div className="flex-1 flex h-6 rounded-lg overflow-hidden">
+                        {high   > 0 && <div style={{ width: `${high   / total * 100}%` }} className="bg-green-600 transition-all" title={`High confidence: ${high}`} />}
+                        {medium > 0 && <div style={{ width: `${medium / total * 100}%` }} className="bg-yellow-500 transition-all" title={`Medium: ${medium}`} />}
+                        {low    > 0 && <div style={{ width: `${low    / total * 100}%` }} className="bg-gray-600 transition-all" title={`Low / unknown: ${low}`} />}
+                      </div>
+                      <div className="flex gap-3 text-xs whitespace-nowrap">
+                        <span className="text-green-400">● High {high}</span>
+                        <span className="text-yellow-400">● Med {medium}</span>
+                        <span className="text-gray-400">● Low {low}</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
 
-          {/* Breakdown tables */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <BreakdownTable
-              title="By Strategy"
-              rows={byStrategyRows}
-              labelKey="Strategy"
-            />
-            <BreakdownTable
-              title="By Symbol"
-              rows={bySymbolRows}
-              labelKey="Symbol"
-            />
-            {modeTab === "all" && (
+            {/* Regime status */}
+            {Object.keys(regimes).length > 0 && <RegimePanel regimes={regimes} />}
+
+            {/* Breakdown tables */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <BreakdownTable
-                title="By Trading Mode"
-                rows={byModeRows}
-                labelKey="Mode"
+                title="By Strategy"
+                rows={byStrategyRows}
+                labelKey="Strategy"
               />
-            )}
-            {accountTab === "all" && (
               <BreakdownTable
-                title="By Account"
-                rows={data ? Object.entries(data.by_account).sort((a, b) => b[1].total_profit - a[1].total_profit) : []}
-                labelKey="Account"
+                title="By Symbol"
+                rows={bySymbolRows}
+                labelKey="Symbol"
               />
-            )}
-          </div>
+              {modeTab === "all" && (
+                <BreakdownTable
+                  title="By Trading Mode"
+                  rows={byModeRows}
+                  labelKey="Mode"
+                />
+              )}
+              {accountTab === "all" && (
+                <BreakdownTable
+                  title="By Account"
+                  rows={data ? Object.entries(data.by_account).sort((a, b) => b[1].total_profit - a[1].total_profit) : []}
+                  labelKey="Account"
+                />
+              )}
+            </div>
 
-          {/* Hour heatmap */}
-          <HourHeatmap byHour={data.by_hour} />
+            {/* Hour heatmap */}
+            <HourHeatmap byHour={data.by_hour} />
 
-          {/* Failure analysis */}
-          <FailurePanel data={data.failure_analysis} />
-        </>
-      )}
-    </>}
+            {/* Failure analysis */}
+            <FailurePanel data={data.failure_analysis} />
+          </>
+        )}
+      </>}
     </div>
   );
 }

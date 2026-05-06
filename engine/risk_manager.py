@@ -72,27 +72,20 @@ class RiskManager:
         # Global circuit breaker
         self._daily_halted = False
         self._weekly_halted = False
-        self._cb_enabled = True   # can be toggled via API
-        # G-3: optional callback — set from api/main.py to broadcast a WS alert
-        self._on_circuit_breaker = None   # Callable[[str, str], None] | None
+        self._cb_enabled = True
+        self._on_circuit_breaker = None
 
-        # RISK-3: timestamp of last mode-switch; used to apply a brief 1-second
-        # hold in check_concurrent_limit so in-flight orders from the old mode
-        # cannot slip through before the new mode's state is fully settled.
+        # RISK-3: timestamp of last mode-switch
         self._mode_switch_ts: Optional[datetime] = None
 
-        # Lock protecting all mutable state that is accessed from both the
-        # async runner loop (update_balance) and _poll_outcome threads.
+        # Lock protecting all mutable state
         self._lock = threading.Lock()
 
-        # GAP-1: restore state from disk so circuit breakers survive restarts.
-        # Only auto-load when using the production config (no explicit config dict
-        # passed) — tests that supply a config dict get a clean in-memory state.
         if config is None:
             self._load_state()
 
     # ------------------------------------------------------------------
-    # State Persistence (GAP-1)
+    # State Persistence
     # ------------------------------------------------------------------
 
     def _save_state(self) -> None:
@@ -164,6 +157,30 @@ class RiskManager:
     # Position Sizing
     # ------------------------------------------------------------------
 
+    def _get_safe_tick_value(self, tick_value: float, symbol: str, tick_size: float) -> float:
+        """
+        Ensure tick_value is not unrealistically low for the instrument type.
+        MT5 sometimes reports tick_value = $0.01 for futures when it should be $1.00,
+        causing lot sizes to be 100x too large.
+        """
+        if tick_value >= 0.50:
+            return tick_value
+        
+        _sym_u = symbol.upper() if symbol else ""
+        
+        # Penny stocks and micro instruments can have very low tick values
+        if any(x in _sym_u for x in ("PENNY", "CENTS", "MICRO")):
+            return tick_value  # Keep as-is, these are legitimate low tick values
+        
+        # For all normal instruments (forex, indices, commodities, crypto),
+        # tick value below $0.50 is suspicious
+        logger.warning(
+            f"Tick value {tick_value:.4f} for {symbol} is suspiciously low. "
+            f"Clamping to $1.00 to prevent over-sizing. "
+            f"SL ticks will be adjusted accordingly."
+        )
+        return 1.0
+
     def calculate_lot_size(
         self,
         # ── MT5 symbol_info style (preferred) ───────────────────────────
@@ -172,8 +189,8 @@ class RiskManager:
         sl: Optional[float] = None,
         symbol: Optional[str] = None,
         contract_size: float = 100_000,
-        tick_value: float = 1.0,    # account-currency value of 1 tick per 1 lot
-        tick_size: float = 0.00001, # minimum price movement
+        tick_value: float = 1.0,
+        tick_size: float = 0.00001,
         # ── legacy pip-based style (kept for back-compat) ────────────────
         account_balance: Optional[float] = None,
         entry_price: Optional[float] = None,
@@ -223,6 +240,9 @@ class RiskManager:
             _tick_size  = tick_size  if tick_size  > 0 else 0.00001
             _tick_value = tick_value if tick_value > 0 else 1.0
 
+        # Apply safety clamp to tick_value for suspiciously low values
+        _tick_value = self._get_safe_tick_value(_tick_value, symbol or "", _tick_size)
+
         sl_ticks = abs(_entry - _sl) / _tick_size
 
         if sl_ticks == 0:
@@ -232,15 +252,13 @@ class RiskManager:
         raw_lot = risk_amount / (sl_ticks * _tick_value)
         
         # SAFETY GUARD: validate that the calculated lot doesn't exceed intended risk.
-        # MT5 can report misleading tick_value for futures contracts (e.g. $0.01
-        # instead of $1.00), causing 100x oversizing. Recompute using a floor on
-        # tick_value as a cross-check, and take the safer (smaller) of the two.
-        _tick_value_safe = max(_tick_value, 0.10)
+        # Recompute using a floor on tick_value as a cross-check.
+        _tick_value_safe = max(_tick_value, 0.50)
         _safe_lot = risk_amount / (sl_ticks * _tick_value_safe) if sl_ticks > 0 else raw_lot
         if _safe_lot < raw_lot:
             logger.warning(
                 f"Lot safety clamp: tick_value={_tick_value:.4f} seems low — "
-                f"using floor 0.10. Lot reduced from {raw_lot:.5f} to {_safe_lot:.5f} "
+                f"using floor 0.50. Lot reduced from {raw_lot:.5f} to {_safe_lot:.5f} "
                 f"(risk_amount={risk_amount:.2f})"
             )
             raw_lot = _safe_lot
@@ -249,10 +267,7 @@ class RiskManager:
         lot = math.floor(raw_lot / lot_step) * lot_step
         lot = round(lot, 8)
 
-        # Detect when broker minimum lot exceeds intended risk.
-        # math.floor can produce 0.0 when raw_lot < lot_step; clamping to min_lot
-        # then silently doubles-or-more the intended risk. Log a clear warning so
-        # the operator knows actual risk is higher than configured.
+        # Detect when broker minimum lot exceeds intended risk
         if raw_lot > 0 and lot < min_lot:
             actual_risk_pct = (min_lot / raw_lot) * risk_pct
             logger.warning(
@@ -280,22 +295,6 @@ class RiskManager:
         """
         Scale down lot size when current ATR% exceeds the baseline for this
         trading type. Protects against oversizing during high-volatility regimes.
-
-        ATR% = ATR(14) / close * 100 — same metric used by regime classifier.
-
-        Baseline ATR% by type (calm market reference):
-          scalping    → 0.15% (M5 candles on major forex)
-          day_trading → 0.50% (H1 candles)
-          swing       → 1.50% (H4 candles)
-
-        Scaling:
-          atr_pct ≤ baseline       → no reduction (factor = 1.0)
-          atr_pct = 2× baseline    → factor = 0.75
-          atr_pct = 3× baseline    → factor = 0.60
-          atr_pct ≥ 4× baseline    → factor = 0.50 (floor)
-
-        This means during a crypto news spike (3× normal vol), position
-        size automatically halves — without needing manual intervention.
         """
         _BASELINE_ATR: dict[str, float] = {
             "scalping":    0.15,
@@ -304,19 +303,17 @@ class RiskManager:
         }
         baseline = _BASELINE_ATR.get(trading_type, 0.50)
         if baseline <= 0 or atr_pct <= baseline:
-            return lot  # calm market — no reduction
+            return lot
 
         ratio = atr_pct / baseline
         if ratio <= 1.0:
             factor = 1.0
         elif ratio <= 2.0:
-            # Linear scale from 1.0 → 0.75 between 1× and 2× baseline
             factor = 1.0 - (ratio - 1.0) * 0.25
         elif ratio <= 3.0:
-            # Linear scale from 0.75 → 0.60 between 2× and 3× baseline
             factor = 0.75 - (ratio - 2.0) * 0.15
         else:
-            factor = 0.50  # floor at 50% for extreme volatility
+            factor = 0.50
 
         adjusted = math.floor(lot * factor / lot_step) * lot_step
         adjusted = round(max(min_lot, adjusted), 8)
@@ -344,7 +341,6 @@ class RiskManager:
         """
         Returns (is_valid, error_message).
         Checks: SL is required, SL is on correct side, R:R meets minimum.
-        Per-mode minimums are read from risk_reward_min_by_mode (falls back to risk_reward_min).
         """
         if sl_price is None or sl_price == 0:
             return False, "SL is required on every trade"
@@ -371,7 +367,7 @@ class RiskManager:
             rr = tp_dist / sl_dist if sl_dist > 0 else 0
             _by_mode = self._config.get("risk_reward_min_by_mode", {})
             min_rr = _by_mode.get(trading_type, self._config["risk_reward_min"]) if trading_type else self._config["risk_reward_min"]
-            if rr < min_rr - 1e-9:  # tolerance for floating-point precision
+            if rr < min_rr - 1e-9:
                 return False, f"R:R {rr:.2f} is below minimum {min_rr} for {trading_type or 'trade'}"
 
         return True, ""
@@ -381,32 +377,25 @@ class RiskManager:
     # ------------------------------------------------------------------
 
     def update_balance(self, current_balance: float) -> None:
-        """
-        Call this after every trade close. Tracks daily/weekly balance
-        and triggers circuit breakers if thresholds are exceeded.
-        """
+        """Call after every trade close. Tracks daily/weekly balance and triggers circuit breakers."""
         with self._lock:
-            # Always use UTC to match forex market day boundaries
             _now_utc  = datetime.now(tz=timezone.utc)
             today     = _now_utc.date()
             _iso      = _now_utc.isocalendar()
-            week_key  = (_iso.year, _iso.week)   # tuple prevents year-boundary rollover
+            week_key  = (_iso.year, _iso.week)
 
-            # Reset daily tracking at start of new day
             if self._tracking_date != today:
                 self._tracking_date = today
                 self._day_start_balance = current_balance
                 self._daily_halted = False
                 logger.info(f"Daily balance reset: {current_balance}")
 
-            # Reset weekly tracking at start of new week
             if self._tracking_week != week_key:
                 self._tracking_week = week_key
                 self._week_start_balance = current_balance
                 self._weekly_halted = False
                 logger.info(f"Weekly balance reset: {current_balance}")
 
-            # Check daily drawdown
             if self._day_start_balance:
                 daily_dd = (self._day_start_balance - current_balance) / self._day_start_balance * 100
                 daily_limit = self._config["drawdown"]["daily_limit_pct"]
@@ -419,7 +408,6 @@ class RiskManager:
                     if self._on_circuit_breaker:
                         self._on_circuit_breaker("daily", f"Daily drawdown {daily_dd:.2f}% reached {daily_limit}% limit")
 
-            # Check weekly drawdown
             if self._week_start_balance:
                 weekly_dd = (self._week_start_balance - current_balance) / self._week_start_balance * 100
                 weekly_limit = self._config["drawdown"]["weekly_limit_pct"]
@@ -448,15 +436,10 @@ class RiskManager:
                     f"Mode '{mode}' paused for {pause_hours}h after "
                     f"{self._consecutive_losses[mode]} consecutive losses."
                 )
-            # Per-strategy tracking
             if strategy_name:
                 self._strategy_losses[strategy_name] = self._strategy_losses.get(strategy_name, 0) + 1
-                strat_limit = self._config["drawdown"].get(
-                    "max_strategy_consecutive_losses", limit
-                )
-                strat_pause_hours = self._config["drawdown"].get(
-                    "strategy_pause_hours", pause_hours
-                )
+                strat_limit = self._config["drawdown"].get("max_strategy_consecutive_losses", limit)
+                strat_pause_hours = self._config["drawdown"].get("strategy_pause_hours", pause_hours)
                 if self._strategy_losses[strategy_name] >= strat_limit:
                     self._strategy_paused[strategy_name] = datetime.now(tz=timezone.utc)
                     logger.warning(
@@ -466,22 +449,16 @@ class RiskManager:
             self._save_state()
 
     def record_win(self, trading_mode: str, strategy_name: str | None = None) -> None:
-        """Reset consecutive loss counter on a win (mode and optionally strategy)."""
+        """Reset consecutive loss counter on a win."""
         with self._lock:
             self._consecutive_losses[trading_mode.lower()] = 0
             if strategy_name:
                 self._strategy_losses[strategy_name] = 0
-                # Clear strategy pause on win
                 self._strategy_paused.pop(strategy_name, None)
             self._save_state()
 
     def is_strategy_allowed(self, strategy_name: str) -> tuple[bool, str]:
-        """
-        Check whether a specific strategy is currently paused by its per-strategy
-        consecutive-loss circuit breaker.
-
-        Returns (is_allowed, reason_or_empty_string).
-        """
+        """Check if a specific strategy is paused by its consecutive-loss circuit breaker."""
         with self._lock:
             paused_at = self._strategy_paused.get(strategy_name)
             if paused_at is None:
@@ -492,7 +469,6 @@ class RiskManager:
             )
             elapsed = (datetime.now(tz=timezone.utc) - paused_at).total_seconds() / 3600
             if elapsed >= pause_hours:
-                # Pause expired — clear automatically
                 self._strategy_paused.pop(strategy_name, None)
                 self._strategy_losses[strategy_name] = 0
                 return True, ""
@@ -503,7 +479,7 @@ class RiskManager:
             )
 
     def strategy_status(self) -> dict:
-        """Return per-strategy loss counters and pause state for dashboard display."""
+        """Return per-strategy loss counters and pause state."""
         with self._lock:
             pause_hours = self._config["drawdown"].get(
                 "strategy_pause_hours",
@@ -554,8 +530,7 @@ class RiskManager:
         logger.info("Circuit breaker: consecutive-loss counters reset.")
 
     def reset_for_mode_switch(self) -> None:
-        """Reset all state when switching between paper and live modes.
-        Prevents losses accumulated in one mode from blocking the other."""
+        """Reset all state when switching between paper and live modes."""
         with self._lock:
             self._daily_halted = False
             self._weekly_halted = False
@@ -568,8 +543,6 @@ class RiskManager:
                 self._paused_modes[mode] = None
             self._strategy_losses.clear()
             self._strategy_paused.clear()
-            # RISK-3: record switch time so check_concurrent_limit enforces a
-            # brief settling hold for any in-flight requests targeting old state.
             self._mode_switch_ts = datetime.now(tz=timezone.utc)
             self._save_state()
         logger.info("RiskManager: all state reset for mode switch.")
@@ -580,7 +553,7 @@ class RiskManager:
         logger.info(f"Circuit breaker {'enabled' if enabled else 'DISABLED'} via API.")
 
     def is_trading_allowed(self, trading_mode: str) -> tuple[bool, str]:
-        """Returns (allowed, reason). Check before opening any new trade."""
+        """Check if trading is allowed for a mode (circuit breakers, pauses)."""
         with self._lock:
             if not self._cb_enabled:
                 return True, ""
@@ -616,26 +589,19 @@ class RiskManager:
         open_positions: list[dict],
         symbol: str | None = None,
     ) -> tuple[bool, str]:
-        """
-        Check if a new trade can be opened given current open position counts.
-        `open_positions` should be the full list from MT5Client.get_open_positions().
-        Pass `symbol` to also enforce the per-symbol concurrent limit.
-        """
+        """Check if a new trade would exceed per-mode or per-symbol concurrent limits."""
         with self._lock:
-            # RISK-3: if a mode-switch happened in the last 1 second, hold new trades
-            # briefly so in-flight orders from the old mode cannot bypass the limit.
             if self._mode_switch_ts is not None:
                 elapsed = (datetime.now(tz=timezone.utc) - self._mode_switch_ts).total_seconds()
                 if elapsed < 1.0:
                     return False, "Mode switch settling — retry in a moment"
+            
             mode = trading_mode.lower()
             limits = self._config["max_concurrent_trades"]
             mode_limit = limits.get(mode, 999)
             total_limit = limits.get("total", 999)
             per_symbol_limit = limits.get("per_symbol", 999)
 
-            # Count positions tagged with bot magic per mode
-            # Mode is stored in the comment prefix: "scalp|", "day|", "swing|"
             prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(mode, mode)
             mode_count = sum(
                 1 for p in open_positions
@@ -649,8 +615,6 @@ class RiskManager:
                 return False, f"Total position limit reached ({total_count}/{total_limit})"
 
             if symbol is not None:
-                # Scope per-symbol count to the same trading mode so a day-trade
-                # position on GBPUSD does NOT block a scalping signal on GBPUSD.
                 symbol_count = sum(
                     1 for p in open_positions
                     if p.get("symbol") == symbol and p.get("comment", "").startswith(prefix)
@@ -661,7 +625,7 @@ class RiskManager:
             return True, ""
 
     # ------------------------------------------------------------------
-    # Status
+    # Status & Config
     # ------------------------------------------------------------------
 
     def reload_config(self) -> None:
@@ -688,14 +652,8 @@ class RiskManager:
         }
 
     # ------------------------------------------------------------------
-    # Risk Presets (Task #12)
+    # Risk Presets
     # ------------------------------------------------------------------
-
-    def _get_current_preset_config(self) -> Optional[dict]:
-        """Get the configuration for the currently active preset."""
-        if not self._presets_data.get("presets"):
-            return None
-        return self._presets_data["presets"].get(self._current_preset)
 
     def get_available_presets(self) -> dict:
         """Return all available presets with their configurations."""
@@ -705,11 +663,7 @@ class RiskManager:
         }
 
     def set_risk_preset(self, preset_name: str) -> tuple[bool, str]:
-        """
-        Set the active risk preset by writing its values directly to risk.json.
-        This replaces the multiplier approach with direct value writes.
-        Returns (success, message).
-        """
+        """Set the active risk preset by writing its values directly to risk.json."""
         presets = self._presets_data.get("presets", {})
         if preset_name not in presets:
             available = ", ".join(presets.keys())
@@ -717,14 +671,11 @@ class RiskManager:
 
         preset = presets[preset_name]
         
-        # Update in-memory config with preset values
         self._config["risk_per_trade_pct"] = preset.get("risk_per_trade_pct", 1.5)
         self._config["max_risk_per_trade_pct"] = preset.get("max_risk_per_trade_pct", 2.0)
         self._config["max_concurrent_trades"] = preset.get("max_concurrent_trades", {})
         self._config["drawdown"] = preset.get("drawdown", {})
         
-        # Write to risk.json on disk — atomic temp+replace so a mid-write crash
-        # cannot corrupt the config (same pattern as risk_state.json save).
         try:
             _serialised = json.dumps(self._config, indent=2)
             _fd, _tmp = tempfile.mkstemp(dir=str(CONFIG_PATH.parent), suffix=".tmp")
@@ -743,7 +694,6 @@ class RiskManager:
             logger.error(f"Failed to write risk.json: {exc}")
             return False, f"Failed to save risk config: {exc}"
 
-        # Update preset selection tracker — also atomic
         self._current_preset = preset_name
         self._presets_data["current_preset"] = preset_name
         try:

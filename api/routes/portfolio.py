@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from loguru import logger
 
 router = APIRouter()
@@ -162,7 +162,8 @@ def portfolio_optimization_status():
 
 @router.get("/optimal-allocation")
 def get_optimal_allocation(
-    account: str = "all",
+    account: str = Query("all", description="paper | live | all"),
+    account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
     min_trades: Optional[int] = None,
 ):
     """
@@ -186,12 +187,20 @@ def get_optimal_allocation(
     
     from engine.trade_journal import trade_journal
     
-    # Get closed trades
-    entries = trade_journal.get(
-        account=account if account != "all" else "all",
-        event="close",
-        limit=5000,
-    )
+    # Get closed trades - use account_login if provided
+    if account_login is not None:
+        entries = trade_journal.get(
+            account="all",
+            event="close",
+            limit=5000,
+            account_login=account_login,
+        )
+    else:
+        entries = trade_journal.get(
+            account=account if account != "all" else "all",
+            event="close",
+            limit=5000,
+        )
     
     if len(entries) < min_trades_req:
         return {
@@ -251,15 +260,14 @@ def get_optimal_allocation(
     # Calculate risk parity allocations
     risk_parity_allocations = _risk_parity_allocation(risk_parity_vols)
     
-    # Calculate correlation matrix — pass full date-keyed dicts so _correlation_matrix
-    # can align returns by calendar date (inner join) rather than positional index.
+    # Calculate correlation matrix
     strategy_returns_dicts = {
         s: dict(strategy_daily_returns[s])
         for s in kelly_allocations.keys()
     }
     correlation_data = _correlation_matrix(strategy_returns_dicts)
     
-    # Check if rebalance needed (compare to equal-weight baseline)
+    # Check if rebalance needed
     equal_weight = 1.0 / len(kelly_allocations) if kelly_allocations else 0.0
     max_deviation = max(
         abs(v - equal_weight) for v in kelly_allocations.values()

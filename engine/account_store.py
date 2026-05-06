@@ -70,7 +70,7 @@ def save_account(login: int, account_type: str) -> None:
         except OSError:
             pass
         raise
-    os.environ["MT5_CURRENT_ACCOUNT"] = str(login)
+
     logger.info(f"Account saved: {login} ({account_type})")
 
 

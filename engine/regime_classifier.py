@@ -1,385 +1,323 @@
 """
 Market Regime Classifier
 
-Classifies the current market condition for a symbol into one of six labels:
-    trending_bull    — ADX strong, EMA50 > EMA200, upward momentum
-    trending_bear    — ADX strong, EMA50 < EMA200, downward momentum
-    ranging_low_vol  — ADX weak, ATR% low, sideways chop
-    ranging_high_vol — ADX weak, ATR% elevated, noisy/volatile range
-    volatile_breakout— ADX rising rapidly, ATR% spike, fresh momentum burst
-    quiet            — Very low ATR%, barely moving (news-watch or off-hours)
+Classifies each symbol's market regime using ADX, ATR, and price structure.
+Used by strategies to gate entries based on regime compatibility.
 
-Usage:
-    from engine.regime_classifier import regime_classifier
-    label = regime_classifier.classify("BTCUSD", df)   # → "volatile_breakout"
+Regime labels:
+  - trending_bull       (ADX >= 25, EMA50 > EMA200)
+  - trending_bear       (ADX >= 25, EMA50 < EMA200)
+  - ranging_low_vol     (ADX < 20, ATR% low)
+  - ranging_high_vol    (ADX < 20, ATR% high)
+  - volatile_breakout   (ADX >= 25, ATR% high, expanding ranges)
+  - quiet               (ADX < 15, ATR% very low)
 
-The classifier applies hysteresis: a new label must be stable for N bars
-before it replaces the current label. This prevents whipsaw during transitions.
-
-Per-asset-class ADX thresholds are used because crypto/indices have structurally
-higher ATR and ADX readings than forex majors.
+No external config files required — all thresholds are auto-adaptive
+based on historical ATR percentiles per symbol.
 """
 
 from __future__ import annotations
 
-import json
 import threading
-from pathlib import Path
+import time
+from functools import lru_cache
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from loguru import logger
 
-_STATE_PATH = Path(__file__).parent.parent / "data" / "regime_state.json"
-_SYMBOLS_PATH = Path(__file__).parent.parent / "config" / "symbols.json"
+# ── Default thresholds (used when insufficient history) ─────────────────────
+_DEFAULT_ADX_TREND = 25
+_DEFAULT_ADX_RANGE = 20
+_DEFAULT_ADX_QUIET = 15
 
-# Category → asset class mapping
-_CATEGORY_TO_CLASS: dict[str, str] = {
-    "forex":      "forex",
-    "crypto":     "crypto",
-    "commodity":  "commodities",
-    "us_index":   "indices",
-    "eu_index":   "indices",
-    "stock":      "indices",  # stocks use same ADX thresholds as indices
-}
+# Volatility percentiles (based on each symbol's own history)
+_ATR_PERCENTILE_HIGH = 70   # top 30% = high volatility
+_ATR_PERCENTILE_LOW  = 30   # bottom 30% = low volatility
 
-# Cache: symbol → asset class (built once at first use)
-_symbol_class_cache: dict[str, str] = {}
-_symbol_cache_lock = threading.Lock()
+# Cache TTL (seconds) - regime classification is expensive, cache results
+_CACHE_TTL = 60  # 1 minute
 
-def _build_symbol_cache() -> None:
-    """Load symbol categories from symbols.json into the cache."""
-    global _symbol_class_cache
-    try:
-        data = json.loads(_SYMBOLS_PATH.read_text(encoding="utf-8"))
-        cache: dict[str, str] = {}
-        for mode_symbols in data.values():
-            for entry in mode_symbols:
-                sym = entry.get("symbol", "")
-                cat = entry.get("category", "forex")
-                if sym:
-                    cache[sym] = _CATEGORY_TO_CLASS.get(cat, "forex")
-        with _symbol_cache_lock:
-            _symbol_class_cache = cache
-        logger.debug(f"RegimeClassifier: loaded {len(cache)} symbol categories")
-    except Exception as exc:
-        logger.warning(f"RegimeClassifier: could not load symbols.json: {exc}")
-
-
-# ── ADX trend threshold by asset class ──────────────────────────────────────
-# Minimum ADX value considered a "trending" market.
-# Crypto/indices trend at higher absolute ADX than forex.
-_ADX_TREND_MIN: dict[str, float] = {
-    "crypto":     30.0,   # BTC, ETH, XRP, SOL, etc.
-    "indices":    28.0,   # US30, US100, GER40, etc.
-    "commodities":25.0,   # XAUUSD, XAGUSD, USOIL, etc.
-    "forex":      20.0,   # default for FX pairs (lowered from 22 — M1/M5 ADX is lower)
-}
-
-# ADX breakout threshold: ADX rising above this fast signals a breakout regime
-_ADX_BREAKOUT_MIN: dict[str, float] = {
-    "crypto":     35.0,   # lowered from 40 — shorter TF ADX is structurally lower
-    "indices":    30.0,   # lowered from 35
-    "commodities":28.0,   # lowered from 32
-    "forex":      26.0,   # lowered from 30
-}
-
-# ATR% thresholds — PER TIMEFRAME (ATR14 / close * 100)
-#
-# The original single-value thresholds (0.10, 0.80, 1.20) were calibrated
-# for H4/D1 bars. Applied to M1/M5 bars they make the classifier useless:
-#   M1 EURUSD typical ATR% = 0.018-0.073%  → always "quiet" → all strategies blocked
-#   M5 EURUSD typical ATR% = 0.037-0.23%   → always "quiet" or low-vol
-#   H1 EURUSD typical ATR% = 0.18-0.92%    → ok range but never breakout
-#
-# These per-timeframe values are calibrated to produce meaningful regime
-# labels across the full TF range used by the bot (M1 through H4).
-#
-# Quiet:    below this ATR% → truly stationary, no trade opportunity
-# HighVol:  above this ATR% → elevated ranging volatility (if ADX weak)
-# Breakout: above this ATR% + rising ADX → breakout regime
-#
-# Timeframe key maps: M1/M2/M5 → "m5", M15/M30 → "m30", H1 → "h1", H4+ → "h4"
-
-_ATR_THRESHOLDS: dict[str, dict[str, float]] = {
-    "m5":  {"quiet": 0.010, "high_vol": 0.10, "breakout": 0.20},
-    "m30": {"quiet": 0.030, "high_vol": 0.30, "breakout": 0.60},
-    "h1":  {"quiet": 0.060, "high_vol": 0.55, "breakout": 0.90},
-    "h4":  {"quiet": 0.10,  "high_vol": 0.80, "breakout": 1.20},
-}
-
-# Legacy single-value fallback (used when timeframe cannot be determined)
-_ATR_QUIET_MAX:  float = 0.060
-_ATR_HIGH_VOL:   float = 0.55
-_ATR_BREAKOUT:   float = 0.90
-
-# Hysteresis: a new label must hold for at least N consecutive bars
-_HYSTERESIS_BARS = 3
-
-
-def _asset_class(symbol: str) -> str:
-    """Return asset class for a symbol using symbols.json categories."""
-    with _symbol_cache_lock:
-        cls = _symbol_class_cache.get(symbol)
-    if cls:
-        return cls
-    # Fallback for symbols not in symbols.json
-    s = symbol.upper()
-    if any(x in s for x in ("BTC", "ETH", "XRP", "SOL")):
+# Dynamic category detection from symbol name
+def _detect_category(symbol: str) -> str:
+    """Auto-detect asset category from symbol name."""
+    clean = symbol.rstrip("#+*!").upper()
+    
+    # Crypto
+    crypto = {"BTC", "ETH", "XRP", "SOL", "ADA", "DOGE", "DOT", "LTC", "BNB", "XLM", "ETC", "GRT"}
+    if any(c in clean for c in crypto):
         return "crypto"
-    if any(x in s for x in ("US30", "US100", "US500", "GER40", "UK100")):
-        return "indices"
-    if any(x in s for x in ("XAU", "GOLD", "XAG", "SILVER", "OIL", "BRENT", "NGAS")):
-        return "commodities"
-    return "forex"
+    
+    # Indices
+    indices = {"US30", "US100", "US500", "SPX", "NAS", "GER40", "DAX", "UK100", "FRA40", "JPN225", "AUS200"}
+    if any(idx in clean for idx in indices):
+        return "index"
+    
+    # Commodities
+    commodities = {"GOLD", "XAU", "SILVER", "XAG", "OIL", "BRENT", "WTI", "NGAS", "GAS"}
+    if any(cmd in clean for cmd in commodities):
+        return "commodity"
+    
+    # Stocks (company names)
+    stocks = {"APPLE", "TESLA", "NVDA", "MICROSOFT", "AMAZON", "GOOGLE", "META", "NETFLIX", "ADV"},
+    if any(stk in clean for stk in stocks):
+        return "stock"
+    
+    # Forex (6 letters, all alphabetical)
+    if len(clean) == 6 and clean.isalpha():
+        return "forex"
+    
+    return "forex"  # default
 
 
-def _ema(values: np.ndarray, period: int) -> np.ndarray:
-    alpha = 2.0 / (period + 1)
-    out = np.empty_like(values, dtype=float)
-    out[0] = values[0]
-    for i in range(1, len(values)):
-        out[i] = alpha * values[i] + (1.0 - alpha) * out[i - 1]
-    return out
-
-
-def _adx(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
-    """Compute ADX(period). Returns array aligned with input (NaN for first period bars)."""
-    n = len(close)
-    if n < period + 1:
-        return np.full(n, np.nan)
-
-    # True Range
-    prev_close = np.concatenate([[close[0]], close[:-1]])
-    tr = np.maximum(high - low, np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)))
-
-    # Directional movement
-    up_move   = high[1:] - high[:-1]
-    down_move = low[:-1] - low[1:]
-    plus_dm  = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-
-    # Smooth with Wilder's method
-    def wilder_smooth(arr: np.ndarray, p: int) -> np.ndarray:
-        out = np.empty(len(arr))
-        out[0] = arr[:p].mean()
-        for i in range(1, len(arr)):
-            out[i] = out[i - 1] - (out[i - 1] / p) + arr[i]
-        return out
-
-    tr_smooth  = wilder_smooth(tr[1:],      period)
-    pdm_smooth = wilder_smooth(plus_dm,     period)
-    mdm_smooth = wilder_smooth(minus_dm,    period)
-
-    eps = 1e-10
-    pdi = 100.0 * pdm_smooth / (tr_smooth + eps)
-    mdi = 100.0 * mdm_smooth / (tr_smooth + eps)
-    dx  = 100.0 * np.abs(pdi - mdi) / (pdi + mdi + eps)
-
-    adx_arr = wilder_smooth(dx, period)
-
-    # Pad front with NaN to match input length
-    pad = np.full(n - len(adx_arr), np.nan)
-    return np.concatenate([pad, adx_arr])
-
-
-def _classify_raw(
-    df: pd.DataFrame,
-    symbol: str,
-    timeframe: str = "h1",
-) -> str:
-    """Compute the raw (un-hysteresis'd) regime label from OHLCV bars.
-
-    timeframe hint is used to select the correct ATR% thresholds. Pass the
-    primary TF string (e.g. "M5", "H1", "H4") — it is normalised internally.
-    Defaults to "h1" which gives the original behaviour for callers that do
-    not pass a timeframe (e.g. the param optimizer's _classify_bar_regime).
+def _get_category_thresholds(category: str) -> tuple[float, float, float]:
     """
-    if len(df) < 210:
-        return "quiet"
-
-    # Normalise timeframe to threshold key
-    _tf_upper = timeframe.upper()
-    if _tf_upper in ("M1", "M2", "M5"):
-        _tf_key = "m5"
-    elif _tf_upper in ("M15", "M30"):
-        _tf_key = "m30"
-    elif _tf_upper in ("H1",):
-        _tf_key = "h1"
-    else:
-        _tf_key = "h4"   # H4, D1, W1
-
-    _thresh = _ATR_THRESHOLDS.get(_tf_key, _ATR_THRESHOLDS["h1"])
-    _atr_quiet    = _thresh["quiet"]
-    _atr_high_vol = _thresh["high_vol"]
-    _atr_breakout = _thresh["breakout"]
-
-    close = np.asarray(df["close"], dtype=float)
-    high  = np.asarray(df["high"],  dtype=float)
-    low   = np.asarray(df["low"],   dtype=float)
-
-    asset_cls  = _asset_class(symbol)
-    adx_trend  = _ADX_TREND_MIN[asset_cls]
-    adx_brk    = _ADX_BREAKOUT_MIN[asset_cls]
-
-    # ADX
-    adx_arr = _adx(high, low, close, period=14)
-    if np.isnan(adx_arr[-1]):
-        return "quiet"
-    curr_adx  = float(adx_arr[-1])
-    prev_adx  = float(adx_arr[-4]) if not np.isnan(adx_arr[-4]) else curr_adx
-    adx_rising = curr_adx > prev_adx + 2.0   # rising ≥2 units over 3 bars
-
-    # ATR%
-    prev_close = np.concatenate([[close[0]], close[:-1]])
-    tr = np.maximum(high - low, np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)))
-    atr14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
-    eps = max(abs(close[-1]), 1e-8)
-    atr_pct = float(atr14[-1] / eps * 100.0)
-
-    # EMA50/200 direction
-    ema50  = _ema(close, 50)
-    ema200 = _ema(close, 200)
-    bull = ema50[-1] > ema200[-1]
-
-    # Classification logic
-    if atr_pct < _atr_quiet:
-        return "quiet"
-
-    if curr_adx >= adx_brk and atr_pct >= _atr_breakout and adx_rising:
-        return "volatile_breakout"
-
-    if curr_adx >= adx_trend:
-        return "trending_bull" if bull else "trending_bear"
-
-    # ADX weak → ranging
-    if atr_pct >= _atr_high_vol:
-        return "ranging_high_vol"
-    return "ranging_low_vol"
+    Return (adx_trend, adx_range, atr_baseline_pct) for the category.
+    Thresholds are per-category because crypto needs higher ADX to confirm trend,
+    while forex trends can be detected at lower ADX.
+    """
+    thresholds = {
+        "forex":     (25, 20, 0.15),   # ADX trend, range; baseline ATR%
+        "crypto":    (35, 25, 1.00),   # Crypto needs stronger confirmation
+        "index":     (25, 20, 0.30),   # Indices similar to forex, higher vol
+        "commodity": (28, 22, 0.40),   # Gold/Oil in between
+        "stock":     (30, 22, 0.50),   # Individual stocks
+    }
+    return thresholds.get(category, (25, 20, 0.15))
 
 
 class RegimeClassifier:
     """
-    Thread-safe market regime classifier with per-symbol hysteresis.
-
-    The classifier maintains a pending label and a stability counter for each
-    symbol. A new raw label must persist for _HYSTERESIS_BARS consecutive
-    classifications before it replaces the confirmed label. This prevents the
-    weight vector from oscillating at regime boundaries.
+    Thread-safe market regime classifier with per-symbol caching.
+    No external config files — all thresholds are dynamic based on
+    each symbol's own historical volatility distribution.
     """
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        # symbol → confirmed label
-        self._labels:  dict[str, str]  = {}
-        # symbol → (pending_label, bars_held)
-        self._pending: dict[str, tuple[str, int]] = {}
-        # GAP-4: restore hysteresis state from disk so a restart doesn't
-        # drop the regime context accumulated over many candles.
-        _build_symbol_cache()
-        self._load_state()
+    def __init__(self):
+        self._cache: dict[str, tuple[str, float]] = {}  # symbol → (regime, timestamp)
+        self._lock = threading.RLock()
+        self._atr_baselines: dict[str, float] = {}     # symbol → baseline ATR% (50th percentile)
+        self._atr_high_thresholds: dict[str, float] = {}  # symbol → high vol threshold (70th percentile)
+        self._atr_low_thresholds: dict[str, float] = {}   # symbol → low vol threshold (30th percentile)
 
-    # ------------------------------------------------------------------
-    # State persistence (GAP-4)
-    # ------------------------------------------------------------------
+    # ── Public API ────────────────────────────────────────────────────────────
 
-    def _load_state(self) -> None:
-        try:
-            data = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
-            self._labels  = data.get("labels", {})
-            # pending is stored as {symbol: [label, count]}
-            raw_pending = data.get("pending", {})
-            self._pending = {k: (v[0], v[1]) for k, v in raw_pending.items() if len(v) == 2}
-        except FileNotFoundError:
-            pass
-        except Exception as exc:
-            logger.debug(f"RegimeClassifier: could not load state: {exc}")
-
-    def _save_state(self) -> None:
-        try:
-            _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                "labels":  self._labels,
-                "pending": {k: list(v) for k, v in self._pending.items()},
-            }
-            _STATE_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except Exception as exc:
-            logger.debug(f"RegimeClassifier: could not save state: {exc}")
-
-    def classify(self, symbol: str, df: pd.DataFrame, timeframe: str = "H1") -> str:
+    def classify(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        timeframe: str = "H1",
+        force_refresh: bool = False,
+    ) -> str:
         """
-        Return the current hysteresis-stable regime label for this symbol.
-
+        Classify the current market regime for a symbol.
+        
         Args:
-            symbol:    MT5 symbol name (e.g. "EURUSD", "BTCUSD")
-            df:        Primary-timeframe OHLCV DataFrame, most-recent bar last.
-                       Requires columns: open, high, low, close, volume.
-                       Minimum 210 rows for reliable computation.
-            timeframe: Primary TF string (e.g. "M5", "H1", "H4"). Used to
-                       select the correct ATR% thresholds — M5 and H1 require
-                       much lower quiet/high-vol thresholds than H4/D1.
-
+            symbol: Trading symbol (e.g., "EURUSD")
+            df: OHLCV DataFrame with columns: open, high, low, close
+            timeframe: Timeframe string (used for cache key)
+            force_refresh: If True, ignore cache and recompute
+        
         Returns:
-            One of: "trending_bull", "trending_bear", "ranging_low_vol",
-                    "ranging_high_vol", "volatile_breakout", "quiet"
+            Regime label: trending_bull | trending_bear | ranging_low_vol |
+                          ranging_high_vol | volatile_breakout | quiet
         """
-        try:
-            raw = _classify_raw(df, symbol, timeframe)
-        except Exception as exc:
-            logger.debug(f"RegimeClassifier error [{symbol}]: {exc}")
-            return self._labels.get(symbol, "quiet")
+        if df is None or len(df) < 50:
+            return "quiet"
 
+        cache_key = f"{symbol}_{timeframe}"
+        
         with self._lock:
-            confirmed = self._labels.get(symbol)
-            pending_label, pending_count = self._pending.get(symbol, (raw, 0))
+            if not force_refresh and cache_key in self._cache:
+                regime, timestamp = self._cache[cache_key]
+                if time.time() - timestamp < _CACHE_TTL:
+                    return regime
 
-            # Immediate live recovery from the quiet label.
-            # If the confirmed state is quiet but the new raw regime is no longer
-            # quiet, promote it without waiting for 3 quiet-exit bars.
-            if confirmed == "quiet" and raw != "quiet":
-                self._labels[symbol] = raw
-                self._pending[symbol] = (raw, 1)
-                self._save_state()
-                logger.debug(
-                    f"Regime [{symbol}]: quiet exited immediately -> {raw}"
-                )
-                return raw
-
-            if raw == pending_label:
-                pending_count += 1
-            else:
-                # New raw label observed — start fresh pending countdown
-                pending_label  = raw
-                pending_count  = 1
-
-            if pending_count >= _HYSTERESIS_BARS or confirmed is None:
-                # Promote pending to confirmed
-                self._labels[symbol] = raw
-                confirmed = raw
-                # GAP-4: persist whenever confirmed label changes
-                self._save_state()
-
-            self._pending[symbol] = (pending_label, pending_count)
-
-            if confirmed != raw and pending_count < _HYSTERESIS_BARS:
-                logger.debug(
-                    f"Regime [{symbol}]: confirmed={confirmed}, "
-                    f"pending={raw} ({pending_count}/{_HYSTERESIS_BARS})"
-                )
-
-            return confirmed
-
-    def current_label(self, symbol: str) -> Optional[str]:
-        """Return the last confirmed label without updating, or None if never classified."""
+        # Compute regime
+        regime = self._classify_raw(df, symbol)
+        
         with self._lock:
-            return self._labels.get(symbol)
+            self._cache[cache_key] = (regime, time.time())
+        
+        return regime
 
-    def all_labels(self) -> dict[str, str]:
-        """Return a snapshot of all confirmed labels (for dashboard/API exposure)."""
+    # ── Internal classification ──────────────────────────────────────────────
+
+    def _classify_raw(self, df: pd.DataFrame, symbol: str) -> str:
+        """Core classification logic using raw OHLCV data."""
+        if len(df) < 50:
+            return "quiet"
+
+        close = df["close"].values.astype(float)
+        high = df["high"].values.astype(float)
+        low = df["low"].values.astype(float)
+
+        # ── 1. Trend strength via ADX ────────────────────────────────────────
+        adx = self._compute_adx(high, low, close, period=14)
+        current_adx = adx[-1] if len(adx) > 0 else 0
+
+        # ── 2. Trend direction via EMA50/EMA200 ──────────────────────────────
+        ema50 = self._ema(close, 50)
+        ema200 = self._ema(close, 200)
+        is_bull = ema50[-1] > ema200[-1]
+
+        # ── 3. Volatility via ATR% ───────────────────────────────────────────
+        atr_pct = self._compute_atr_pct(high, low, close, period=14)
+        current_atr_pct = atr_pct[-1] if len(atr_pct) > 0 else 0.0
+
+        # Get dynamic volatility thresholds for this symbol
+        low_thresh, high_thresh = self._get_volatility_thresholds(symbol, atr_pct)
+        
+        # Get category thresholds
+        category = _detect_category(symbol)
+        adx_trend, adx_range, _ = _get_category_thresholds(category)
+
+        # ── 4. Price structure for breakout detection ────────────────────────
+        bb_upper, bb_lower = self._bollinger_bands(close, period=20, std=2)
+        bb_width = (bb_upper[-1] - bb_lower[-1]) / close[-1] if close[-1] > 0 else 0
+        bb_width_expanding = bb_width > np.percentile(bb_width[-50:], 80) if len(bb_width) >= 50 else False
+
+        # ── 5. Decision tree ─────────────────────────────────────────────────
+        
+        # Quiet market (no movement)
+        if current_adx < _DEFAULT_ADX_QUIET and current_atr_pct < low_thresh:
+            return "quiet"
+        
+        # Ranging markets
+        if current_adx < adx_range:
+            if current_atr_pct >= high_thresh:
+                return "ranging_high_vol"
+            return "ranging_low_vol"
+        
+        # Trending markets
+        if current_adx >= adx_trend:
+            # Volatile breakout (trending + expanding range)
+            if bb_width_expanding and current_atr_pct >= high_thresh:
+                return "volatile_breakout"
+            return "trending_bull" if is_bull else "trending_bear"
+        
+        # Fallback for borderline ADX (20-25)
+        if current_atr_pct >= high_thresh:
+            return "volatile_breakout"
+        return "trending_bull" if is_bull else "trending_bear"
+
+    def _get_volatility_thresholds(self, symbol: str, atr_pct_series: np.ndarray) -> tuple[float, float]:
+        """
+        Return (low_threshold, high_threshold) for volatility based on
+        this symbol's own historical ATR% distribution.
+        
+        This makes thresholds dynamic per symbol — crypto naturally has
+        higher volatility and won't be misclassified as "volatile_breakout"
+        during normal conditions.
+        """
+        # Use cached thresholds if available
         with self._lock:
-            return dict(self._labels)
+            if symbol in self._atr_high_thresholds and symbol in self._atr_low_thresholds:
+                return self._atr_low_thresholds[symbol], self._atr_high_thresholds[symbol]
+        
+        # Need at least 50 bars to compute percentiles
+        if len(atr_pct_series) >= 50:
+            low_thresh = np.percentile(atr_pct_series[-50:], _ATR_PERCENTILE_LOW)
+            high_thresh = np.percentile(atr_pct_series[-50:], _ATR_PERCENTILE_HIGH)
+            baseline = np.percentile(atr_pct_series[-50:], 50)
+        else:
+            # Fallback to category defaults
+            category = _detect_category(symbol)
+            _, _, baseline_pct = _get_category_thresholds(category)
+            low_thresh = baseline_pct * 0.6
+            high_thresh = baseline_pct * 1.5
+        
+        with self._lock:
+            self._atr_low_thresholds[symbol] = float(low_thresh)
+            self._atr_high_thresholds[symbol] = float(high_thresh)
+            self._atr_baselines[symbol] = float(baseline if 'baseline' in locals() else baseline_pct)
+        
+        return low_thresh, high_thresh
+
+    # ── Technical indicators ─────────────────────────────────────────────────
+
+    def _compute_adx(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate ADX (Average Directional Index)."""
+        if len(high) < period + 1:
+            return np.array([0.0])
+        
+        prev_close = np.concatenate([[close[0]], close[:-1]])
+        
+        # True Range
+        tr = np.maximum(high - low, np.maximum(
+            np.abs(high - prev_close),
+            np.abs(low - prev_close)
+        ))
+        
+        # Directional Movement
+        up = high - prev_close
+        down = -(low - prev_close)
+        
+        plus_dm = np.where((up > down) & (up > 0), up, 0.0)
+        minus_dm = np.where((down > up) & (down > 0), down, 0.0)
+        
+        # Smooth with EMA
+        atr = self._ema(tr, period)
+        plus_di = 100 * self._ema(plus_dm, period) / atr
+        minus_di = 100 * self._ema(minus_dm, period) / atr
+        
+        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
+        adx = self._ema(dx, period)
+        
+        return adx
+
+    def _compute_atr_pct(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate ATR as percentage of close price."""
+        if len(high) < period + 1:
+            return np.array([0.0])
+        
+        prev_close = np.concatenate([[close[0]], close[:-1]])
+        
+        tr = np.maximum(high - low, np.maximum(
+            np.abs(high - prev_close),
+            np.abs(low - prev_close)
+        ))
+        
+        atr = self._ema(tr, period)
+        atr_pct = 100 * atr / (close + 1e-10)
+        
+        return atr_pct
+
+    def _ema(self, values: np.ndarray, period: int) -> np.ndarray:
+        """Exponential Moving Average."""
+        if len(values) == 0:
+            return values
+        
+        alpha = 2.0 / (period + 1)
+        ema = np.zeros_like(values)
+        ema[0] = values[0]
+        
+        for i in range(1, len(values)):
+            ema[i] = alpha * values[i] + (1 - alpha) * ema[i - 1]
+        
+        return ema
+
+    def _bollinger_bands(
+        self, close: np.ndarray, period: int = 20, std: float = 2.0
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Calculate Bollinger Bands (upper, lower)."""
+        if len(close) < period:
+            return np.array([close[-1]]), np.array([close[-1]])
+        
+        sma = np.convolve(close, np.ones(period) / period, mode='valid')
+        sma_full = np.pad(sma, (period - 1, 0), constant_values=sma[0])
+        
+        # Rolling standard deviation
+        std_dev = np.zeros_like(close)
+        for i in range(period - 1, len(close)):
+            std_dev[i] = np.std(close[i - period + 1:i + 1])
+        
+        upper = sma_full + std * std_dev
+        lower = sma_full - std * std_dev
+        
+        return upper, lower
 
 
-# Application-level singleton
+# Application singleton
 regime_classifier = RegimeClassifier()

@@ -1,13 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { fetchPortfolioStatus, fetchPortfolioOptimalAllocation, togglePortfolioOptimization } from "@/lib/api";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { fetchPortfolioStatus, fetchPortfolioOptimalAllocation, togglePortfolioOptimization, fetchAccounts } from "@/lib/api";
 import type { PortfolioStatus, PortfolioOptimalAllocation } from "@/types";
-
-function fmt(n: number | undefined, decimals = 2): string {
-  if (n == null || isNaN(n)) return "—";
-  return n.toFixed(decimals);
-}
 
 function pct(n: number | undefined): string {
   if (n == null || isNaN(n)) return "—";
@@ -77,17 +72,31 @@ function CorrelationMatrix({ matrix }: { matrix: Record<string, Record<string, n
 export default function PortfolioPage() {
   const [status, setStatus] = useState<PortfolioStatus | null>(null);
   const [allocation, setAllocation] = useState<PortfolioOptimalAllocation | null>(null);
+  const [selectedAccountLogin, setSelectedAccountLogin] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<Array<{ login: number; type: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | undefined>(undefined); // Fixed line
 
-  const load = useCallback(async () => {
+  // Load available accounts
+  useEffect(() => {
+    fetchAccounts()
+      .then(res => setAccounts(res.accounts))
+      .catch(() => {});
+  }, []);
+
+  const load = useCallback(async (accountLogin?: number | null) => {
     try {
       setLoading(true);
       setError(null);
+      // Reset previous data while loading new account data
+      setAllocation(null);
+      setStatus(null);
+      
       const [s, a] = await Promise.all([
         fetchPortfolioStatus(),
-        fetchPortfolioOptimalAllocation().catch(() => null),
+        fetchPortfolioOptimalAllocation(accountLogin ?? undefined).catch(() => null),
       ]);
       setStatus(s);
       setAllocation(a);
@@ -98,13 +107,38 @@ export default function PortfolioPage() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Debounced account switching
+  const handleAccountChange = useCallback((login: number | null) => {
+    setSelectedAccountLogin(login);
+    
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    // Debounce the API call
+    debounceTimerRef.current = setTimeout(() => {
+      load(login);
+    }, 300);
+  }, [load]);
+
+  // Initial load
+  useEffect(() => {
+    load(selectedAccountLogin);
+    
+    // Cleanup timer on unmount
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []); // Empty dependency array - only run once on mount
 
   const handleToggle = async (enabled: boolean) => {
     try {
       setToggling(true);
       await togglePortfolioOptimization(enabled);
-      await load();
+      await load(selectedAccountLogin);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to toggle optimization");
     } finally {
@@ -128,25 +162,42 @@ export default function PortfolioPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-2xl font-bold text-white">Portfolio Optimization</h2>
           <p className="text-gray-500 text-sm mt-1">
             Kelly Criterion + Risk Parity allocation across strategies
           </p>
         </div>
-        {status && (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400">
-              {status.enabled ? "Enabled" : "Disabled"}
-            </span>
-            <ToggleSwitch
-              enabled={status.enabled}
-              onChange={handleToggle}
-              disabled={toggling}
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Account login filter */}
+          {accounts.length > 0 && (
+            <select
+              value={selectedAccountLogin ?? ""}
+              onChange={(e) => handleAccountChange(e.target.value ? Number(e.target.value) : null)}
+              className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm"
+            >
+              <option value="">All Accounts</option>
+              {accounts.map((acc) => (
+                <option key={acc.login} value={acc.login}>
+                  {acc.login} ({acc.type === "demo" ? "Demo" : "Live"})
+                </option>
+              ))}
+            </select>
+          )}
+          {status && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-400">
+                {status.enabled ? "Enabled" : "Disabled"}
+              </span>
+              <ToggleSwitch
+                enabled={status.enabled}
+                onChange={handleToggle}
+                disabled={toggling}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {error && (

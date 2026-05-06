@@ -5,10 +5,11 @@ Monitors open positions every tick and adjusts stop-loss when price moves
 favorably, locking in profit while allowing positions to run.
 
 Key Features:
-- Activation threshold: only trail after X pips profit
-- Trail distance: maintain Y pips from current price
+- Activation threshold: only trail after X pips profit (R-factor or fixed pips)
+- Trail distance: maintain Y pips from current price (R-factor or fixed pips)
 - Never moves SL against profit (only upward for BUY, downward for SELL)
 - Per-mode configuration (scalping/day_trading/swing)
+- Symbol-level overrides for activation/trail distances
 - Thread-safe position tracking
 """
 
@@ -100,24 +101,26 @@ class TrailingStopManager:
         - Forex JPY: 0.01
         - Commodities (BRENT, OIL, GOLD, SILVER): 0.01
         - Indices (US30, US100): 1.0
-        - Crypto (BTCUSD): 1.0
-
-        NOTE: MT5 `info.point` is the smallest price increment, NOT a pip.
-        On 5-digit forex (EURUSD, digits=5) and 3-digit JPY (USDJPY, digits=3),
-        1 pip = 10 points. We normalise here so trail_distance_pips is always
-        in real pips, not MT5 micro-points.
+        - Crypto (BTCUSD): 1.0 (price unit)
         """
         sym = symbol.upper()
-        # Indices and crypto have no meaningful "pip" — use 1.0 (index point / $1)
-        # regardless of what MT5 reports for digits/point on this broker.
-        if any(x in sym for x in ("US30", "US100", "US500", "GER40", "UK100")):
+        
+        # Crypto: use price unit (1 point = $1)
+        if any(x in sym for x in ("BTC", "ETH", "SOL", "XRP", "ADA", "DOGE")):
             return 1.0
-        if any(x in sym for x in ("BTC", "ETH", "SOL", "XRP")):
+        
+        # Indices: use index point (1 point = 1 index unit)
+        if any(x in sym for x in ("US30", "US100", "US500", "GER40", "UK100", "FRA40")):
             return 1.0
+        
+        # Commodities: typically 0.01 (gold, oil, etc.)
+        if any(x in sym for x in ("GOLD", "XAUUSD", "SILVER", "XAGUSD", "OIL", "BRENT", "NGAS")):
+            return 0.01
+        
         try:
             info = self._client.get_symbol_info(symbol)
             if info and info.get("point"):
-                point  = info["point"]
+                point = info["point"]
                 digits = info.get("digits", 5)
                 # On odd-digit symbols (5-decimal forex, 3-decimal JPY) one pip
                 # is 10 MT5 points. On even-digit symbols the pip == point.
@@ -126,10 +129,9 @@ class TrailingStopManager:
                 return point
         except Exception:
             pass
+        
         # Fallback: classify by symbol name
         if "JPY" in sym:
-            return 0.01
-        if any(x in sym for x in ("GOLD", "XAUUSD", "SILVER", "XAGUSD", "OIL", "BRENT", "NGAS")):
             return 0.01
         return 0.0001
 
@@ -145,25 +147,38 @@ class TrailingStopManager:
             return "swing"
         return None
 
+    def _is_market_tradable(self, symbol: str) -> bool:
+        """
+        Check if the market is currently tradable for this symbol.
+        Crypto and indices trade 24/7. Forex and commodities have weekend gaps.
+        """
+        sym = symbol.upper()
+        _now = datetime.now(timezone.utc)
+        _dow = _now.weekday()  # 5=Saturday, 6=Sunday
+        
+        # Crypto and indices trade 24/7 — always tradable
+        crypto = {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE"}
+        indices = {"US30", "US100", "US500", "GER40", "UK100", "FRA40"}
+        if any(x in sym for x in crypto) or any(x in sym for x in indices):
+            return True
+        
+        # Forex and commodities: weekend gap
+        # Sunday: wait until 21:00 UTC (Sydney open)
+        if _dow == 6:  # Sunday
+            return _now.hour >= 21
+        # Saturday: all day closed
+        if _dow == 5:  # Saturday
+            return False
+        
+        return True
+
     def update_trailing_stops(self) -> int:
         """
         Check all open positions and update trailing stops.
         Returns number of positions trailed.
         """
-        # LIVE-2 fix: read config from TTL cache so dashboard changes take effect
-        # within 5 s instead of requiring a full bot restart.
         _ts_cfg = _get_ts_app_cfg().get("trailing_stops", self._config)
         if not _ts_cfg.get("enabled", False):
-            return 0
-
-        # Skip entirely when markets are closed (weekends, session gaps).
-        # MT5 rejects modify_position with "Market closed" — this prevents
-        # thousands of error log entries over the weekend.
-        from datetime import datetime, timezone
-        _now = datetime.now(timezone.utc)
-        _dow = _now.weekday()  # 5=Saturday, 6=Sunday
-        if _dow == 6 or (_dow == 5 and _now.hour >= 21):
-            # Saturday all day, or Friday after 21:00 UTC
             return 0
 
         positions = self._client.get_open_positions()
@@ -181,13 +196,16 @@ class TrailingStopManager:
                 current_sl = pos["sl"]
                 comment = pos.get("comment", "")
 
+                # Skip if market is closed for this symbol type
+                if not self._is_market_tradable(symbol):
+                    continue
+
                 # Extract mode from comment
                 mode = self._extract_mode_from_comment(comment)
                 if not mode:
                     continue
 
                 # Skip if trailing disabled for this mode
-                # NOTE: Scalping uses EA (AIBotScalper.mq5) for sub-millisecond trailing
                 mode_cfg = _ts_cfg.get(mode, {})
                 if not mode_cfg.get("enabled", False):
                     continue
@@ -214,7 +232,7 @@ class TrailingStopManager:
 
                 state = self._position_states[ticket]
 
-                # Update highest profit price
+                # Update highest profit price (best price seen since open)
                 if direction == "BUY":
                     if current_price > state.highest_profit_price:
                         state.highest_profit_price = current_price
@@ -222,35 +240,28 @@ class TrailingStopManager:
                     if current_price < state.highest_profit_price:
                         state.highest_profit_price = current_price
 
-                # Symbol-level overrides — escape hatch for truly exceptional setups.
-                # activation_price / trail_price still accepted if explicitly set.
+                # Skip if SL is already moved to breakeven or better (let _poll_outcome own it)
+                if current_sl > 0:
+                    if direction == "BUY" and current_sl >= entry_price:
+                        continue
+                    if direction == "SELL" and current_sl <= entry_price:
+                        continue
+
+                # Symbol-level overrides — escape hatch for truly exceptional setups
                 sym_override = mode_cfg.get("symbol_overrides", {}).get(symbol, {})
 
-                # ── R-factor based distances (fully dynamic, per-trade SL) ────────
-                # Activation and trail are expressed as fractions of this trade's
-                # actual SL distance — not fixed pips, not % of price.  This works
-                # for every symbol and every setup without any per-symbol config:
-                #
-                #   activation = sl_dist × activation_r_factor  (default 0.5)
-                #     → "activate when profit = 50% of what was risked"
-                #   trail      = sl_dist × trail_r_factor        (default 0.35 day / 0.4 swing)
-                #     → "trail keeping SL at 35% of original risk from highest price"
-                #
-                # AUDCAD  SL=6.7 pips  → activation=3.35 pips  (fires before TP)
-                # AMD     SL=$20       → trail=$7.00           (well above $2 broker min)
-                # BTC     SL=$1 500    → trail=$525            (appropriate for crypto)
-                # New symbol added to scanner? Works automatically. No config needed.
+                # Calculate SL distance in price units (not pips)
                 _sl_dist = abs(entry_price - current_sl) if current_sl > 0 else 0.0
+                
+                # If SL is 0 (no stop set), use a percentage-based fallback
+                if _sl_dist == 0:
+                    _sl_dist = entry_price * 0.01  # 1% fallback
+                    logger.debug(f"TrailingStop: SL=0 for #{ticket}, using 1% fallback")
 
-                _sym_info_ts = None
-                try:
-                    _sym_info_ts = self._client.get_symbol_info(symbol)
-                except Exception:
-                    pass
-
-                # Activation distance
+                # ── Activation distance (when to start trailing) ────────────────────
+                # Priority: 1. activation_price (fixed pips), 2. activation_r_factor (dynamic)
                 if "activation_price" in sym_override:
-                    activation_distance = float(sym_override["activation_price"])
+                    activation_distance = float(sym_override["activation_price"]) * pip_value
                 elif _sl_dist > 0:
                     a_r = float(sym_override.get(
                         "activation_r_factor",
@@ -258,12 +269,13 @@ class TrailingStopManager:
                     ))
                     activation_distance = _sl_dist * a_r
                 else:
-                    # SL is 0: safety fallback (should never reach normal trades)
+                    # Fallback: 0.5% of entry price
                     activation_distance = entry_price * 0.005
 
-                # Trail distance
+                # ── Trail distance (how far SL follows) ─────────────────────────────
+                # Priority: 1. trail_price (fixed pips), 2. trail_r_factor (dynamic)
                 if "trail_price" in sym_override:
-                    trail_distance = float(sym_override["trail_price"])
+                    trail_distance = float(sym_override["trail_price"]) * pip_value
                 elif _sl_dist > 0:
                     t_r = float(sym_override.get(
                         "trail_r_factor",
@@ -271,15 +283,17 @@ class TrailingStopManager:
                     ))
                     trail_distance = _sl_dist * t_r
                 else:
+                    # Fallback: 0.3% of entry price
                     trail_distance = entry_price * 0.003
 
                 # Enforce broker minimum stop distance so modify_position never
                 # silently fails on stocks/CFDs with a hard stops_level minimum.
                 try:
+                    _sym_info_ts = self._client.get_symbol_info(symbol)
                     if _sym_info_ts:
-                        _sl_lvl     = _sym_info_ts.get("stops_level", 0)
-                        _pt         = _sym_info_ts.get("point", 0.00001)
-                        _sp         = _sym_info_ts.get("spread", 0)
+                        _sl_lvl = _sym_info_ts.get("stops_level", 0)
+                        _pt = _sym_info_ts.get("point", 0.00001)
+                        _sp = _sym_info_ts.get("spread", 0)
                         _broker_min = (_sl_lvl * _pt) if _sl_lvl > 0 else (_sp * _pt * 2)
                         if _broker_min > 0 and trail_distance < _broker_min * 1.2:
                             trail_distance = _broker_min * 1.2
@@ -292,26 +306,17 @@ class TrailingStopManager:
                 else:
                     profit_distance = entry_price - current_price
 
-                # GAP-2: skip positions where _poll_outcome's ATR trail has already
-                # moved SL to breakeven or better — let that system own them.
-                if current_sl > 0:
-                    if direction == "BUY" and current_sl >= entry_price:
-                        continue
-                    if direction == "SELL" and current_sl <= entry_price:
-                        continue
-
                 # Check activation threshold
                 if profit_distance < activation_distance:
                     continue
 
+                # Calculate new SL
                 if direction == "BUY":
                     new_sl = state.highest_profit_price - trail_distance
                 else:
                     new_sl = state.highest_profit_price + trail_distance
 
-                # Only move SL in profit direction (never backwards).
-                # BUG-5 fix: use only current_sl (live MT5 value); state.current_sl
-                # is stale because _poll_outcome can move SL without updating state.
+                # Only move SL in profit direction (never backwards)
                 should_update = False
                 if direction == "BUY":
                     should_update = new_sl > current_sl
@@ -320,15 +325,15 @@ class TrailingStopManager:
 
                 if should_update:
                     # Back off for 12 ticks (~60 s) after 3 consecutive failures
-                    # to avoid spamming MT5 with the same rejected modification.
                     if state.consecutive_failures >= 3:
-                        state.consecutive_failures -= 1  # countdown toward retry
+                        state.consecutive_failures -= 1
                         continue
+                    
                     # Modify position
                     success = self._om.modify_position(ticket, sl=new_sl, tp=pos["tp"])
                     if success:
                         state.consecutive_failures = 0
-                        pips_moved = abs(new_sl - current_sl) / pip_value
+                        pips_moved = abs(new_sl - current_sl) / pip_value if pip_value > 0 else 0
                         state.current_sl = new_sl
                         state.last_trail_at = datetime.now(tz=timezone.utc)
                         state.pips_trailed += pips_moved
@@ -342,7 +347,7 @@ class TrailingStopManager:
                         state.consecutive_failures = min(state.consecutive_failures + 1, 15)
 
             except Exception as exc:
-                logger.warning(f"TrailingStop: error updating #{ticket}: {exc}")
+                logger.warning(f"TrailingStop: error updating {pos.get('ticket', '?')}: {exc}")
                 continue
 
         # Clean up closed positions
@@ -374,8 +379,9 @@ class TrailingStopManager:
     def get_all_trailing_status(self) -> list[dict]:
         """Get trailing status for all tracked positions."""
         with self._lock:
-            return [
-                self.get_trailing_status(ticket)
-                for ticket in self._position_states
-                if self.get_trailing_status(ticket) is not None
-            ]
+            result: list[dict] = []
+            for ticket in self._position_states:
+                status = self.get_trailing_status(ticket)
+                if status is not None:
+                    result.append(status)
+            return result

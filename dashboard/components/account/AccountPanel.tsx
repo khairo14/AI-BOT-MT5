@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
-import { fetchJournalStats, fetchTradeJournal, fetchPositions } from "@/lib/api";
+import { fetchJournalStats, fetchTradeJournal, fetchPositions} from "@/lib/api";
 import type { JournalStatsResponse, JournalEntry } from "@/types";
 
 const MODE_LABELS = { paper: "Paper / Demo", live: "Live" } as const;
@@ -40,7 +40,6 @@ export default function AccountPanel() {
   const [sortKey, setSortKey]     = useState<SortKey>("open_time");
   const [sortDir, setSortDir]     = useState<SortDir>("desc");
   const [pageSize, setPageSize]   = useState<number | "all">(20);
-  // ticket → current unrealized profit for open positions
   const [liveProfit, setLiveProfit] = useState<Record<number, number>>({});
 
   useEffect(() => {

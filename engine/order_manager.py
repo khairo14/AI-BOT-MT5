@@ -59,6 +59,7 @@ def _get_om_app_cfg() -> dict:
         _om_cfg_loaded_at = now
     return _om_cfg_cache
 
+
 @dataclass
 class OrderRequest:
     symbol: str
@@ -90,6 +91,21 @@ class OrderManager:
 
     def __init__(self, client: MT5Client):
         self._client = client
+
+    # ------------------------------------------------------------------
+    # Helper: derive trading type from comment
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _derive_trading_type_from_comment(comment: str) -> str:
+        """Extract trading type from position comment."""
+        comment_lower = comment.lower()
+        if "scalp" in comment_lower:
+            return "scalping"
+        if "swing" in comment_lower:
+            return "swing"
+        if "day" in comment_lower:
+            return "day_trading"
+        return ""
 
     # ------------------------------------------------------------------
     # Place Order
@@ -510,6 +526,9 @@ class OrderManager:
             f"Reason: {reason} | Close price: {price}"
         )
         
+        # Derive trading_type from position comment
+        trading_type = self._derive_trading_type_from_comment(pos.comment)
+        
         try:
             from engine.trade_journal import trade_journal
             from engine.account_store import current_mode, current_account_login
@@ -523,7 +542,7 @@ class OrderManager:
                 sl=pos.sl,
                 tp=pos.tp if pos.tp else None,
                 profit=pos.profit,
-                trading_type="",  # Can be derived from comment if needed
+                trading_type=trading_type,
                 account_mode=current_mode(),
                 comment=reason,
                 event="close",
@@ -655,6 +674,10 @@ class OrderManager:
             f"Partial close | #{ticket} | {pos.symbol} | "
             f"{close_pct*100:.0f}% ({close_volume} lots) | Reason: {reason}"
         )
+        
+        # Derive trading_type from position comment
+        trading_type = self._derive_trading_type_from_comment(pos.comment)
+        
         # H-5 fix: journal the partial close so trailing audit logs are complete.
         # Fetch the real profit from the MT5 deal record using result.deal so the
         # journal, stats, RL agent, and win-rate all see the correct figure.
@@ -684,7 +707,7 @@ class OrderManager:
                 sl=pos.sl,
                 tp=pos.tp if pos.tp else None,
                 profit=_partial_profit,
-                trading_type="",
+                trading_type=trading_type,
                 account_mode=current_mode(),
                 comment=reason,
                 event="partial_close",

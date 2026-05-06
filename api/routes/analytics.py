@@ -39,6 +39,7 @@ def _load_closed(
     account: str,
     trading_type: Optional[str],
     limit: int,
+    account_login: Optional[int] = None,
 ) -> list[dict]:
     """Return one merged entry per closed ticket with true net P&L.
 
@@ -50,6 +51,7 @@ def _load_closed(
         account=account,
         trading_type=trading_type if trading_type != "all" else None,
         limit=limit,
+        account_login=account_login,
     )
 
 
@@ -82,7 +84,7 @@ def _sortino(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
     arr = np.array(daily_rets) - risk_free_daily
     downside = arr[arr < 0]
     if len(downside) < 2:
-        return 0.0  # 0 or 1 losing day → ddof=1 std is undefined; return 0 (not nan/inf)
+        return 0.0
     down_std = float(np.std(downside, ddof=1))
     if down_std == 0 or math.isnan(down_std):
         return 0.0
@@ -127,7 +129,7 @@ def _losing_streak(closed: list[dict]) -> tuple[int, int]:
         key=lambda e: e.get("close_time") or e.get("logged_at") or "",
     )
     max_streak = 0
-    cur_streak  = 0
+    cur_streak = 0
     for e in sorted_trades:
         if (e["profit"] or 0) <= 0:
             cur_streak += 1
@@ -147,22 +149,22 @@ def _by_bucket(
         buckets[key_fn(e)].append(e)
     result = {}
     for label, trades in buckets.items():
-        total  = len(trades)
-        wins   = sum(1 for t in trades if (t["profit"] or 0) > 0)
+        total = len(trades)
+        wins = sum(1 for t in trades if (t["profit"] or 0) > 0)
         profit = sum(float(t["profit"] or 0) for t in trades)
-        rrs    = []
+        rrs = []
         for t in trades:
-            risk   = abs((t.get("entry") or 0) - (t.get("sl") or 0))
+            risk = abs((t.get("entry") or 0) - (t.get("sl") or 0))
             reward = abs(float(t.get("profit") or 0))
             if risk > 0 and t.get("entry"):
                 rrs.append(reward / (risk * (t.get("volume") or 1) * 1))
         result[label] = {
-            "total":       total,
-            "wins":        wins,
-            "losses":      total - wins,
-            "win_rate":    round(wins / total * 100, 1) if total else 0.0,
+            "total": total,
+            "wins": wins,
+            "losses": total - wins,
+            "win_rate": round(wins / total * 100, 1) if total else 0.0,
             "total_profit": round(profit, 2),
-            "avg_profit":  round(profit / total, 2) if total else 0.0,
+            "avg_profit": round(profit / total, 2) if total else 0.0,
         }
     return result
 
@@ -200,20 +202,23 @@ def _trade_quality_distribution(closed: list[dict]) -> dict[str, int]:
 
 @router.get("/performance")
 def get_performance(
-    account:      str = Query("all",  pattern="^(paper|live|all)$"),
-    trading_type: str = Query("all",  pattern="^(scalping|day_trading|swing|all)$"),
-    limit:        int = Query(5000,   ge=1, le=50_000),
+    account: str = Query("all", pattern="^(paper|live|all)$"),
+    trading_type: str = Query("all", pattern="^(scalping|day_trading|swing|all)$"),
+    account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
+    limit: int = Query(5000, ge=1, le=50_000),
 ):
     """
     Return comprehensive trading performance analytics.
 
     Query params:
-        account      — paper | live | all
-        trading_type — scalping | day_trading | swing | all
-        limit        — max closed trades to analyse (default 5000)
+        account       — paper | live | all
+        trading_type  — scalping | day_trading | swing | all
+        account_login — optional filter by specific MT5 account login
+        limit         — max closed trades to analyse (default 5000)
     """
     tt_filter = None if trading_type == "all" else trading_type
-    closed    = _load_closed(account, tt_filter, limit)
+    mode_filter = None if account == "all" else account
+    closed = _load_closed(mode_filter or "all", tt_filter, limit, account_login)
 
     if not closed:
         return {
@@ -223,22 +228,22 @@ def get_performance(
             "message":       "No closed trades found for the selected filters.",
         }
 
-    total  = len(closed)
-    wins   = [e for e in closed if (e["profit"] or 0) > 0]
+    total = len(closed)
+    wins = [e for e in closed if (e["profit"] or 0) > 0]
     losses = [e for e in closed if (e["profit"] or 0) <= 0]
 
-    total_profit  = round(sum(float(e["profit"] or 0) for e in closed), 2)
-    avg_profit    = round(total_profit / total, 2)
-    avg_win       = round(sum(float(e["profit"] or 0) for e in wins)   / len(wins),   2) if wins   else 0.0
-    avg_loss      = round(sum(float(e["profit"] or 0) for e in losses) / len(losses), 2) if losses else 0.0
+    total_profit = round(sum(float(e["profit"] or 0) for e in closed), 2)
+    avg_profit = round(total_profit / total, 2)
+    avg_win = round(sum(float(e["profit"] or 0) for e in wins) / len(wins), 2) if wins else 0.0
+    avg_loss = round(sum(float(e["profit"] or 0) for e in losses) / len(losses), 2) if losses else 0.0
 
-    daily_rets    = _daily_returns(closed)
-    curve_points  = _equity_curve(closed)
+    daily_rets = _daily_returns(closed)
+    curve_points = _equity_curve(closed)
     equity_values = [p["equity"] for p in curve_points]
 
-    max_dd        = _max_drawdown(equity_values)
-    sharpe        = round(_sharpe(daily_rets), 3)
-    sortino       = round(_sortino(daily_rets), 3)
+    max_dd = _max_drawdown(equity_values)
+    sharpe = round(_sharpe(daily_rets), 3)
+    sortino = round(_sortino(daily_rets), 3)
     max_streak, cur_streak = _losing_streak(closed)
 
     # Per-strategy breakdown
@@ -248,10 +253,10 @@ def get_performance(
     # Per-symbol breakdown
     by_symbol = _by_bucket(closed, lambda e: e.get("symbol", "unknown"))
 
-    # Per trading-type breakdown (useful when account=all&trading_type=all)
+    # Per trading-type breakdown
     by_mode = _by_bucket(closed, lambda e: e.get("trading_type", "unknown"))
 
-    # Per account breakdown (useful when account=all)
+    # Per account breakdown
     by_account = _by_bucket(closed, lambda e: e.get("account_mode", "unknown"))
 
     # Hour-of-day win rate
@@ -260,7 +265,7 @@ def get_performance(
     # Trade quality distribution
     quality_dist = _trade_quality_distribution(closed)
 
-    # Failure analysis: worst 5 symbols and strategies by total loss
+    # Failure analysis
     worst_symbols = sorted(
         by_symbol.items(),
         key=lambda kv: kv[1]["total_profit"],
@@ -270,12 +275,12 @@ def get_performance(
         key=lambda kv: kv[1]["total_profit"],
     )[:5]
 
-    # Average RR from entry/sl/tp fields
+    # Average RR
     rr_vals = []
     for e in closed:
         entry = e.get("entry") or 0
-        sl    = e.get("sl") or 0
-        tp    = e.get("tp") or 0
+        sl = e.get("sl") or 0
+        tp = e.get("tp") or 0
         if entry and sl and tp and abs(entry - sl) > 0:
             rr_vals.append(abs(tp - entry) / abs(entry - sl))
     _rr_mean = float(np.mean(rr_vals)) if rr_vals else 0.0
@@ -319,6 +324,14 @@ def get_regime_status():
     """Return the current market regime label for all classified symbols."""
     try:
         from engine.regime_classifier import regime_classifier
-        return {"regimes": regime_classifier.all_labels()}
+        # Return regimes from the classifier's cache
+        regimes = {}
+        with regime_classifier._lock:
+            for key, (regime, _) in regime_classifier._cache.items():
+                # Extract symbol from cache key (format: "symbol_timeframe")
+                symbol = key.split("_", 1)[0] if "_" in key else key
+                if symbol not in regimes:
+                    regimes[symbol] = regime
+        return {"regimes": regimes}
     except Exception as exc:
         return {"regimes": {}, "error": str(exc)}
