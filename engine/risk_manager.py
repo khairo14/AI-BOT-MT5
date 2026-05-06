@@ -276,7 +276,14 @@ class RiskManager:
                 f"(target {risk_pct:.2f}%). Consider widening SL or reducing position on a larger balance."
             )
 
-        lot = max(min_lot, min(lot, max_lot))
+        if lot < min_lot:
+            logger.warning(
+                f"Calculated lot {lot:.8f} is below broker minimum {min_lot}. "
+                "Rejecting trade instead of forcing min_lot to avoid over-risk."
+            )
+            return 0.0
+
+        lot = min(lot, max_lot)
 
         logger.debug(
             f"Lot size | Balance: {_balance} | Risk: {risk_pct}% "
@@ -714,7 +721,16 @@ class RiskManager:
         except Exception as exc:
             logger.error(f"Failed to save preset selection: {exc}")
             return False, f"Failed to save preset selection: {exc}"
+        
+    def validate_final_risk(
+        self,
+        balance: float,
+        risk_amount: float,
+        max_risk_pct: float,
+    ) -> bool:
+        actual_pct = (risk_amount / max(balance, 1e-9)) * 100.0
 
+        return actual_pct <= max_risk_pct
 
 # Application-level singleton
 risk_manager = RiskManager()

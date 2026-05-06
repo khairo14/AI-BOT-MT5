@@ -27,7 +27,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
+
 from loguru import logger
+from engine.utils.symbol_utils import normalize_symbol
 
 _JOURNAL_PATH = Path(__file__).parent.parent / "data" / "trade_journal.jsonl"
 AccountMode = Literal["paper", "live"]
@@ -70,11 +72,18 @@ class TradeJournal:
         tp2: Optional[float] = None,
         tp3: Optional[float] = None,
         account_login: int = 0,
+        account_type: str = "",
+        user_id: str = "default",
+        strategy: str = "",
     ) -> None:
         """Append a trade event to the journal."""
         record = {
             "ticket":       ticket,
+            # Symbol identity
             "symbol":       symbol,
+            "symbol_raw":   symbol,
+            "symbol_normalized": normalize_symbol(symbol),
+
             "direction":    direction.upper(),
             "volume":       volume,
             "entry":        entry,
@@ -83,9 +92,15 @@ class TradeJournal:
             "tp2":          tp2,
             "tp3":          tp3,
             "profit":       profit,
+            # Strategy/mode identity
             "trading_type": trading_type,
+            "strategy":     strategy or comment,
+             # Account identity
             "account_mode": account_mode,
             "account_login": account_login,
+            "account_type": account_type,
+            "user_id":      user_id,
+
             "comment":      comment,
             "event":        event,
             "open_time":    (open_time or datetime.now(tz=timezone.utc).isoformat()) if event == "open" else open_time,

@@ -33,6 +33,9 @@ from pathlib import Path
 from typing import Optional
 
 from engine.notification_manager import notification_manager
+from engine.trade_state import trade_state_store
+from engine.signal_journal import signal_journal
+from engine.utils.symbol_utils import normalize_symbol
 
 _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -877,6 +880,8 @@ class SignalBus:
                 try:
                     from engine.trade_journal import trade_journal
                     from engine.account_store import current_mode, current_account_login
+                    _account_login = current_account_login()
+
                     trade_journal.log(
                         ticket=result.ticket,
                         symbol=signal["symbol"],
@@ -891,13 +896,33 @@ class SignalBus:
                         trading_type=signal.get("trading_mode", "day_trading"),
                         account_mode=current_mode(),
                         comment=signal.get("strategy", ""),
+                        strategy=signal.get("strategy", ""),
                         event="open",
                         confidence=float(signal.get("confidence") or 0.5),
                         expected_price=signal.get("entry_price"),
                         slippage=result.slippage,
                         execution_time_ms=result.execution_time_ms,
                         spread_pips=result.spread_pips,
-                        account_login=current_account_login(),
+                        account_login=_account_login,
+                        account_type=signal.get("account_type", ""),
+                        user_id=signal.get("user_id", "default"),
+                    )
+
+                    trade_state_store.update(
+                        _account_login,
+                        result.ticket,
+                        symbol_raw=signal["symbol"],
+                        symbol_normalized=normalize_symbol(signal["symbol"]),
+                        mode=signal.get("trading_mode", "day_trading"),
+                        strategy=signal.get("strategy", ""),
+                        direction=signal.get("direction", "").upper(),
+                        entry=result.open_price or 0.0,
+                        sl=float(signal.get("sl") or 0),
+                        tp1=float(signal["tp"]) if signal.get("tp") else None,
+                        tp2=float(signal["tp2"]) if signal.get("tp2") else None,
+                        volume=req.volume,
+                        account_type=signal.get("account_type", ""),
+                        user_id=signal.get("user_id", "default"),
                     )
                 except Exception:
                     pass
@@ -1430,6 +1455,16 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     import MetaTrader5 as mt5
     from ai.trade_memory import memory, TradeOutcome
     from ai.rl_agent import rl_manager
+    from engine.account_store import current_account_login
+    from engine.trade_state import trade_state_store
+
+    account_login = current_account_login()
+    lifecycle_state = trade_state_store.get(account_login, ticket)
+
+    _tp1_triggered = bool(lifecycle_state.get("tp1_hit", False))
+    _day_be_triggered = bool(lifecycle_state.get("day_be_triggered", False))
+    _swing_pre_tp1_be_triggered = bool(lifecycle_state.get("swing_pre_tp1_be_triggered", False))
+    _swing_be_triggered = bool(lifecycle_state.get("swing_be_triggered", False))
 
     # NEW-5: per-trading-type poll budget (30 s intervals)
     # scalping: 2 days, day_trading: 14 days, swing: 45 days
@@ -1453,17 +1488,6 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     except Exception:
         pass
 
-    # G-6: tp2 partial-close state — set to True after tp1 partial-close fires
-    _tp1_triggered = False
-    # Day trading: set to True once SL has been moved to breakeven at halfway
-    _day_be_triggered = False
-    # Swing: set to True once price reached 50% of TP1 and SL moved to entry (pre-TP1 BE)
-    _swing_pre_tp1_be_triggered = False
-    # Swing: set to True once SL has been moved to breakeven (legacy path for tp2=0 recovered positions)
-    _swing_be_triggered = False
-    # ATR cache: keyed by timeframe string → (atr_value, monotonic_timestamp)
-    # Refreshed at most once every 5 minutes — ATR on H1/H4 changes per candle close
-    # not per 30-second poll, so re-fetching every cycle is wasteful.
     _atr_cache: dict = {}
 
     for _ in range(MAX_POLLS):
@@ -1547,15 +1571,31 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         (direction == "SELL" and pos.price_current <= tp1)
                     )
                     if hit_tp1:
-                        _tp1_triggered = True
                         try:
                             om = _get_om()
                             if om and entry_px:
                                 # Swing: 40/60 split — let a larger runner ride to TP2.
                                 # Day trading: keep original 50/50 split.
                                 _partial_pct = 0.4 if trading_mode == "swing" else 0.5
-                                await asyncio.to_thread(om.partial_close, ticket, _partial_pct)
-                                await asyncio.to_thread(om.modify_position, ticket, entry_px, tp2)
+                                _partial_ok = await asyncio.to_thread(om.partial_close, ticket, _partial_pct)
+                                if _partial_ok:
+                                    trade_state_store.update(
+                                        account_login,
+                                        ticket,
+                                        tp1_hit=True,
+                                        break_even_moved=True,
+                                        last_event="tp1_partial_close",
+                                    )
+                                    trade_state_store.mark_partial_close(
+                                        account_login,
+                                        ticket,
+                                        pct=_partial_pct,
+                                        reason="tp1",
+                                    )
+                                    _tp1_triggered = True
+
+                                    await asyncio.to_thread(om.modify_position, ticket, entry_px, tp2)
+
                                 logger.info(
                                     f"TP1 partial-close fired: #{ticket} {signal.get('symbol')} "
                                     f"{int(_partial_pct*100)}% closed, BE={entry_px} → targeting TP2={tp2}"
@@ -1614,7 +1654,6 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         (direction == "SELL" and pos.price_current <= _dt_halfway)
                     )
                     if _hit_dt_halfway:
-                        _day_be_triggered = True
                         try:
                             om = _get_om()
                             if om and entry_px:
@@ -1623,7 +1662,18 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                     (direction == "SELL" and (pos.sl == 0 or entry_px < pos.sl - 1e-9))
                                 )
                                 if _be_improves:
-                                    await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                    _be_ok = await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                    
+                                    if _be_ok:
+                                        trade_state_store.update(
+                                            account_login,
+                                            ticket,
+                                            break_even_moved=True,
+                                            day_be_triggered=True,
+                                            last_event="day_be",
+                                        )
+                                        _day_be_triggered = True
+
                                     logger.info(
                                         f"Day BE fired: #{ticket} {signal.get('symbol')} "
                                         f"SL → entry {entry_px}"
@@ -1646,7 +1696,6 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                         (direction == "SELL" and pos.price_current <= _sw_pre_halfway)
                     )
                     if _hit_sw_pre_halfway:
-                        _swing_pre_tp1_be_triggered = True
                         try:
                             om = _get_om()
                             if om and entry_px:
@@ -1655,7 +1704,18 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                     (direction == "SELL" and (pos.sl == 0 or entry_px < pos.sl - 1e-9))
                                 )
                                 if _be_improves:
-                                    await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                    _be_ok = await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                    
+                                    if _be_ok:
+                                        trade_state_store.update(
+                                            account_login,
+                                            ticket,
+                                            break_even_moved=True,
+                                            swing_pre_tp1_be_triggered=True,
+                                            last_event="swing_pre_tp1_be",
+                                        )
+                                        _swing_pre_tp1_be_triggered = True
+
                                     logger.info(
                                         f"Swing pre-TP1 BE fired: #{ticket} {signal.get('symbol')} "
                                         f"SL → entry {entry_px}"
@@ -1700,7 +1760,6 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                             (direction == "SELL" and pos.price_current <= _halfway)
                         )
                         if hit_halfway:
-                            _swing_be_triggered = True
                             try:
                                 om = _get_om()
                                 if om and entry_px:
@@ -1710,6 +1769,14 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                     )
                                     if _be_improves:
                                         await asyncio.to_thread(om.modify_position, ticket, entry_px)
+                                        trade_state_store.update(
+                                            account_login,
+                                            ticket,
+                                            break_even_moved=True,
+                                            swing_be_triggered=True,
+                                            last_event="swing_be",
+                                        )
+                                        _swing_be_triggered = True
                                         logger.info(
                                             f"Swing BE fired: #{ticket} {signal.get('symbol')} "
                                             f"SL → entry {entry_px}"

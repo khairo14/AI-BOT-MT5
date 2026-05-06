@@ -110,6 +110,69 @@ class OrderManager:
     # ------------------------------------------------------------------
     # Place Order
     # ------------------------------------------------------------------
+    def _final_risk_audit(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        volume: float,
+        entry_price: float,
+        sl_price: float,
+    ) -> tuple[bool, str]:
+        """
+        Final safety check before MT5 order_send.
+
+        Uses MT5 order_calc_profit to estimate worst-case loss at SL.
+        This avoids relying on fragile tick-value assumptions.
+        """
+        try:
+            acct = self._client.get_account_info()
+            if not acct:
+                return False, "No account info available for final risk audit"
+
+            balance = float(acct.get("balance") or 0)
+            if balance <= 0:
+                return False, "Invalid account balance for final risk audit"
+
+            order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+
+            with self._client._lock:
+                pnl_at_sl = mt5.order_calc_profit(
+                    order_type,
+                    symbol,
+                    volume,
+                    entry_price,
+                    sl_price,
+                )
+
+            if pnl_at_sl is None:
+                return False, f"MT5 order_calc_profit failed: {mt5.last_error()}"
+
+            money_risk = abs(float(pnl_at_sl))
+            actual_risk_pct = (money_risk / balance) * 100.0
+
+            try:
+                from api.runner_loop import _risk_manager
+                max_risk_pct = float(
+                    getattr(_risk_manager, "_config", {}).get("max_risk_per_trade_pct", 1.5)
+                )
+            except Exception:
+                max_risk_pct = 1.5
+
+            if actual_risk_pct > max_risk_pct + 1e-9:
+                return (
+                    False,
+                    f"Final risk audit failed: {actual_risk_pct:.2f}% > max {max_risk_pct:.2f}% "
+                    f"(risk=${money_risk:.2f}, volume={volume})"
+                )
+
+            return True, (
+                f"Final risk audit OK: {actual_risk_pct:.2f}% "
+                f"(risk=${money_risk:.2f}, volume={volume})"
+            )
+
+        except Exception as exc:
+            return False, f"Final risk audit exception: {exc}"
 
     def place_market_order(self, req: OrderRequest) -> OrderResult:
         """Place a market order (BUY or BUY_MARKET / SELL or SELL_MARKET)."""
@@ -277,6 +340,20 @@ class OrderManager:
             _deviation = int(_dev_cfg.get(_tt_dev, 20)) if _tt_dev else 20
         except Exception:
             _deviation = 20
+            
+        audit_ok, audit_msg = self._final_risk_audit(
+            symbol=req.symbol,
+            direction=req.direction,
+            volume=vol,
+            entry_price=price,
+            sl_price=sl,
+        )
+
+        if not audit_ok:
+            logger.warning(audit_msg)
+            return OrderResult(success=False, error=audit_msg)
+
+        logger.debug(audit_msg)
 
         request = {
             "action":    mt5.TRADE_ACTION_DEAL,

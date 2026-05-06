@@ -53,6 +53,10 @@ class TradeOutcome:
     rl_state:        Optional[str] = None   # RL state bucket at signal time (e.g. "med_high_active_low_tight")
     account_login:   int = 0
     extra:           dict = field(default_factory=dict)
+    symbol_raw: str = ""
+    symbol_normalized: str = ""
+    account_type: str = ""
+    user_id: str = "default"
 
 class TradeMemory:
     """
