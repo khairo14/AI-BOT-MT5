@@ -268,14 +268,14 @@ class RLAgent:
             self._conf_thresh = float(
                 max(_conf_floor, min(_conf_max, self._conf_thresh + conf_delta))
             )
-            # Risk factor floor: never drop below 0.60 — below this,
-            # lot sizes become so small they barely cover spread cost.
+            # Risk factor floor: allow RL to cut exposure aggressively during weak states,
+            # but keep a minimum 25% sizing so the bot does not become completely inactive.
             _RF_FLOOR_BY_MODE = {
-                "scalping":    0.60,
-                "day_trading": 0.60,
-                "swing":       0.60,
+                "scalping":    0.25,
+                "day_trading": 0.25,
+                "swing":       0.25,
             }
-            _rf_floor = _RF_FLOOR_BY_MODE.get(self.trading_type, 0.60)
+            _rf_floor = _RF_FLOOR_BY_MODE.get(self.trading_type, 0.25)
             self._risk_factor = float(
                 max(_rf_floor, min(RISK_MAX, self._risk_factor + risk_delta))
             )
@@ -445,8 +445,8 @@ class RLAgent:
                         _conf_max_boot = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
                         _CONF_FLOOR_BOOT = {"scalping": 0.52, "day_trading": 0.52, "swing": 0.50}
                         _conf_floor_boot = _CONF_FLOOR_BOOT.get(self.trading_type, 0.52)
-                        _RF_FLOOR_BOOT = {"scalping": 0.60, "day_trading": 0.60, "swing": 0.60}
-                        _rf_floor_boot = _RF_FLOOR_BOOT.get(self.trading_type, 0.60)
+                        _RF_FLOOR_BOOT = {"scalping": 0.25, "day_trading": 0.25, "swing": 0.25}
+                        _rf_floor_boot = _RF_FLOOR_BOOT.get(self.trading_type, 0.25)
                         self._conf_thresh = float(
                             max(_conf_floor_boot, min(
                                 paper_data.get("conf_thresh", DEFAULT_CONF_THRESH),
@@ -488,8 +488,8 @@ class RLAgent:
             _conf_max_load = _CONF_MAX_BY_MODE.get(self.trading_type, CONF_MAX)
             _CONF_FLOOR_LOAD = {"scalping": 0.52, "day_trading": 0.52, "swing": 0.50}
             _conf_floor_load = _CONF_FLOOR_LOAD.get(self.trading_type, 0.52)
-            _RF_FLOOR_LOAD = {"scalping": 0.60, "day_trading": 0.60, "swing": 0.60}
-            _rf_floor_load = _RF_FLOOR_LOAD.get(self.trading_type, 0.60)
+            _RF_FLOOR_LOAD = {"scalping": 0.25, "day_trading": 0.25, "swing": 0.25}
+            _rf_floor_load = _RF_FLOOR_LOAD.get(self.trading_type, 0.25)
             self._conf_thresh = float(
                 max(_conf_floor_load, min(data.get("conf_thresh", DEFAULT_CONF_THRESH), _conf_max_load))
             )

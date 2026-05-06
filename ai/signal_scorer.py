@@ -204,7 +204,7 @@ class SignalScorer:
         
         except Exception as exc:
             logger.warning(f"SignalScorer error [{symbol}]: {exc}")
-            return 0.5
+            return 0.0
 
     def is_tradeable(self, confidence: float, trading_type: str = "day_trading", strategy_name: str | None = None) -> bool:
         """
@@ -244,14 +244,28 @@ class SignalScorer:
 
     def _rr_score(self, entry: float, sl: float, tp: float) -> float:
         """
-        Score based on Risk:Reward ratio, capped at 4:1 = 1.0.
-          1:1 → 0.25 | 2:1 → 0.50 | 3:1 → 0.75 | ≥4:1 → 1.0
+        Score based on Risk:Reward ratio.
+          <1:1 → weak
+          1:1  → 0.35
+          2:1  → 0.75
+          3:1+ → 1.00
         """
-        risk   = abs(entry - sl)
-        reward = abs(tp - entry)
-        if risk == 0:
+        risk = abs(entry - sl)
+        reward_dist = abs(tp - entry)
+
+        if risk <= 0:
             return 0.0
-        return float(np.clip((reward / risk) / 4.0, 0.0, 1.0))
+
+        rr = reward_dist / risk
+
+        if rr < 1.0:
+            return float(np.clip(rr * 0.35, 0.0, 0.35))
+
+        return float(np.clip(
+            0.35 + ((rr - 1.0) / 2.0) * 0.65,
+            0.35,
+            1.0,
+        ))
 
     def _trend_score(self, direction: str, df: pd.DataFrame) -> float:
         """
@@ -278,7 +292,7 @@ class SignalScorer:
         eps    = max(abs(ema200[-1]), 1e-8)
         gap_pct        = (ema50[-1] - ema200[-1]) / eps
         # MATH-2: normalise over 5% gap (was 2%). A 2% gap now scores 0.6 and a 5%+
-        # gap scores 1.0, preserving discrimination for strong vs moderate trends.
+        # gap scores 0.9, preserving discrimination for strong vs moderate trends.
         trend_strength = float(np.clip(gap_pct / 0.05, -1.0, 1.0))
         raw_score      = round(0.5 + 0.4 * trend_strength, 4)   # [0.1, 0.9]
         if direction.upper() == "BUY":

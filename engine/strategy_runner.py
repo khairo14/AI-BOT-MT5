@@ -307,21 +307,46 @@ class StrategyRunner:
     # ── public interface ──────────────────────────────────────────────────────
 
     def run_all(self) -> list[StrategySignal]:
-        """Run all enabled symbols through their assigned strategies.
-        Returns any new signals generated this iteration."""
+        """
+        Run all enabled symbols through their assigned strategies.
+        For each symbol + trading_type, only the highest-confidence signal wins.
+        """
         new_signals: list[StrategySignal] = []
+
         for trading_type in ("scalping", "day_trading", "swing"):
             symbols = self._enabled_symbols(trading_type)
             active_strategies = self._active_strategies(trading_type)
+
             for symbol in symbols:
+                candidates: list[StrategySignal] = []
+
                 for strat_name in active_strategies:
                     sig = self._run_strategy(trading_type, symbol, strat_name)
                     if sig:
-                        new_signals.append(sig)
-                        if self.execution_mode == "auto":
-                            self._execute(sig)
-                        else:
-                            self.pending_signals.append(sig)
+                        candidates.append(sig)
+
+                if not candidates:
+                    continue
+
+                best_sig = max(
+                    candidates,
+                    key=lambda s: float(getattr(s, "confidence", 0.0) or 0.0),
+                )
+
+                new_signals.append(best_sig)
+
+                logger.info(
+                    f"Signal winner [{trading_type}/{symbol}]: "
+                    f"{best_sig.strategy} {best_sig.direction} "
+                    f"confidence={best_sig.confidence:.2f} "
+                    f"candidates={len(candidates)}"
+                )
+
+                if self.execution_mode == "auto":
+                    self._execute(best_sig)
+                else:
+                    self.pending_signals.append(best_sig)
+
         return new_signals
 
     def confirm_signal(self, signal_index: int) -> bool:
@@ -509,14 +534,15 @@ class StrategyRunner:
                     min_lot = sym_info.get("min_lot", 0.01)
                     lot_step = sym_info.get("lot_step", 0.01)
                     _intended_lot = round(math.floor(lot * rf / lot_step) * lot_step, 8)
-                    lot = max(min_lot, _intended_lot)
-                    # LOGIC-1: warn when RL reduction is overridden by broker minimum
-                    if rf < 1.0 and _intended_lot < min_lot:
+                    if _intended_lot < min_lot:
                         logger.warning(
-                            f"RL risk factor {rf:.2f} intended lot {_intended_lot:.5f} "
-                            f"but broker min_lot={min_lot} — clamped to min_lot. "
-                            f"Actual risk is higher than RL intended [{symbol}/{trading_type}]."
+                            f"RL risk factor {rf:.2f} reduced lot below broker min_lot={min_lot}. "
+                            f"Rejecting trade instead of forcing min lot [{symbol}/{trading_type}]."
                         )
+                        return None
+
+                    lot = _intended_lot
+
         except Exception as _rl_exc:
             logger.warning(
                 f"RL risk factor skipped [{symbol}/{trading_type}]: {_rl_exc} — using raw lot"
@@ -570,7 +596,14 @@ class StrategyRunner:
                 _regime_adj = round(
                     math.floor(lot * _regime_factor / _step_l) * _step_l, 8
                 )
-                lot = max(_min_l, _regime_adj)
+                if _regime_adj < _min_l:
+                    logger.warning(
+                        f"Regime factor {_regime_factor:.2f} reduced lot below broker min_lot={_min_l}. "
+                        f"Rejecting trade instead of forcing min lot [{symbol}/{trading_type}/{_regime}]."
+                    )
+                    return None
+
+                lot = _regime_adj
                 if lot < _regime_adj or _regime_factor < 1.0:
                     logger.debug(
                         f"Regime lot reduction [{_regime}]: "
@@ -624,7 +657,8 @@ class StrategyRunner:
             indicators=result.indicators,
         )
 
-        # Phase 6: score signal confidence (safe — degrades to 0.5 if AI not ready)
+        # Phase 6: score signal confidence.
+        # If scorer crashes, it returns 0.0 so the signal will be rejected by confidence/RL gates.
         # primary_df and _regime already computed at the top of this method.
         try:
             from ai.signal_scorer import scorer

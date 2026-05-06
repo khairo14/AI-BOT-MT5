@@ -193,7 +193,7 @@ class TradeMemory:
             correct += int(is_correct)
             total   += 1
 
-            sym = o.get("symbol", "unknown")
+            sym = o.get("symbol_normalized") or o.get("symbol", "unknown")
             if sym not in by_symbol:
                 by_symbol[sym] = {"correct": 0, "total": 0}
             by_symbol[sym]["correct"] += int(is_correct)
