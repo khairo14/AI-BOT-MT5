@@ -25,7 +25,7 @@ VALID_OUTCOMES = {
     "breakeven",
     "unknown",
 }
-VALID_SOURCES = {"live", "demo", "backtest", "shadow"}
+VALID_SOURCES = {"live", "demo", "backtest", "shadow", "broker"}
 LEARNING_OUTCOMES = {"tp_hit", "sl_hit"}
 
 def normalize_execution_mode(value: Any = None) -> str:
@@ -104,7 +104,9 @@ class MaintenanceAgent:
 
         if o["source"] not in VALID_SOURCES:
             errors.append("invalid_source")
-            
+        
+        if o["source"] == "broker":
+            o["source"] = o["execution_mode"]
         # Required identity fields
         required_identity = [
             "user_id",

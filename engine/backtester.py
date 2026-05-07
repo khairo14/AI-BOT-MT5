@@ -289,8 +289,7 @@ def run_backtest(
                     i += step
                     continue
                 # RL risk factor: scale position size as the live engine does
-                if _rl_manager is not None:
-                    _ai_risk_scale = _rl_manager.risk_factor(strategy_name, trading_type)
+                _ai_risk_scale = 1.0
             except Exception as exc:
                 logger.debug(f"Backtester AI filter error at bar {i}: {exc}")
 

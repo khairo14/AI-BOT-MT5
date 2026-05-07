@@ -303,7 +303,11 @@ def _get_strategy_map() -> dict:
         }
     return _STRATEGY_MAP
 
-
+def _normalize_execution_mode(value: str | None) -> str:
+    mode = str(value or "live").lower().strip()
+    if mode in ("paper", "demo", "test"):
+        return "demo"
+    return "live"
 # ── Helper functions ─────────────────────────────────────────────────────────
 
 def _grid_combos(strategy_name: str) -> list[dict]:
@@ -713,7 +717,7 @@ class ParamOptimizer:
         from ai.trade_memory import memory
         from engine.account_store import current_mode as _cur_mode_opt
         outcomes = [
-            o for o in memory.recent(n=50, live_only=True, execution_mode=_cur_mode_opt())
+            o for o in memory.recent(n=50, live_only=True, execution_mode=_normalize_execution_mode(_cur_mode_opt()))
             if o.get("strategy") == strategy_name and o.get("symbol") == symbol
         ]
         # Count trades that closed AFTER the last optimization

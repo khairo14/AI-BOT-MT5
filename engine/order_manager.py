@@ -29,6 +29,12 @@ def _load_bot_magic() -> int:
 
 BOT_MAGIC: int = _load_bot_magic()
 
+def _normalize_account_mode(value: str | None) -> str:
+    mode = str(value or "live").lower().strip()
+    if mode in ("paper", "demo", "test"):
+        return "demo"
+    return "live"
+
 # TTL cache for app.json — spread gate reads this on every order placement.
 # Caching for 5 s avoids disk reads on high-frequency scalping runs while still
 # picking up dashboard config changes (spread limits) within one scan cycle.
@@ -665,13 +671,13 @@ class OrderManager:
                 tp=pos.tp if pos.tp else None,
                 profit=pos.profit,
                 trading_type=trading_type,
-                account_mode=current_mode(),
+                account_mode=_normalize_account_mode(current_mode()),
                 comment=reason,
                 strategy=pos.comment or reason,
                 event="close",
                 close_time=datetime.now(tz=timezone.utc).isoformat(),
                 account_login=current_account_login(),
-                account_type="",
+                account_type=_normalize_account_mode(current_mode()),
                 user_id="default",
             )
         except Exception as _je:
@@ -838,10 +844,10 @@ class OrderManager:
                 tp=pos.tp if pos.tp else None,
                 profit=_partial_profit,
                 trading_type=trading_type,
-                account_type="",
+                account_type=account_mode,
                 user_id="default",
                 strategy=pos.comment or reason,
-                account_mode=account_mode,
+                account_mode = _normalize_account_mode(current_mode()),
                 comment=reason,
                 event="partial_close",
                 close_time=datetime.now(tz=timezone.utc).isoformat(),

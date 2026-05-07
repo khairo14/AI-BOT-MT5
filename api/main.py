@@ -339,7 +339,7 @@ async def lifespan(app: FastAPI):
                 _ws_manager.broadcast_alert({"type": "circuit_breaker", "kind": kind, "message": message}),
                 _running_loop,
             )
-        _risk_manager._on_circuit_breaker = _on_cb
+        setattr(_risk_manager, "_on_circuit_breaker", _on_cb)
         # GAP-1: pre-seed day/week start balance immediately so drawdown protection
         # is active from the very first trade, not only after update_balance() fires.
         try:
@@ -350,11 +350,12 @@ async def lifespan(app: FastAPI):
         except Exception as _seed_exc:
             logger.warning(f"RiskManager: balance seed failed: {_seed_exc}")
         # Start the strategy runner background loop (passes the same instance)
-        start_runner_loop(mt5_client, order_manager, _risk_manager)
         # Recover close events for any trades that closed while server was offline
         try:
             from api.signal_bus import recover_unclosed_trades
-            asyncio.create_task(recover_unclosed_trades(mt5_client))
+            await recover_unclosed_trades(mt5_client)
+            start_runner_loop(mt5_client, order_manager, _risk_manager)
+            logger.info("Startup validation complete | ""trade_state loaded | ""recovery complete | ""runner enabled")
         except Exception as _rec_exc:
             logger.warning(f"Startup recovery task failed to launch: {_rec_exc}")
         try:
@@ -407,9 +408,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from starlette.requests import Request as StarletteRequest
+async def rate_limit_handler(request: StarletteRequest, exc: Exception):
+    return _rate_limit_exceeded_handler(request, exc)  # type: ignore[arg-type]
 # Rate limiting state and error handler
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
 
 @app.middleware("http")
@@ -526,10 +530,13 @@ def health(request: Request):
     circuit_breaker_active = False
     if _risk_manager is not None:
         try:
-            circuit_breaker_active = (
-                _risk_manager._daily_breaker_active
-                or _risk_manager._weekly_breaker_active
-                or _risk_manager._monthly_breaker_active
+            circuit_breaker_active = any(
+                bool(getattr(_risk_manager, attr, False))
+                for attr in (
+                    "_daily_breaker_active",
+                    "_weekly_breaker_active",
+                    "_monthly_breaker_active",
+                )
             )
             if circuit_breaker_active:
                 risk_status = "circuit_breaker_active"

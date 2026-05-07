@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -6,54 +7,86 @@ import { useBotStore } from "@/lib/store";
 import TradeSwitchModal from "@/components/account/TradeSwitchModal";
 import type { AccountMode } from "@/types";
 
+// ── Account mode helpers ───────────────────────────────────────────────────
+// Backend now uses demo/live.
+// Some old dashboard/API switch logic still uses paper/live.
+// Treat paper === demo broker account.
+function normalizeRuntimeMode(mode?: string | null): "demo" | "live" | "unknown" {
+  const value = String(mode || "").toLowerCase();
+
+  if (value === "live") return "live";
+  if (value === "demo" || value === "paper") return "demo";
+
+  return "unknown";
+}
+
+function toSwitchTarget(mode?: string | null): AccountMode {
+  const normalized = normalizeRuntimeMode(mode);
+
+  // TradeSwitchModal still expects legacy AccountMode: "paper" | "live"
+  // demo/paper current account should switch to live.
+  // live current account should switch to paper/demo.
+  return normalized === "live" ? "paper" : "live";
+}
+
 // ── Market session definitions ─────────────────────────────────────────────
-// All times in UTC hours [open, close]. Sessions that cross midnight use two ranges.
 const SESSIONS = [
   {
     name: "Forex",
     icon: "💱",
-    // Forex is open Sun 22:00 – Fri 22:00 UTC (continuous weekday)
-    // We approximate as Mon-Fri 00:00–24:00; closed Sat + Sun before 22:00
     type: "forex",
   },
   {
     name: "US Stocks",
     icon: "🗽",
-    // NYSE/NASDAQ: Mon-Fri 13:30–20:00 UTC
-    openH: 13, openM: 30, closeH: 20, closeM: 0,
-    days: [1, 2, 3, 4, 5], // Mon-Fri
+    openH: 13,
+    openM: 30,
+    closeH: 20,
+    closeM: 0,
+    days: [1, 2, 3, 4, 5],
     type: "equity",
   },
   {
     name: "Crypto",
     icon: "₿",
-    // 24/7
     type: "crypto",
   },
   {
     name: "Commodities",
     icon: "🛢",
-    // Oil / Gold (CME): Mon 00:00 – Fri 23:00 UTC (approx)
-    openH: 0, openM: 0, closeH: 23, closeM: 0,
+    openH: 0,
+    openM: 0,
+    closeH: 23,
+    closeM: 0,
     days: [1, 2, 3, 4, 5],
     type: "equity",
   },
 ] as const;
 
 function getForexStatus(now: Date): { open: boolean; label: string } {
-  const day = now.getUTCDay(); // 0=Sun, 6=Sat
-  const h = now.getUTCHours(), m = now.getUTCMinutes();
+  const day = now.getUTCDay();
+  const h = now.getUTCHours();
+  const m = now.getUTCMinutes();
   const mins = h * 60 + m;
-  // Open: Mon 00:00 – Fri 22:00 UTC; also Sun >= 22:00
+
   if (day === 6) return { open: false, label: "Opens Sun 22:00 UTC" };
+
   if (day === 0 && mins < 22 * 60) {
     const diff = 22 * 60 - mins;
-    return { open: false, label: `Opens in ${Math.floor(diff / 60)}h ${diff % 60}m` };
+    return {
+      open: false,
+      label: `Opens in ${Math.floor(diff / 60)}h ${diff % 60}m`,
+    };
   }
+
   if (day === 5 && mins >= 22 * 60) {
-    const diff = (24 * 60 - mins) + (24 * 60) + 22 * 60; // to Sun 22:00
-    return { open: false, label: `Opens in ${Math.floor(diff / 60)}h ${diff % 60}m` };
+    const diff = 24 * 60 - mins + 24 * 60 + 22 * 60;
+    return {
+      open: false,
+      label: `Opens in ${Math.floor(diff / 60)}h ${diff % 60}m`,
+    };
   }
+
   return { open: true, label: "Open" };
 }
 
@@ -63,7 +96,10 @@ function getCryptoStatus(): { open: boolean; label: string } {
 
 function getEquityStatus(
   now: Date,
-  openH: number, openM: number, closeH: number, closeM: number,
+  openH: number,
+  openM: number,
+  closeH: number,
+  closeM: number,
   days: readonly number[]
 ): { open: boolean; label: string } {
   const day = now.getUTCDay();
@@ -71,35 +107,77 @@ function getEquityStatus(
   const openMins = openH * 60 + openM;
   const closeMins = closeH * 60 + closeM;
 
-  if (!days.includes(day as 1|2|3|4|5)) {
-    // Find next open day
+  if (!days.includes(day as 1 | 2 | 3 | 4 | 5)) {
     let daysAhead = 1;
-    while (!days.includes(((day + daysAhead) % 7) as 1|2|3|4|5)) daysAhead++;
+    while (!days.includes(((day + daysAhead) % 7) as 1 | 2 | 3 | 4 | 5)) {
+      daysAhead++;
+    }
+
     const minsUntil = daysAhead * 24 * 60 - mins + openMins;
-    return { open: false, label: `Opens in ${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m` };
+    return {
+      open: false,
+      label: `Opens in ${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m`,
+    };
   }
+
   if (mins < openMins) {
     const diff = openMins - mins;
-    return { open: false, label: `Opens in ${Math.floor(diff / 60)}h ${diff % 60}m` };
+    return {
+      open: false,
+      label: `Opens in ${Math.floor(diff / 60)}h ${diff % 60}m`,
+    };
   }
+
   if (mins >= closeMins) {
-    // Next open day
     let daysAhead = 1;
-    while (!days.includes(((day + daysAhead) % 7) as 1|2|3|4|5)) daysAhead++;
+    while (!days.includes(((day + daysAhead) % 7) as 1 | 2 | 3 | 4 | 5)) {
+      daysAhead++;
+    }
+
     const minsUntil = daysAhead * 24 * 60 - mins + openMins;
-    return { open: false, label: `Opens in ${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m` };
+    return {
+      open: false,
+      label: `Opens in ${Math.floor(minsUntil / 60)}h ${minsUntil % 60}m`,
+    };
   }
+
   const diffClose = closeMins - mins;
-  return { open: true, label: `Closes in ${Math.floor(diffClose / 60)}h ${diffClose % 60}m` };
+  return {
+    open: true,
+    label: `Closes in ${Math.floor(diffClose / 60)}h ${diffClose % 60}m`,
+  };
 }
 
 // ── Forex trading session definitions ─────────────────────────────────────
-// openUTC / closeUTC in whole hours. Sessions crossing midnight: openUTC > closeUTC.
 const TRADING_SESSION_DEFS = [
-  { name: "Sydney",   flag: "🇦🇺", tz: "Australia/Sydney",  openUTC: 22, closeUTC: 7  },
-  { name: "Tokyo",    flag: "🇯🇵", tz: "Asia/Tokyo",         openUTC: 0,  closeUTC: 9  },
-  { name: "London",   flag: "🇬🇧", tz: "Europe/London",      openUTC: 7,  closeUTC: 17 },
-  { name: "New York", flag: "🇺🇸", tz: "America/New_York",   openUTC: 13, closeUTC: 22 },
+  {
+    name: "Sydney",
+    flag: "🇦🇺",
+    tz: "Australia/Sydney",
+    openUTC: 22,
+    closeUTC: 7,
+  },
+  {
+    name: "Tokyo",
+    flag: "🇯🇵",
+    tz: "Asia/Tokyo",
+    openUTC: 0,
+    closeUTC: 9,
+  },
+  {
+    name: "London",
+    flag: "🇬🇧",
+    tz: "Europe/London",
+    openUTC: 7,
+    closeUTC: 17,
+  },
+  {
+    name: "New York",
+    flag: "🇺🇸",
+    tz: "America/New_York",
+    openUTC: 13,
+    closeUTC: 22,
+  },
 ] as const;
 
 function getSessionLocalTime(tz: string, now: Date): string {
@@ -112,24 +190,29 @@ function getSessionLocalTime(tz: string, now: Date): string {
   });
 }
 
-function isForexSessionOpen(openUTC: number, closeUTC: number, now: Date): boolean {
+function isForexSessionOpen(
+  openUTC: number,
+  closeUTC: number,
+  now: Date
+): boolean {
   const h = now.getUTCHours();
-  const day = now.getUTCDay(); // 0=Sun, 6=Sat
-  // Forex sessions only run Mon–Fri
+  const day = now.getUTCDay();
+
   if (day === 6) return false;
+
   if (openUTC > closeUTC) {
-    // crosses midnight: open if h >= openUTC OR h < closeUTC
-    // but Sydney / Tokyo close Friday – avoid showing open on weekends
-    if (day === 0 && h < closeUTC) return true; // Sun late night bleeds into Mon
-    if (day === 5 && h >= openUTC) return true;  // Fri night for Sydney
+    if (day === 0 && h < closeUTC) return true;
+    if (day === 5 && h >= openUTC) return true;
     if (day !== 0 && day !== 5) return h >= openUTC || h < closeUTC;
     return false;
   }
+
   return h >= openUTC && h < closeUTC;
 }
 
 function ClockAndMarkets() {
   const [now, setNow] = useState<Date | null>(null);
+
   useEffect(() => {
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -139,13 +222,22 @@ function ClockAndMarkets() {
   if (!now) return null;
 
   const utcTime = now.toUTCString().slice(17, 25);
-  const localTime = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const localTZ = Intl.DateTimeFormat().resolvedOptions().timeZone.split("/").pop()?.replace("_", " ") ?? "";
+  const localTime = now.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const localTZ =
+    Intl.DateTimeFormat()
+      .resolvedOptions()
+      .timeZone.split("/")
+      .pop()
+      ?.replace("_", " ") ?? "";
 
   const forex = getForexStatus(now);
   const crypto = getCryptoStatus();
-  const usStocks = getEquityStatus(now, 13, 30, 20, 0, [1,2,3,4,5]);
-  const commodities = getEquityStatus(now, 0, 0, 23, 0, [1,2,3,4,5]);
+  const usStocks = getEquityStatus(now, 13, 30, 20, 0, [1, 2, 3, 4, 5]);
+  const commodities = getEquityStatus(now, 0, 0, 23, 0, [1, 2, 3, 4, 5]);
 
   const markets = [
     { name: "Forex", icon: "💱", ...forex },
@@ -162,45 +254,62 @@ function ClockAndMarkets() {
 
   return (
     <div className="px-2 pb-3 space-y-2">
-      {/* Clock */}
       <div className="bg-gray-900 rounded-lg p-2 space-y-0.5">
         <div className="flex items-center justify-between text-xs">
           <span className="text-gray-500">Local ({localTZ})</span>
           <span className="font-mono text-white">{localTime}</span>
         </div>
+
         <div className="flex items-center justify-between text-xs">
           <span className="text-gray-500">UTC</span>
           <span className="font-mono text-blue-400">{utcTime}</span>
         </div>
       </div>
 
-      {/* Forex trading session clocks */}
       <div className="bg-gray-900 rounded-lg p-2 space-y-1">
-        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Sessions</p>
+        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+          Sessions
+        </p>
+
         {tradingSessions.map((s) => (
           <div key={s.name} className="flex items-center gap-1.5 text-xs">
             <span className="shrink-0">{s.flag}</span>
-            <span className={`flex-1 whitespace-nowrap font-medium ${s.open ? "text-gray-200" : "text-gray-500"}`}>
+            <span
+              className={`flex-1 whitespace-nowrap font-medium ${
+                s.open ? "text-gray-200" : "text-gray-500"
+              }`}
+            >
               {s.name}
             </span>
-            <span className="font-mono text-[10px] text-gray-400">{s.localTime}</span>
+            <span className="font-mono text-[10px] text-gray-400">
+              {s.localTime}
+            </span>
             <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.open ? "bg-green-400" : "bg-gray-600"}`}
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                s.open ? "bg-green-400" : "bg-gray-600"
+              }`}
               title={s.open ? "Open" : "Closed"}
             />
           </div>
         ))}
       </div>
 
-      {/* Market sessions */}
       <div className="space-y-1">
         {markets.map((m) => (
           <div key={m.name} className="flex items-center gap-1.5 text-xs">
             <span>{m.icon}</span>
-            <span className={`font-medium flex-1 whitespace-nowrap ${m.open ? "text-gray-200" : "text-gray-500"}`}>
+            <span
+              className={`font-medium flex-1 whitespace-nowrap ${
+                m.open ? "text-gray-200" : "text-gray-500"
+              }`}
+            >
               {m.name}
             </span>
-            <span className={`text-[10px] font-semibold whitespace-nowrap ${m.open ? "text-green-400" : "text-gray-500"}`}>
+            <span
+              className={`text-[10px] font-semibold whitespace-nowrap ${
+                m.open ? "text-green-400" : "text-gray-500"
+              }`}
+            >
               {m.open ? "● Open" : m.label}
             </span>
           </div>
@@ -251,160 +360,180 @@ const NAV_SECTIONS = [
 export default function Sidebar() {
   const pathname = usePathname();
   const { account, wsConnected, notifications } = useBotStore();
+
   const unreadCount = notifications.length;
 
   const [collapsed, setCollapsed] = useState(false);
   const [switchTarget, setSwitchTarget] = useState<AccountMode | null>(null);
 
-  // Collapsible state for Tools/Reports/System — Trading is always open
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
-    { Tools: false, Reports: false, System: false }
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    Tools: false,
+    Reports: false,
+    System: false,
+  });
+
+  const runtimeMode = normalizeRuntimeMode(
+    account?.account_type || account?.mode
   );
-  const toggleSection = (title: string) =>
-    setOpenSections(prev => ({ ...prev, [title]: !prev[title] }));
+  const isLive = runtimeMode === "live";
+
+  const toggleSection = (title: string) => {
+    setOpenSections((prev) => ({ ...prev, [title]: !prev[title] }));
+  };
 
   const handleModeToggle = () => {
     if (!account) return;
-    const next: AccountMode = account.mode === "paper" ? "live" : "paper";
-    setSwitchTarget(next);
+    setSwitchTarget(toSwitchTarget(account.account_type || account.mode));
   };
 
   return (
     <>
-    <aside
-      className="h-full bg-gray-950 border-r border-gray-800 flex flex-col transition-all duration-300 overflow-hidden"
-      style={{ width: collapsed ? "56px" : "224px" }}
-    >
-      {/* Logo + collapse toggle */}
-      <div className="px-3 py-5 border-b border-gray-800 flex items-center justify-between gap-2 min-h-15">
-        {!collapsed && (
-          <div className="overflow-hidden">
-            <h1 className="text-lg font-bold text-white tracking-tight whitespace-nowrap">EVOTRADE-AI</h1>
-            <p className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">XM Trading Dashboard</p>
-          </div>
-        )}
-        <button
-          onClick={() => setCollapsed(v => !v)}
-          className="ml-auto shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? "»" : "«"}
-        </button>
-      </div>
+      <aside
+        className="h-full bg-gray-950 border-r border-gray-800 flex flex-col transition-all duration-300 overflow-hidden"
+        style={{ width: collapsed ? "56px" : "224px" }}
+      >
+        <div className="px-3 py-5 border-b border-gray-800 flex items-center justify-between gap-2 min-h-15">
+          {!collapsed && (
+            <div className="overflow-hidden">
+              <h1 className="text-lg font-bold text-white tracking-tight whitespace-nowrap">
+                EVOTRADE-AI
+              </h1>
+              <p className="text-xs text-gray-500 mt-0.5 whitespace-nowrap">
+                XM Trading Dashboard
+              </p>
+            </div>
+          )}
 
-      {/* Nav links */}
-      <nav className="flex-1 px-2 py-4 space-y-4 overflow-hidden">
-        {NAV_SECTIONS.map((section) => {
-          const isCollapsible = section.title !== "Trading";
-          const isOpen = !isCollapsible || openSections[section.title] !== false;
-          return (
-            <div key={section.title}>
-              {!collapsed && (
-                isCollapsible ? (
-                  <button
-                    onClick={() => toggleSection(section.title)}
-                    className="w-full flex items-center justify-between px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors"
-                  >
-                    <span>{section.title}</span>
-                    <span className={`transition-transform duration-200 ${isOpen ? "rotate-0" : "-rotate-90"}`}>▾</span>
-                  </button>
-                ) : (
-                  <div className="px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    {section.title}
-                  </div>
-                )
-              )}
-              {/* Items: always show in collapsed (icon-only) mode; respect toggle otherwise */}
-              {(collapsed || isOpen) && (
-                <div className="space-y-1">
-                  {section.items.map(({ href, label, icon }) => {
-                    const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-                    return (
-                      <Link
-                        key={href}
-                        href={href}
-                        title={collapsed ? label : undefined}
-                        className={`flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors ${
-                          active
-                            ? "bg-blue-600 text-white"
-                            : "text-gray-400 hover:text-white hover:bg-gray-800"
+          <button
+            onClick={() => setCollapsed((v) => !v)}
+            className="ml-auto shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? "»" : "«"}
+          </button>
+        </div>
+
+        <nav className="flex-1 px-2 py-4 space-y-4 overflow-hidden">
+          {NAV_SECTIONS.map((section) => {
+            const isCollapsible = section.title !== "Trading";
+            const isOpen =
+              !isCollapsible || openSections[section.title] !== false;
+
+            return (
+              <div key={section.title}>
+                {!collapsed &&
+                  (isCollapsible ? (
+                    <button
+                      onClick={() => toggleSection(section.title)}
+                      className="w-full flex items-center justify-between px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:text-gray-300 transition-colors"
+                    >
+                      <span>{section.title}</span>
+                      <span
+                        className={`transition-transform duration-200 ${
+                          isOpen ? "rotate-0" : "-rotate-90"
                         }`}
                       >
-                        <span className="text-base shrink-0">{icon}</span>
-                        {!collapsed && (
-                          <>
-                            <span className="flex-1 whitespace-nowrap">{label}</span>
-                            {href === "/notifications" && unreadCount > 0 && (
-                              <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 leading-none">
+                        ▾
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="px-2 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      {section.title}
+                    </div>
+                  ))}
+
+                {(collapsed || isOpen) && (
+                  <div className="space-y-1">
+                    {section.items.map(({ href, label, icon }) => {
+                      const active =
+                        href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+                      return (
+                        <Link
+                          key={href}
+                          href={href}
+                          title={collapsed ? label : undefined}
+                          className={`flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-colors ${
+                            active
+                              ? "bg-blue-600 text-white"
+                              : "text-gray-400 hover:text-white hover:bg-gray-800"
+                          }`}
+                        >
+                          <span className="text-base shrink-0">{icon}</span>
+
+                          {!collapsed && (
+                            <>
+                              <span className="flex-1 whitespace-nowrap">
+                                {label}
+                              </span>
+
+                              {href === "/notifications" && unreadCount > 0 && (
+                                <span className="text-xs bg-blue-600 text-white rounded-full px-1.5 py-0.5 leading-none">
+                                  {unreadCount}
+                                </span>
+                              )}
+                            </>
+                          )}
+
+                          {collapsed &&
+                            href === "/notifications" &&
+                            unreadCount > 0 && (
+                              <span className="absolute ml-3 -mt-3 text-[9px] bg-blue-600 text-white rounded-full px-1 leading-none">
                                 {unreadCount}
                               </span>
                             )}
-                          </>
-                        )}
-                        {collapsed && href === "/notifications" && unreadCount > 0 && (
-                          <span className="absolute ml-3 -mt-3 text-[9px] bg-blue-600 text-white rounded-full px-1 leading-none">
-                            {unreadCount}
-                          </span>
-                        )}
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </nav>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </nav>
 
-      {/* Clock + market sessions */}
-      {!collapsed && <ClockAndMarkets />}
+        {!collapsed && <ClockAndMarkets />}
 
-      {/* Account status */}
-      <div className="px-2 py-4 border-t border-gray-800 space-y-3">
-        {/* Live / Demo toggle */}
-        <button
-          onClick={handleModeToggle}
-          title={account?.mode === "live" ? "LIVE" : "PAPER / DEMO"}
-          className={`w-full text-xs px-2 py-1.5 rounded-full font-semibold transition-colors ${
-            account?.mode === "live"
-              ? "bg-red-600 hover:bg-red-700 text-white"
-              : "bg-emerald-700 hover:bg-emerald-600 text-white"
-          }`}
-        >
-          {collapsed
-            ? (account?.mode === "live" ? "🔴" : "🟢")
-            : (account?.mode === "live" ? "🔴 LIVE" : "🟢 PAPER / DEMO")}
-        </button>
-
-        {/* WS indicator */}
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span
-            className={`w-2 h-2 rounded-full shrink-0 ${
-              wsConnected ? "bg-green-400 animate-pulse" : "bg-gray-600"
+        <div className="px-2 py-4 border-t border-gray-800 space-y-3">
+          <button
+            onClick={handleModeToggle}
+            disabled={!account}
+            title={isLive ? "Switch to DEMO" : "Switch to LIVE"}
+            className={`w-full text-xs px-2 py-1.5 rounded-full font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              isLive
+                ? "bg-emerald-700 hover:bg-emerald-600 text-white"
+                : "bg-red-600 hover:bg-red-700 text-white"
             }`}
-          />
-          {!collapsed && (wsConnected ? "Live feed active" : "Reconnecting…")}
-        </div>
+          >
+            {collapsed ? isLive ? "🟢" : "🔴" : isLive ? "Switch to DEMO" : "Switch to LIVE"}
+          </button>
 
-        {/* Balance */}
-        {!collapsed && account && (
-          <div className="text-xs text-gray-400">
-            <span className="text-gray-600">Balance </span>
-            <span className="text-white font-medium">
-              ${account.balance.toLocaleString()}
-            </span>
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                wsConnected ? "bg-green-400 animate-pulse" : "bg-gray-600"
+              }`}
+            />
+            {!collapsed && (wsConnected ? "Live feed active" : "Reconnecting…")}
           </div>
-        )}
-      </div>
-    </aside>
 
-    {/* Account switch confirmation modal */}
-    {switchTarget && (
-      <TradeSwitchModal
-        targetMode={switchTarget}
-        onClose={() => setSwitchTarget(null)}
-      />
-    )}
-  </>
+          {!collapsed && account && (
+            <div className="text-xs text-gray-400">
+              <span className="text-gray-600">Balance </span>
+              <span className="text-white font-medium">
+                ${account.balance.toLocaleString()}
+              </span>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {switchTarget && (
+        <TradeSwitchModal
+          targetMode={switchTarget}
+          onClose={() => setSwitchTarget(null)}
+        />
+      )}
+    </>
   );
 }

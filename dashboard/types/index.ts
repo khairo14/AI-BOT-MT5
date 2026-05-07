@@ -10,7 +10,14 @@ export interface AccountInfo {
   margin_level: number;
   profit: number;
   leverage: number;
-  mode: "paper" | "live";
+
+  // Backend runtime identity:
+  // demo/paper = broker demo account
+  // live = real account
+  mode: "demo" | "paper" | "live";
+
+  // New backend field from /account/
+  account_type?: "demo" | "paper" | "live";
 }
 
 // ── OHLCV ──────────────────────────────────────────────────────────────────

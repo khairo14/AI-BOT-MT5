@@ -2,12 +2,20 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchJournalStats, fetchTradeJournal, fetchPositions} from "@/lib/api";
 import type { JournalStatsResponse, JournalEntry } from "@/types";
+type AccountFilter = "all" | "paper" | "live";
+type StatsMode = "paper" | "live";
 
-const MODE_LABELS = { paper: "Paper / Demo", live: "Live" } as const;
-const MODE_COLORS = {
+const STATS_MODES: StatsMode[] = ["paper", "live"];
+
+const MODE_LABELS: Record<StatsMode, string> = {
+  paper: "Paper / Demo",
+  live: "Live",
+};
+
+const MODE_COLORS: Record<StatsMode, string> = {
   paper: "text-emerald-400",
-  live:  "text-red-400",
-} as const;
+  live: "text-red-400",
+};
 
 function StatCard({
   label,
@@ -35,7 +43,7 @@ type SortDir = "asc" | "desc";
 export default function AccountPanel() {
   const [stats, setStats]         = useState<JournalStatsResponse | null>(null);
   const [entries, setEntries]     = useState<JournalEntry[]>([]);
-  const [account, setAccount]     = useState<"paper" | "live" | "all">("all");
+  const [account, setAccount]     = useState<AccountFilter>("all");
   const [loading, setLoading]     = useState(true);
   const [sortKey, setSortKey]     = useState<SortKey>("open_time");
   const [sortDir, setSortDir]     = useState<SortDir>("desc");
@@ -77,7 +85,7 @@ export default function AccountPanel() {
       {/* P&L comparison cards */}
       {stats && (
         <div className="grid grid-cols-2 gap-4">
-          {(["paper", "live"] as const).map((acct) => {
+          {STATS_MODES.map((acct) => {
             const s = stats[acct];
             return (
               <div key={acct} className="bg-gray-900 border border-gray-800 rounded-xl p-5">
@@ -140,7 +148,7 @@ export default function AccountPanel() {
                       : "bg-gray-800 text-gray-400 hover:text-white"
                   }`}
                 >
-                  {a === "all" ? "All" : a === "paper" ? "Paper" : "Live"}
+                  {a === "all" ? "All" : a === "paper" ? "Paper / Demo" : "Live"}
                 </button>
               ))}
             </div>

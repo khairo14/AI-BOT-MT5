@@ -100,13 +100,14 @@ class TradeMemory:
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def record(self, outcome: TradeOutcome) -> None:
+    def record(self, outcome: TradeOutcome) -> dict:
         """Append a closed trade outcome to memory."""
         entry = asdict(outcome)
 
         try:
             from maintenance_agent import maintenance_agent
             entry = maintenance_agent.validate_trade_outcome(entry)
+            entry = self._validate_and_normalize(entry)
         except Exception as exc:
             entry["learning_valid"] = False
             entry["validation_errors"] = [f"maintenance_validation_failed:{exc}"]
@@ -121,7 +122,8 @@ class TradeMemory:
 
             with open(MEMORY_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
-
+        return entry
+    
     def _validate_and_normalize(self, entry: dict) -> dict:
         errors = []
 

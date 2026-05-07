@@ -100,7 +100,7 @@ class TradeJournal:
              # Account identity
             "account_mode": normalize_account_mode(account_mode),
             "account_login": account_login,
-            "account_type": account_type,
+            "account_type": normalize_account_mode(account_type or account_mode),
             "user_id":      user_id,
 
             "comment":      comment,
@@ -128,7 +128,7 @@ class TradeJournal:
         account: str = "all",
         trading_type: Optional[str] = None,
         event: Optional[str] = None,
-        limit: int = 100,
+        limit: int = 5000,
         account_login: Optional[int] = None,
     ) -> list[dict]:
         """
@@ -174,54 +174,112 @@ class TradeJournal:
         return results
 
     def stats(self, account: str = "all", account_login: Optional[int] = None) -> dict:
-        """Return summary stats for the given account filter."""
-        entries = self.get(account=account, limit=10_000, account_login=account_login)
-        closed = [
+        """Return summary stats for the given account filter, deduped by ticket."""
+        entries = self.get(account=account, limit=100_000, account_login=account_login)
+
+        closed_events = [
             e for e in entries
             if e.get("event") in ("close", "partial_close") and e.get("profit") is not None
         ]
-        if not closed:
+
+        if not closed_events:
             return {
-                "total": 0, "wins": 0, "losses": 0,
-                "win_rate": 0.0, "total_profit": 0.0,
-                "today_trades": 0, "today_pnl": 0.0,
+                "total": 0,
+                "wins": 0,
+                "losses": 0,
+                "win_rate": 0.0,
+                "total_profit": 0.0,
+                "today_trades": 0,
+                "today_pnl": 0.0,
+                "by_mode": {},
             }
 
         today_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-        today = [
-            e for e in closed
-            if (e.get("close_time") or e.get("logged_at") or "")[:10] == today_str
-        ]
 
         from collections import defaultdict
-        _ticket_profit: dict = defaultdict(float)
-        _ticket_tt: dict = {}
-        for e in closed:
-            _ticket_profit[e["ticket"]] += (e["profit"] or 0)
-            if e.get("trading_type"):
-                _ticket_tt[e["ticket"]] = e["trading_type"]
 
-        _net_trades = list(_ticket_profit.items())
-        wins   = [t for t, p in _net_trades if p > 0]
-        losses = [t for t, p in _net_trades if p <= 0]
+        ticket_profit: dict[int, float] = defaultdict(float)
+        ticket_today_profit: dict[int, float] = defaultdict(float)
+        ticket_trading_type: dict[int, str] = {}
+
+        seen_close_tickets: set[int] = set()
+        seen_partial_keys: set[tuple] = set()
+
+        for e in reversed(closed_events):
+            ticket = e.get("ticket")
+            if ticket is None:
+                continue
+
+            ticket = int(ticket)
+            event = e.get("event")
+            profit = float(e.get("profit") or 0.0)
+
+            if e.get("trading_type"):
+                ticket_trading_type[ticket] = e["trading_type"]
+
+            is_today = (e.get("close_time") or e.get("logged_at") or "")[:10] == today_str
+
+            if event == "close":
+                # Count only one final close per ticket.
+                # Because get() returns newest first, reversed() makes this oldest -> newest.
+                # This means the latest close overwrites older duplicate recovery closes.
+                if ticket in seen_close_tickets:
+                    continue
+
+                seen_close_tickets.add(ticket)
+                ticket_profit[ticket] += profit
+
+                if is_today:
+                    ticket_today_profit[ticket] += profit
+
+            elif event == "partial_close":
+                # Dedup partial-close rows by ticket + logged/close time + profit.
+                partial_key = (
+                    ticket,
+                    e.get("close_time") or e.get("logged_at"),
+                    round(profit, 2),
+                )
+
+                if partial_key in seen_partial_keys:
+                    continue
+
+                seen_partial_keys.add(partial_key)
+                ticket_profit[ticket] += profit
+
+                if is_today:
+                    ticket_today_profit[ticket] += profit
+
+        net_trades = list(ticket_profit.items())
+
+        wins = [ticket for ticket, profit in net_trades if profit > 0]
+        losses = [ticket for ticket, profit in net_trades if profit <= 0]
 
         by_mode: dict = {}
         for tt in ("scalping", "day_trading", "swing"):
-            mc = [(t, p) for t, p in _net_trades if _ticket_tt.get(t) == tt]
-            if mc:
-                mw = sum(1 for _, p in mc if p > 0)
-                by_mode[tt] = {"wins": mw, "losses": len(mc) - mw}
+            mode_trades = [
+                (ticket, profit)
+                for ticket, profit in net_trades
+                if ticket_trading_type.get(ticket) == tt
+            ]
 
-        _total_trades = len(_net_trades)
+            if mode_trades:
+                mode_wins = sum(1 for _, profit in mode_trades if profit > 0)
+                by_mode[tt] = {
+                    "wins": mode_wins,
+                    "losses": len(mode_trades) - mode_wins,
+                }
+
+        total_trades = len(net_trades)
+
         return {
-            "total":        _total_trades,
-            "wins":         len(wins),
-            "losses":       len(losses),
-            "win_rate":     round(len(wins) / _total_trades * 100, 1) if _total_trades else 0.0,
-            "total_profit": round(sum(e["profit"] or 0 for e in closed), 2),
-            "by_mode":      by_mode,
-            "today_trades": len({e["ticket"] for e in today}),
-            "today_pnl":    round(sum(e["profit"] or 0 for e in today), 2),
+            "total": total_trades,
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(len(wins) / total_trades * 100, 1) if total_trades else 0.0,
+            "total_profit": round(sum(ticket_profit.values()), 2),
+            "by_mode": by_mode,
+            "today_trades": len(ticket_today_profit),
+            "today_pnl": round(sum(ticket_today_profit.values()), 2),
         }
 
     def get_closed_merged(
@@ -233,33 +291,43 @@ class TradeJournal:
     ) -> list[dict]:
         """Return one dict per closed ticket with the true net profit."""
         all_entries = self.get(account=account, limit=limit, account_login=account_login)
+
         if trading_type:
-            all_entries = [e for e in all_entries if e.get("trading_type") == trading_type]
+            all_entries = [
+                e for e in all_entries
+                if e.get("trading_type") == trading_type
+            ]
 
         partial_profit: dict[int, float] = {}
+
         for e in all_entries:
             if e.get("event") == "partial_close" and e.get("profit") is not None:
                 ticket = e.get("ticket")
+
                 if ticket is not None:
-                    partial_profit[ticket] = partial_profit.get(ticket, 0.0) + float(e["profit"])
+                    partial_profit[int(ticket)] = (
+                        partial_profit.get(int(ticket), 0.0) + float(e["profit"])
+                    )
 
         merged: list[dict] = []
+
         for e in all_entries:
             if e.get("event") == "close" and e.get("profit") is not None:
                 ticket = e.get("ticket")
+
                 if ticket is None:
                     continue
-                if ticket is not None:
-                    partial_profit[int(ticket)] = partial_profit.get(int(ticket), 0.0) + float(e["profit"])
-               
-                extra = partial_profit.get(int(ticket), 0.0)
-                if extra != 0.0:
-                    e = dict(e)
-                    e["profit"] = round(float(e["profit"]) + extra, 2)
-                merged.append(e)
+
+                close_profit = float(e["profit"])
+                partials = partial_profit.get(int(ticket), 0.0)
+
+                merged_entry = dict(e)
+                merged_entry["profit"] = round(close_profit + partials, 2)
+
+                merged.append(merged_entry)
 
         return merged
-
+    
     def get_unclosed_tickets(self) -> list[dict]:
         """Return a list of journal "open" entry dicts that have no matching
         "close" entry for the same ticket."""

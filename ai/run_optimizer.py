@@ -84,6 +84,8 @@ def _run_job(args: tuple) -> tuple:
     from pathlib import Path as _Path
     _sys.path.insert(0, str(_Path(__file__).parent.parent))
     from ai.param_optimizer import ParamOptimizer
+    import os
+    os.environ["EVOTRADE_CONTEXT"] = "optimizer"
     opt = ParamOptimizer()
     best_params, score, n, regime_params = opt._run_backtest(
         strategy_name, symbol, df, trading_type

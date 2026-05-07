@@ -26,8 +26,15 @@ class TradeStateStore:
         self._state = {}
         self._load()
 
+    def _normalize_account_mode(self, account_mode: str) -> str:
+        mode = str(account_mode or "live").lower().strip()
+        if mode in ("paper", "demo", "test"):
+            return "demo"
+        return "live" if mode != "demo" else mode
+
     def _key(self, account_mode: str, account_login: int, ticket: int) -> str:
-        return f"{account_mode}:{account_login}:{ticket}"
+        mode = self._normalize_account_mode(account_mode)
+        return f"{mode}:{int(account_login or 0)}:{int(ticket)}"
 
     def _load(self):
         if STATE_FILE.exists():
@@ -65,7 +72,7 @@ class TradeStateStore:
 
     def mark_partial_close(self, account_mode: str, account_login: int, ticket: int, pct: float, reason: str):
         with self._lock:
-            key = key = self._key(account_mode, account_login, ticket)
+            key = self._key(account_mode, account_login, ticket)
             state = self._state.setdefault(key, {})
 
             partials = state.setdefault("partial_closes", [])

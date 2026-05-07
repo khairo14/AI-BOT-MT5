@@ -87,5 +87,5 @@ def is_demo() -> bool:
 
 
 def current_mode() -> str:
-    """Backward compat — returns 'paper' for demo, 'live' otherwise."""
-    return "paper" if is_demo() else "live"
+    """Normalized runtime execution mode."""
+    return "demo" if is_demo() else "live"

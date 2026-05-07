@@ -67,7 +67,7 @@ _app_cfg_cache_bus: dict = {}
 _app_cfg_loaded_at_bus: float = 0.0
 _APP_CFG_TTL_BUS = 5.0  # seconds — consistent with strategy_runner.py TTL
 
-AccountMode = Literal["paper", "live"]
+AccountMode = Literal["demo", "live"]
 
 def _account_identity(source: dict | None = None) -> tuple[AccountMode, int]:
     from engine.account_store import current_mode, current_account_login
@@ -75,8 +75,10 @@ def _account_identity(source: dict | None = None) -> tuple[AccountMode, int]:
     raw_mode = (source or {}).get("account_mode") or current_mode()
     mode = str(raw_mode).lower()
 
-    if mode not in ("paper", "live"):
-        mode = "paper" if mode in ("demo", "test") else "live"
+    if mode in ("paper", "demo", "test"):
+        mode = "demo"
+    elif mode != "live":
+        mode = "live"
 
     login = int((source or {}).get("account_login") or current_account_login() or 0)
     return mode, login
@@ -1784,7 +1786,7 @@ async def recover_unclosed_trades(client) -> None:
                 rl_state=_rec_rl_state,
                 extra={"source": "live", "slippage_pips": 0.0},
             )
-            memory.record(outcome)
+            recorded = memory.record(outcome)
             # Normalize raw dollar profit → % of balance (same scale as _poll_outcome)
             try:
                 from api.runner_loop import _risk_manager as _rm_rec
@@ -1792,13 +1794,18 @@ async def recover_unclosed_trades(client) -> None:
             except Exception:
                 _rec_bal = 0.0
             _rec_pct = (profit / _rec_bal * 100.0) if _rec_bal > 0 else (profit / 10000.0 * 100.0)
-            rl_manager.on_trade_closed(
-                trading_type=trading_type,
-                profit_pct=_rec_pct,
-                win_rate=_stats.get("win_rate", 0.5),
-                avg_conf=_stats.get("avg_conf", 0.5),
-                strategy_name=entry.get("comment") or None,
-            )
+            if recorded.get("learning_valid") is True:
+                rl_manager.on_trade_closed(
+                    trading_type=trading_type,
+                    profit_pct=_rec_pct,
+                    win_rate=_stats.get("win_rate", 0.5),
+                    avg_conf=_stats.get("avg_conf", 0.5),
+                    strategy_name=entry.get("comment") or None,
+                )
+            else:
+                logger.info(
+                    f"RL training skipped for recovered ticket #{ticket}: learning_valid=False"
+                )
         except Exception as _exc:
             logger.debug(f"Recovery: trade memory record failed for #{ticket}: {_exc}")
 
@@ -2076,6 +2083,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                         account_login,
                                         ticket,
                                         tp1_hit=True,
+                                        day_be_triggered=True,
                                         break_even_moved=True,
                                         last_event="tp1_partial_close",
                                     )
@@ -2163,7 +2171,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                             account_mode,
                                             account_login,
                                             ticket,
-                                            tp1_hit=True,
+                                            day_be_triggered=True,
                                             break_even_moved=True,
                                             last_event="day be",
                                         )
@@ -2206,7 +2214,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                             account_mode,
                                             account_login,
                                             ticket,
-                                            tp1_hit=True,
+                                            swing_pre_tp1_be_triggered=True,
                                             break_even_moved=True,
                                             last_event="swing_pre_tp1_be",
                                         )
@@ -2270,7 +2278,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                             account_mode,
                                             account_login,
                                             ticket,
-                                            tp1_hit=True,
+                                            swing_be_triggered=True,
                                             break_even_moved=True,
                                             last_event="swing_be",
                                         )
@@ -2487,7 +2495,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 extra={"source": "live", "slippage_pips": _slippage_pips,
                        "lstm_raw_prob": signal.get("indicators", {}).get("lstm_raw_prob")},
             )
-            memory.record(outcome)
+            recorded = memory.record(outcome)
 
             trade_state_store.update(
                 account_mode,
@@ -2575,19 +2583,20 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             except Exception:
                 pass
 
-            rl_manager.on_trade_closed(
-                trading_type=trading_type,
-                profit_pct=_profit_pct,
-                win_rate=stats.get("win_rate", 0.5),
-                avg_conf=stats.get("avg_conf", 0.5),
-                drawdown_pct=_drawdown_pct,
-                vol_pct=abs(entry_px - sl) / max(abs(entry_px), 1e-8) * 100 if entry_px and sl else 0.0,
-                strategy_name=signal.get("strategy") or None,
-            )
-            logger.info(
-                f"Outcome recorded: #{ticket} {signal['symbol']} {outcome_type} "
-                f"profit={profit:+.2f} ({_profit_pct:+.4f}%) pips={pips:+.1f}"
-            )
+            if recorded.get("learning_valid") is True:
+                rl_manager.on_trade_closed(
+                    trading_type=trading_type,
+                    profit_pct=_profit_pct,
+                    win_rate=stats.get("win_rate", 0.5),
+                    avg_conf=stats.get("avg_conf", 0.5),
+                    drawdown_pct=_drawdown_pct,
+                    vol_pct=abs(entry_px - sl) / max(abs(entry_px), 1e-8) * 100 if entry_px and sl else 0.0,
+                    strategy_name=signal.get("strategy") or None,
+                )
+            else:
+                logger.info(
+                    f"RL training skipped for ticket #{ticket}: learning_valid=False"
+                )
             try:
                 from engine.notification_manager import notification_manager as _nm_close
                 _outcome_emoji = {"tp_hit": "✅ TP Hit", "sl_hit": "❌ SL Hit", "manual_close": "🔒 Closed"}

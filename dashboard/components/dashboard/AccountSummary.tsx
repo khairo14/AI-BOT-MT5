@@ -1,4 +1,5 @@
 "use client";
+
 import type { AccountInfo } from "@/types";
 
 interface Props {
@@ -15,61 +16,116 @@ function Stat({
   color?: string;
 }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl px-5 py-4">
-      <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className={`mt-1 text-xl font-bold ${color ?? "text-white"}`}>{value}</p>
+    <div className="rounded-xl border border-slate-800 bg-slate-900/70 px-4 py-3">
+      <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`mt-1 text-sm font-semibold ${color || "text-slate-100"}`}>
+        {value}
+      </p>
     </div>
   );
 }
 
+function money(value?: number | null, currency = "USD") {
+  const safeValue = Number(value ?? 0);
+
+  return `${currency} ${safeValue.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function normalizeAccountMode(account: AccountInfo | null) {
+  const rawMode = String(
+    account?.account_type || account?.mode || ""
+  ).toLowerCase();
+
+  if (rawMode === "demo" || rawMode === "paper") return "demo";
+  if (rawMode === "live") return "live";
+
+  return "unknown";
+}
+
 export default function AccountSummary({ account }: Props) {
+  const mode = normalizeAccountMode(account);
+  const isDemo = mode === "demo";
+  const isLive = mode === "live";
+
+  const badgeText = isDemo ? "DEMO" : isLive ? "LIVE" : "UNKNOWN";
+
+  const badgeClass = isDemo
+    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+    : isLive
+      ? "border-red-500/40 bg-red-500/10 text-red-300"
+      : "border-slate-500/40 bg-slate-500/10 text-slate-300";
+
   if (!account) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 animate-pulse">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="bg-gray-900 rounded-xl h-20" />
-        ))}
-      </div>
+      <section className="rounded-2xl border border-slate-800 bg-slate-950/80 p-5 shadow-lg">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              Account
+            </p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-100">
+              No account connected
+            </h2>
+          </div>
+
+          <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs font-bold text-slate-400">
+            OFFLINE
+          </span>
+        </div>
+      </section>
     );
   }
 
-  const pl = account.profit;
-  const plColor = pl > 0 ? "text-emerald-400" : pl < 0 ? "text-red-400" : "text-white";
+  const currency = account.currency || "USD";
 
   return (
-    <div className="space-y-3">
-      {/* Account info row - NEW */}
-      <div className="flex items-center justify-between bg-gray-900/50 rounded-lg px-4 py-2 border border-gray-800">
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500 uppercase tracking-wide">Account</span>
-          <span className="font-mono font-bold text-white">{account.login}</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-            account.mode === "paper" 
-              ? "bg-emerald-900/50 text-emerald-400" 
-              : "bg-red-900/50 text-red-400"
-          }`}>
-            {account.mode === "paper" ? "DEMO" : "LIVE"}
-          </span>
-          {account.server && (
-            <span className="text-xs text-gray-500">{account.server}</span>
-          )}
+    <section className="rounded-2xl border border-slate-800 bg-slate-950/80 p-5 shadow-lg">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Account
+          </p>
+
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold text-slate-100">
+              {account.login || "Unknown Login"}
+            </h2>
+
+            <span
+              className={`rounded-full border px-3 py-1 text-xs font-bold ${badgeClass}`}
+            >
+              {badgeText}
+            </span>
+          </div>
+
+          <p className="mt-1 text-sm text-slate-400">
+            {account.server || "Unknown Server"}
+          </p>
         </div>
-        <div className="text-xs text-gray-500">
-          Leverage: 1:{account.leverage}
+
+        <div className="text-right">
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Currency
+          </p>
+          <p className="mt-1 text-sm font-semibold text-slate-100">
+            {currency}
+          </p>
         </div>
       </div>
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Stat label="Balance" value={`$${account.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
-        <Stat label="Equity" value={`$${account.equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
+      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat label="Balance" value={money(account.balance, currency)} />
+        <Stat label="Equity" value={money(account.equity, currency)} />
+        <Stat label="Free Margin" value={money(account.free_margin, currency)} />
         <Stat
-          label="Open P&L"
-          value={`${pl >= 0 ? "+" : ""}$${pl.toFixed(2)}`}
-          color={plColor}
+          label="Profit"
+          value={money(account.profit, currency)}
+          color={Number(account.profit || 0) >= 0 ? "text-emerald-300" : "text-red-300"}
         />
-        <Stat label="Free Margin" value={`$${account.free_margin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
       </div>
-    </div>
+    </section>
   );
 }

@@ -15,7 +15,7 @@ VALIDATED_SIGNAL_FILE = DATA_DIR / "validated_signal_memory.jsonl"
 
 def normalize_execution_mode(value: Any = None) -> str:
     value = str(value or "live").lower().strip()
-    return "demo" if value == "paper" else value
+    return "demo" if value in ("paper", "demo", "test") else value
 @dataclass
 class SignalValidationResult:
     signal_id: str

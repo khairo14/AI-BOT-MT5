@@ -97,7 +97,11 @@ class RiskManager:
             login = "unknown"
 
         try:
-            mode = str(current_mode() or "unknown")
+            mode = str(current_mode() or "unknown").lower().strip()
+            if mode in ("paper", "demo", "test"):
+                mode = "demo"
+            elif mode != "live":
+                mode = "unknown"
         except Exception:
             mode = "unknown"
 
@@ -159,7 +163,12 @@ class RiskManager:
             self._week_start_balance = state.get("week_start_balance")
             self._tracking_date      = date.fromisoformat(state["tracking_date"]) if state.get("tracking_date") else None
             _tw = state.get("tracking_week")
-            self._tracking_week = tuple(_tw) if isinstance(_tw, list) and len(_tw) == 2 else _tw
+            if isinstance(_tw, list) and len(_tw) == 2:
+                self._tracking_week = (int(_tw[0]), int(_tw[1]))
+            elif isinstance(_tw, tuple) and len(_tw) == 2:
+                self._tracking_week = (int(_tw[0]), int(_tw[1]))
+            else:
+                self._tracking_week = None
             
             for k, v in state.get("consecutive_losses", {}).items():
                 if k in self._consecutive_losses:

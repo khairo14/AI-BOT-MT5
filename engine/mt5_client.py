@@ -7,9 +7,11 @@ import os
 import json
 import threading
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any, cast
 
-import MetaTrader5 as mt5
+import MetaTrader5 as _mt5
+mt5 = cast(Any, _mt5)
+
 import pandas as pd
 from dotenv import load_dotenv
 from loguru import logger
@@ -33,6 +35,8 @@ TIMEFRAMES = {
     "W1":  mt5.TIMEFRAME_W1,
 }
 
+def _mt5_attr(obj: Any, name: str, default: Any = None) -> Any:
+    return getattr(obj, name, default)
 
 class MT5Client:
     """
@@ -48,7 +52,7 @@ class MT5Client:
         self._credentials = self._load_credentials()
 
         acc_type = self._credentials.get("type", "")
-        self._trading_mode = "paper" if acc_type == "demo" else "live"
+        self._trading_mode = "demo" if acc_type == "demo" else "live"
 
 
     @property
@@ -59,17 +63,17 @@ class MT5Client:
     # Connection
     # ------------------------------------------------------------------
 
-    def _load_credentials(self) -> dict:
+    def _load_credentials(self, login: int | None = None) -> dict:
         demo_accounts = json.loads(os.getenv("MT5_DEMO_ACCOUNTS", "[]"))
         live_accounts = json.loads(os.getenv("MT5_LIVE_ACCOUNTS", "[]"))
         all_accounts = demo_accounts + live_accounts
         
         # Get current account from account_mode.json (single source of truth)
         current_account = load_account()
-        current_login = current_account.get("login", 0)
+        current_login = int(login or current_account.get("login", 0) or 0)
 
         for acc in all_accounts:
-            if acc["login"] == current_login:
+            if int(acc["login"]) == current_login:
                 return acc
         return all_accounts[0] if all_accounts else {}
 
@@ -96,10 +100,20 @@ class MT5Client:
 
         self._connected = True
         info = mt5.account_info()
+        from engine.account_store import save_account
+        login = int(_mt5_attr(info, "login", creds.get("login") or 0))
+        acc_type = str(self._credentials.get("type", "live")).lower().strip()
+        acc_type = "demo" if acc_type in ("paper", "demo", "test") else "live"
+        self._trading_mode = acc_type
+
+        save_account(login, acc_type)
+        balance = _mt5_attr(info, "balance", 0.0)
+        currency = _mt5_attr(info, "currency", "")
+
         logger.info(
-            f"Connected to MT5 | Login: {info.login} | "
+            f"Connected to MT5 | Login: {login} | "
             f"Type: {self._credentials.get('type', 'unknown')} | "
-            f"Balance: {info.balance} {info.currency}"
+            f"Balance: {balance} {currency}"
         )
         return True
 
@@ -147,11 +161,11 @@ class MT5Client:
         self.disconnect()     
         
         # Reload credentials for the new account
-        self._credentials = self._load_credentials()
+        self._credentials = self._load_credentials(login)
         
         # Determine trading mode for backward compat
         acc_type = self._credentials.get("type", "")
-        self._trading_mode = "paper" if acc_type == "demo" else "live"
+        self._trading_mode = "demo" if acc_type == "demo" else "live"
         
         success = self.connect()
         if success:
@@ -171,21 +185,21 @@ class MT5Client:
 
         with self._lock:
             info = mt5.account_info()
-        if info is None:
+        if info is None:           
             logger.error(f"mt5.account_info() returned None: {mt5.last_error()}")
             return None
 
         return {
-            "login":        info.login,
-            "server":       info.server,
-            "currency":     info.currency,
-            "balance":      info.balance,
-            "equity":       info.equity,
-            "margin":       info.margin,
-            "free_margin":  info.margin_free,
-            "margin_level": info.margin_level,
-            "profit":       info.profit,
-            "leverage":     info.leverage,
+            "login":        _mt5_attr(info, "login", 0),
+            "server":       _mt5_attr(info, "server", ""),
+            "currency":     _mt5_attr(info, "currency", ""),
+            "balance":      _mt5_attr(info, "balance", 0.0),
+            "equity":       _mt5_attr(info, "equity", 0.0),
+            "margin":       _mt5_attr(info, "margin", 0.0),
+            "free_margin":  _mt5_attr(info, "margin_free", 0.0),
+            "margin_level": _mt5_attr(info, "margin_level", 0.0),
+            "profit":       _mt5_attr(info, "profit", 0.0),
+            "leverage":     _mt5_attr(info, "leverage", 0),
             "mode":         self._trading_mode,
         }
 
@@ -396,47 +410,52 @@ class MT5Client:
         ]
 
     def get_deals_by_position(self, position_ticket: int) -> list:
-        """Return raw deal objects for a given position ticket (acquires SDK lock).
-
-        Primary: position-based lookup (fast, no date range needed).
-        Fallback: date-range search over the last 30 days filtered by position_id.
-        Some brokers (e.g. XM demo) return nothing from the position-based call
-        unless the corresponding history window has already been loaded locally —
-        the date-range fallback guarantees we always find the deal.
-        """
+        """Return raw deal objects for a given position ticket."""
         from datetime import datetime, timedelta, timezone as _tz
 
         with self._lock:
-            # FIRST: Try date-range lookup for recent trades (last 7 days)
-            # This works more reliably on XM than position lookup
             to_dt = datetime.now(_tz.utc) + timedelta(hours=24)
+
+            # First: recent date-range lookup, most reliable on XM.
             from_dt = to_dt - timedelta(days=9)
             recent_deals = mt5.history_deals_get(from_dt, to_dt)
 
             if recent_deals:
-                for d in recent_deals:
-                    entry_type = "IN" if d.entry == mt5.DEAL_ENTRY_IN else "OUT" if d.entry == mt5.DEAL_ENTRY_OUT else "UNKNOWN"
-                    logger.info(f"  Deal: ticket={d.ticket}, pos_id={d.position_id}, order={d.order}, profit={d.profit}, entry={entry_type}")
-                
-                matches = [d for d in recent_deals if d.position_id == position_ticket or d.order == position_ticket]
+                matches = [
+                    d for d in recent_deals
+                    if d.position_id == position_ticket or d.order == position_ticket
+                ]
                 if matches:
-                    for m in matches:
-                        logger.info(f"MATCH: ticket={m.ticket}, profit={m.profit}, entry={'OUT' if m.entry == mt5.DEAL_ENTRY_OUT else 'IN'}")
+                    logger.debug(
+                        f"MT5 deals found for position #{position_ticket}: {len(matches)} recent match(es)"
+                    )
                     return matches
-            
-            # SECOND: Try position-based lookup (works for older trades)
+
+            # Second: position-based lookup.
             deals = mt5.history_deals_get(position=position_ticket)
             if deals:
+                logger.debug(
+                    f"MT5 deals found for position #{position_ticket}: {len(deals)} position lookup match(es)"
+                )
                 return list(deals)
-            
-            # THIRD: Extended search (last 90 days)
+
+            # Third: extended date-range fallback.
             from_dt = to_dt - timedelta(days=90)
             all_deals = mt5.history_deals_get(from_dt, to_dt)
             if not all_deals:
                 return []
-            
-            return [d for d in all_deals if d.position_id == position_ticket or d.order == position_ticket]
 
+            matches = [
+                d for d in all_deals
+                if d.position_id == position_ticket or d.order == position_ticket
+            ]
+
+            if matches:
+                logger.debug(
+                    f"MT5 deals found for position #{position_ticket}: {len(matches)} extended match(es)"
+                )
+
+            return matches
     # ------------------------------------------------------------------
     # Context manager support
     # ------------------------------------------------------------------

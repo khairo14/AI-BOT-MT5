@@ -68,7 +68,11 @@ class SignalJournal:
 
         payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
         payload.setdefault("account_login", 0)
-        payload.setdefault("account_type", "")
+        payload["account_type"] = normalize_execution_mode(
+            payload.get("account_type")
+            or payload.get("execution_mode")
+            or payload.get("account_mode")
+        )
         payload.setdefault("user_id", "default")
 
         payload.setdefault("strategy", "")
