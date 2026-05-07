@@ -26,8 +26,8 @@ class TradeStateStore:
         self._state = {}
         self._load()
 
-    def _key(self, account_login: int, ticket: int) -> str:
-        return f"{account_login}:{ticket}"
+    def _key(self, account_mode: str, account_login: int, ticket: int) -> str:
+        return f"{account_mode}:{account_login}:{ticket}"
 
     def _load(self):
         if STATE_FILE.exists():
@@ -41,13 +41,13 @@ class TradeStateStore:
         tmp.write_text(json.dumps(self._state, indent=2), encoding="utf-8")
         tmp.replace(STATE_FILE)
 
-    def get(self, account_login: int, ticket: int) -> dict:
+    def get(self, account_mode: str, account_login: int, ticket: int) -> dict:
         with self._lock:
-            return dict(self._state.get(self._key(account_login, ticket), {}))
+            return dict(self._state.get(self._key(account_mode, account_login, ticket), {}))
 
-    def update(self, account_login: int, ticket: int, **kwargs):
+    def update(self, account_mode: str, account_login: int, ticket: int, **kwargs):
         with self._lock:
-            key = self._key(account_login, ticket)
+            key = self._key(account_mode, account_login, ticket)
 
             state = self._state.setdefault(key, {
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -63,9 +63,9 @@ class TradeStateStore:
 
             self._save()
 
-    def mark_partial_close(self, account_login: int, ticket: int, pct: float, reason: str):
+    def mark_partial_close(self, account_mode: str, account_login: int, ticket: int, pct: float, reason: str):
         with self._lock:
-            key = self._key(account_login, ticket)
+            key = key = self._key(account_mode, account_login, ticket)
             state = self._state.setdefault(key, {})
 
             partials = state.setdefault("partial_closes", [])

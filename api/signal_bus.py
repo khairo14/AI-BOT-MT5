@@ -30,7 +30,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 from engine.notification_manager import notification_manager
 from engine.trade_state import trade_state_store
@@ -67,6 +67,19 @@ _app_cfg_cache_bus: dict = {}
 _app_cfg_loaded_at_bus: float = 0.0
 _APP_CFG_TTL_BUS = 5.0  # seconds — consistent with strategy_runner.py TTL
 
+AccountMode = Literal["paper", "live"]
+
+def _account_identity(source: dict | None = None) -> tuple[AccountMode, int]:
+    from engine.account_store import current_mode, current_account_login
+
+    raw_mode = (source or {}).get("account_mode") or current_mode()
+    mode = str(raw_mode).lower()
+
+    if mode not in ("paper", "live"):
+        mode = "paper" if mode in ("demo", "test") else "live"
+
+    login = int((source or {}).get("account_login") or current_account_login() or 0)
+    return mode, login
 
 def _get_bus_app_cfg() -> dict:
     global _app_cfg_cache_bus, _app_cfg_loaded_at_bus
@@ -247,7 +260,7 @@ class SignalBus:
         from api.websocket.feed import broadcast_signal
 
         # ── Dedup guard: skip if same symbol+direction+strategy+mode already active ──
-        mode = signal.get("trading_mode", "")
+        mode = str(signal.get("trading_mode") or "")
 
         _dedup_key = (
             signal.get("symbol"), signal.get("strategy"),
@@ -299,7 +312,7 @@ class SignalBus:
                 open_positions = self._client.get_open_positions()
                 sym = signal.get("symbol", "")
                 direction = signal.get("direction", "").upper()
-                mode_prefix = {"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(mode, mode)
+                mode_prefix = str({"scalping": "scalp", "day_trading": "day", "swing": "swing"}.get(mode, mode))
                 _bot_magic: int | None = None
                 try:
                     from engine.order_manager import BOT_MAGIC as _bot_magic
@@ -826,7 +839,8 @@ class SignalBus:
                 fill_price = signal.get("fill_price")
                 try:
                     from engine.trade_journal import trade_journal
-                    from engine.account_store import current_mode, current_account_login
+                    account_mode, account_login = _account_identity(signal)
+                    
                     trade_journal.log(
                         ticket=ticket or 0,
                         symbol=signal["symbol"],
@@ -839,11 +853,11 @@ class SignalBus:
                         tp3=float(signal["tp3"]) if signal.get("tp3") else None,
                         profit=None,
                         trading_type=trading_mode,
-                        account_mode=current_mode(),
+                        account_login=account_login,
+                        account_mode=account_mode,
                         comment=signal.get("strategy", ""),
                         event="open",
                         confidence=float(signal.get("confidence") or 0.5),
-                        account_login=current_account_login(),
                     )
                 except Exception:
                     pass
@@ -951,10 +965,14 @@ class SignalBus:
                                 if _rf_rv != 1.0:
                                     _step_rv = _sym_info_lot.get("lot_step", 0.01)
                                     _min_rv  = _sym_info_lot.get("min_lot", 0.01)
-                                    _new_lot = max(
-                                        _min_rv,
-                                        round(_math_rv.floor(_new_lot * _rf_rv / _step_rv) * _step_rv, 8),
-                                    )
+                                    _rv_lot = round(_math_rv.floor(_new_lot * _rf_rv / _step_rv) * _step_rv, 8)
+                                    if _rv_lot < _min_rv:
+                                        signal["rejection_reason"] = (
+                                            f"RL risk factor {_rf_rv:.2f} reduced revalidated lot below broker min_lot={_min_rv}; rejected"
+                                        )
+                                        return False
+
+                                    _new_lot = _rv_lot
                             except Exception:
                                 pass
                             if abs(_new_lot - _lot) / max(_lot, 1e-8) > 0.10:
@@ -1032,7 +1050,7 @@ class SignalBus:
                                 f"{signal.get('symbol')} — {err}"
                             )
                             notification_manager.add(
-                                type="spread_guard",
+                                type="risk_alert",
                                 title="High Spread — Trade Blocked",
                                 message=(
                                     f"{signal.get('symbol')} {signal.get('direction','').upper()}: "
@@ -1101,8 +1119,7 @@ class SignalBus:
                 # Journal: record trade open
                 try:
                     from engine.trade_journal import trade_journal
-                    from engine.account_store import current_mode, current_account_login
-                    _account_login = current_account_login()
+                    account_mode, account_login = _account_identity(signal)
 
                     trade_journal.log(
                         ticket=result.ticket,
@@ -1116,7 +1133,7 @@ class SignalBus:
                         tp3=float(signal["tp3"]) if signal.get("tp3") else None,
                         profit=None,
                         trading_type=signal.get("trading_mode", "day_trading"),
-                        account_mode=current_mode(),
+                        account_mode=account_mode,
                         comment=signal.get("strategy", ""),
                         strategy=signal.get("strategy", ""),
                         event="open",
@@ -1125,13 +1142,14 @@ class SignalBus:
                         slippage=result.slippage,
                         execution_time_ms=result.execution_time_ms,
                         spread_pips=result.spread_pips,
-                        account_login=_account_login,
+                        account_login=account_login,
                         account_type=signal.get("account_type", ""),
                         user_id=signal.get("user_id", "default"),
                     )
 
                     trade_state_store.update(
-                        _account_login,
+                        account_mode,
+                        account_login,
                         result.ticket,
                         symbol_raw=signal["symbol"],
                         symbol_normalized=normalize_symbol(signal["symbol"]),
@@ -1145,6 +1163,12 @@ class SignalBus:
                         volume=req.volume,
                         account_type=signal.get("account_type", ""),
                         user_id=signal.get("user_id", "default"),
+                        tp1_hit=False,
+                        tp2_hit=False,
+                        break_even_moved=False,
+                        trailing_active=False,
+                        closed=False,
+                        last_event="opened",
                     )
                 except Exception:
                     pass
@@ -1336,7 +1360,7 @@ def _get_server_utc_offset_secs(symbol: str = "EURUSD") -> int:
     _FOREX_PROBES = ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF")
     tick = None
     for probe in _FOREX_PROBES:
-        tick = mt5.symbol_info_tick(probe)
+        tick = getattr(mt5, "symbol_info_tick")(probe)
         if tick is not None:
             break
     if tick is None:
@@ -1446,6 +1470,7 @@ async def recover_unclosed_trades(client) -> None:
         close_dt2 = datetime.fromisoformat(close_time)
         dur_mins  = (close_dt2 - open_dt2).total_seconds() / 60
 
+        account_mode, account_login = _account_identity(entry)
         # Write close event to journal (include swap/commission from closing deal)
         trade_journal.log(
             ticket=ticket,
@@ -1460,13 +1485,13 @@ async def recover_unclosed_trades(client) -> None:
             tp=tp if tp else None,
             profit=profit,
             trading_type=trading_type,
-            account_mode=entry.get("account_mode") or current_mode(),
+            account_mode=account_mode,
+            account_login=account_login,
             comment=entry.get("comment", ""),
             event="close",
             close_time=close_time,
             swap=getattr(deal, "swap", None),
             commission=getattr(deal, "commission", None),
-            account_login=current_account_login(),
         )
 
         # Feed to trade memory and RL
@@ -1602,6 +1627,8 @@ async def recover_unclosed_trades(client) -> None:
             "tp3":          entry.get("tp3"),
             "lot_size":     entry.get("volume"),
             "confidence":   float(entry.get("confidence") or 0.5),
+            "account_mode": entry.get("account_mode") or current_mode(),
+            "account_login": int(entry.get("account_login") or current_account_login() or 0),
         }
         asyncio.create_task(
             _poll_outcome(ticket=entry["ticket"], signal=fake_signal, client=client)
@@ -1635,7 +1662,8 @@ async def recover_unclosed_trades(client) -> None:
         # Write an open-event so future restarts see this position in the journal
         try:
             from engine.trade_journal import trade_journal
-            from engine.account_store import current_mode, current_account_login
+            account_mode, account_login = _account_identity()
+
             trade_journal.log(
                 ticket=_ticket,
                 symbol=_symbol,
@@ -1646,10 +1674,10 @@ async def recover_unclosed_trades(client) -> None:
                 tp=float(_tp) if _tp else None,
                 profit=None,
                 trading_type=_trading_type_untracked,
-                account_mode=current_mode(),
+                account_mode=account_mode,
+                account_login=account_login,
                 comment=_comment,
                 event="open",
-                account_login=current_account_login(),
             )
         except Exception as _jw:
             logger.debug(f"Recovery: journal write failed for untracked #{_ticket}: {_jw}")
@@ -1684,11 +1712,13 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
     import MetaTrader5 as mt5
     from ai.trade_memory import memory, TradeOutcome
     from ai.rl_agent import rl_manager
-    from engine.account_store import current_account_login
+    from engine.account_store import current_mode, current_account_login
     from engine.trade_state import trade_state_store
 
-    account_login = current_account_login()
-    lifecycle_state = trade_state_store.get(account_login, ticket)
+    account_mode = signal.get("account_mode") or current_mode()
+    account_login = int(signal.get("account_login") or current_account_login() or 0)
+    
+    lifecycle_state = trade_state_store.get(account_mode, account_login, ticket,)
 
     _tp1_triggered = bool(lifecycle_state.get("tp1_hit", False))
     _day_be_triggered = bool(lifecycle_state.get("day_be_triggered", False))
@@ -1809,6 +1839,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                 _partial_ok = await asyncio.to_thread(om.partial_close, ticket, _partial_pct)
                                 if _partial_ok:
                                     trade_state_store.update(
+                                        account_mode,
                                         account_login,
                                         ticket,
                                         tp1_hit=True,
@@ -1816,6 +1847,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                         last_event="tp1_partial_close",
                                     )
                                     trade_state_store.mark_partial_close(
+                                        account_mode,
                                         account_login,
                                         ticket,
                                         pct=_partial_pct,
@@ -1895,11 +1927,12 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                     
                                     if _be_ok:
                                         trade_state_store.update(
+                                            account_mode,
                                             account_login,
                                             ticket,
+                                            tp1_hit=True,
                                             break_even_moved=True,
-                                            day_be_triggered=True,
-                                            last_event="day_be",
+                                            last_event="day be",
                                         )
                                         _day_be_triggered = True
 
@@ -1937,12 +1970,14 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                     
                                     if _be_ok:
                                         trade_state_store.update(
+                                            account_mode,
                                             account_login,
                                             ticket,
+                                            tp1_hit=True,
                                             break_even_moved=True,
-                                            swing_pre_tp1_be_triggered=True,
                                             last_event="swing_pre_tp1_be",
                                         )
+                                        
                                         _swing_pre_tp1_be_triggered = True
 
                                     logger.info(
@@ -1999,10 +2034,11 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                                     if _be_improves:
                                         await asyncio.to_thread(om.modify_position, ticket, entry_px)
                                         trade_state_store.update(
+                                            account_mode,
                                             account_login,
                                             ticket,
+                                            tp1_hit=True,
                                             break_even_moved=True,
-                                            swing_be_triggered=True,
                                             last_event="swing_be",
                                         )
                                         _swing_be_triggered = True
@@ -2218,6 +2254,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             memory.record(outcome)
 
             trade_state_store.update(
+                account_mode,
                 account_login,
                 ticket,
                 closed=True,
@@ -2231,6 +2268,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
             try:
                 from engine.trade_journal import trade_journal
                 from engine.account_store import current_mode, current_account_login
+                account_mode, account_login = _account_identity()
                 # Extract swap and commission from the closing MT5 deal
                 _deal_swap       = getattr(deal, "swap", None)
                 _deal_commission = getattr(deal, "commission", None)
@@ -2244,7 +2282,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     tp=tp if tp else None,
                     profit=profit,
                     trading_type=signal.get("trading_mode", "day_trading"),
-                    account_mode=current_mode(),
+                    account_mode=account_mode,
                     comment=signal.get("strategy", ""),
                     event="close",
                     close_time=close_time,
@@ -2381,7 +2419,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                     raise Exception(f"retrain dedup cooldown active for {_key}")
                 _total = len([
                     o for o in _mem.recent(n=500, live_only=True)
-                    if o.get("symbol").rstrip("#+*!") == _sym and o.get("trading_type") == _type
+                    if str(o.get("symbol") or "").rstrip("#+*!") == _sym and o.get("trading_type") == _type
                 ])
 
                 # Trigger 0: no model exists yet for this symbol×mode — bootstrap
@@ -2423,7 +2461,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 if not _retrain and not predictor.is_training(_sym, _type):
                     _recent_trades = [
                         o for o in _mem.recent(n=50, live_only=True)
-                        if o.get("symbol").rstrip("#+*!") == _sym and o.get("trading_type") == _type
+                       if str(o.get("symbol") or "").rstrip("#+*!") == _sym and o.get("trading_type") == _type
                     ][-8:]
                     if len(_recent_trades) == 8 and all(o.get("profit", 0) < 0 for o in _recent_trades):
                         _retrain = True
