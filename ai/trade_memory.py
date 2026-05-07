@@ -25,8 +25,32 @@ DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 MEMORY_FILE = DATA_DIR / "trade_memory.jsonl"
+VALID_DIRECTIONS = {"BUY", "SELL"}
+VALID_TRADING_TYPES = {"scalping", "day_trading", "swing"}
 
+# Broker account execution only.
+# paper is allowed only as an alias, then normalized to demo.
+VALID_EXECUTION_MODES = {"live", "demo", "paper"}
 
+VALID_OUTCOMES = {
+    "tp_hit",
+    "sl_hit",
+    "manual_close",
+    "partial_close",
+    "breakeven",
+    "unknown",
+}
+
+# Only these are safe for RL learning.
+LEARNING_OUTCOMES = {"tp_hit", "sl_hit"}
+
+def normalize_execution_mode(value: str) -> str:
+    value = str(value or "live").lower().strip()
+
+    if value == "paper":
+        return "demo"
+
+    return value
 @dataclass
 class TradeOutcome:
     ticket:          int
@@ -47,7 +71,7 @@ class TradeOutcome:
     open_time:       str          # ISO datetime
     close_time:      str          # ISO datetime
     duration_mins:   float
-    mode:            str  = "live"   # "live" or "paper" — used to separate RL/stats per mode
+    mode:            str = ""   # scalping | day_trading | swing
     lstm_predicted_direction: Optional[str] = None  # "BUY" or "SELL" — LSTM prediction at signal time
     regime:          Optional[str] = None   # market regime at signal time (e.g. "trending_bull")
     rl_state:        Optional[str] = None   # RL state bucket at signal time (e.g. "med_high_active_low_tight")
@@ -57,6 +81,10 @@ class TradeOutcome:
     symbol_normalized: str = ""
     account_type: str = ""
     user_id: str = "default"
+    execution_mode: str = "live"
+    learning_valid: bool = False
+    validation_errors: list[str] = field(default_factory=list)
+    source: str = "live"
 
 class TradeMemory:
     """
@@ -76,34 +104,129 @@ class TradeMemory:
     def record(self, outcome: TradeOutcome) -> None:
         """Append a closed trade outcome to memory."""
         entry = asdict(outcome)
+
+        try:
+            from maintenance_agent import maintenance_agent
+            entry = maintenance_agent.validate_trade_outcome(entry)
+        except Exception as exc:
+            entry["learning_valid"] = False
+            entry["validation_errors"] = [f"maintenance_validation_failed:{exc}"]
+
         entry["recorded_at"] = datetime.now(timezone.utc).isoformat() + "Z"
+
         with self._lock:
             self._buffer.append(entry)
             if len(self._buffer) > self.MAX_BUFFER:
                 self._buffer = self._buffer[-self.MAX_BUFFER:]
-        with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
 
-    def recent(self, n: int = 200, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None, account_login: Optional[int] = None) -> list[dict]:
+            with open(MEMORY_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+
+    def _validate_and_normalize(self, entry: dict) -> dict:
+        errors = []
+
+        entry["direction"] = str(entry.get("direction", "")).upper().strip()
+        entry["outcome"] = str(entry.get("outcome", "unknown")).lower().strip()
+        entry["trading_type"] = str(entry.get("trading_type", "")).lower().strip()
+        entry["execution_mode"] = normalize_execution_mode(
+            entry.get("execution_mode") or entry.get("mode") or "live"
+        )
+
+        if not entry.get("user_id"):
+            errors.append("missing_user_id")
+        if not entry.get("account_login"):
+            errors.append("missing_account_login")
+        if not entry.get("account_type"):
+            errors.append("missing_account_type")
+        if not entry.get("symbol_normalized"):
+            errors.append("missing_symbol_normalized")
+        if not entry.get("strategy"):
+            errors.append("missing_strategy")
+
+        if entry["direction"] not in VALID_DIRECTIONS:
+            errors.append("invalid_direction")
+        if entry["trading_type"] not in VALID_TRADING_TYPES:
+            errors.append("invalid_trading_type")
+        if entry["execution_mode"] not in VALID_EXECUTION_MODES:
+            errors.append("invalid_execution_mode")
+        if entry["outcome"] not in VALID_OUTCOMES:
+            errors.append("invalid_outcome")
+
+        try:
+            confidence = float(entry.get("confidence", 0))
+            if not 0 <= confidence <= 1:
+                errors.append("confidence_out_of_range")
+        except Exception:
+            errors.append("invalid_confidence")
+
+        for key in ("entry_price", "close_price", "volume"):
+            try:
+                if float(entry.get(key, 0)) <= 0:
+                    errors.append(f"invalid_{key}")
+            except Exception:
+                errors.append(f"invalid_{key}")
+
+        try:
+            if float(entry.get("duration_mins", 0)) < 0:
+                errors.append("invalid_duration")
+        except Exception:
+            errors.append("invalid_duration")
+
+        entry["validation_errors"] = errors
+        entry["learning_valid"] = (
+            not errors
+            and entry["outcome"] in LEARNING_OUTCOMES
+            and entry["execution_mode"] in {"live", "demo", "paper"}
+        )
+
+        return entry
+
+    def recent(self,
+        n: int = 200,
+        trading_type: Optional[str] = None,
+        execution_mode: Optional[str] = None,
+        account_login: Optional[int] = None,
+        account_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+        strategy: Optional[str] = None,
+        symbol_normalized: Optional[str] = None,
+        learning_only: bool = False,
+        live_only: bool = False,
+    ) -> list[dict]:
         """Return the last N outcomes, optionally filtered by trading_type and/or mode.
         live_only=True excludes backtest entries so RL/optimizer aren't skewed by re-runs."""
         with self._lock:
             data = list(self._buffer)
+
         if trading_type:
             data = [d for d in data if d.get("trading_type") == trading_type]
-        if mode:
-            data = [d for d in data if d.get("mode", "live") == mode]
+        if execution_mode:
+            data = [d for d in data if d.get("execution_mode", d.get("mode")) == execution_mode]
         if account_login is not None:
-            data = [d for d in data if d.get("account_login", 0) == account_login]
+            data = [d for d in data if d.get("account_login") == account_login]
+        if account_type:
+            data = [d for d in data if d.get("account_type") == account_type]
+        if user_id:
+            data = [d for d in data if d.get("user_id") == user_id]
+        if strategy:
+            data = [d for d in data if d.get("strategy") == strategy]
+        if symbol_normalized:
+            data = [d for d in data if d.get("symbol_normalized") == symbol_normalized]
+        if learning_only:
+            data = [d for d in data if d.get("learning_valid") is True]
         if live_only:
-            data = [d for d in data if d.get("extra", {}).get("source") != "backtest"]
+            data = [d for d in data if d.get("execution_mode", d.get("mode")) == "live"]
+
         return data[-n:]
 
     def stats(self, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None, exclude_manual: bool = False, account_login: Optional[int] = None) -> dict:
         """Aggregate stats used by the RL agent and dashboard."""
-        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, mode=mode, account_login=account_login)
+        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, execution_mode=mode, account_login=account_login)
         if exclude_manual:
-            outcomes = [o for o in outcomes if o.get("outcome") in ("tp_hit", "sl_hit")]
+            outcomes = [
+                o for o in outcomes
+                if o.get("learning_valid") is True
+            ]
         if not outcomes:
             return {"total": 0}
         total   = len(outcomes)
@@ -161,7 +284,7 @@ class TradeMemory:
             n=self.MAX_BUFFER,
             trading_type=trading_type,
             live_only=live_only,
-            mode=mode,
+            execution_mode=mode,
             account_login=account_login,
         )
         # Only consider trades where LSTM prediction was recorded
@@ -352,7 +475,7 @@ class TradeMemory:
             n=max(window * 3, 100),
             trading_type=trading_type,
             live_only=live_only,
-            mode=mode,
+            execution_mode=mode,
         )
         if len(outcomes) < window:
             return {
@@ -433,7 +556,7 @@ class TradeMemory:
             n=self.MAX_BUFFER,
             trading_type=trading_type,
             live_only=live_only,
-            mode=mode,
+            execution_mode=mode,
         )
         needed = window * min_windows
         if len(outcomes) < needed:
