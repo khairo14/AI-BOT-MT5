@@ -41,7 +41,7 @@ _event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 # Signals older than this (seconds) with a terminal status are purged from the queue
 _SIGNAL_TTL_SECONDS = 3600  # 1 hour
-_TERMINAL_STATUSES = frozenset({"executed", "rejected", "failed", "expired"})
+_TERMINAL_STATUSES = frozenset({"executed", "rejected", "failed", "expired", "blocked"})
 
 # Default expiry (seconds) per timeframe for PENDING manual signals
 # One bar's worth of time — after this the signal's entry/SL/TP are considered stale
@@ -168,6 +168,168 @@ class SignalBus:
         self._client = client
         self._order_manager = order_manager
 
+    # ── shared signal helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _signal_score(signal: dict) -> float:
+        try:
+            return float(signal.get("score") or signal.get("confidence") or 0.0)
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _same_symbol_mode(a: dict, b: dict) -> bool:
+        return (
+            normalize_symbol(a.get("symbol", "")) == normalize_symbol(b.get("symbol", ""))
+            and a.get("trading_mode", "") == b.get("trading_mode", "")
+        )
+
+    @staticmethod
+    def _pending_key(signal: dict) -> tuple:
+        return (
+            signal.get("symbol"),
+            signal.get("strategy"),
+            signal.get("direction"),
+            str(signal.get("trading_mode") or ""),
+        )
+
+    def _release_pending_key(self, signal: dict) -> None:
+        self._pending_keys.discard(self._pending_key(signal))
+
+    @staticmethod
+    def _account_login_from_signal(signal: dict) -> int:
+        try:
+            return int(
+                signal.get("account_login")
+                or signal.get("login")
+                or signal.get("account", {}).get("login", 0)
+                or 0
+            )
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _execution_mode_from_signal(signal: dict) -> str:
+        return str(
+            signal.get("execution_mode")
+            or signal.get("account_mode")
+            or "live"
+        ).lower().strip()
+
+    def _signal_id(self, signal: dict) -> str:
+        account_login = self._account_login_from_signal(signal)
+        return str(
+            signal.get("signal_id")
+            or signal.get("id")
+            or f"{account_login}:{signal.get('symbol')}:{signal.get('strategy')}:{signal.get('direction')}"
+        )
+
+    def _record_signal_journal(
+        self,
+        signal: dict,
+        *,
+        status: str,
+        decision: str,
+        reason: str | None = None,
+        filters: dict | None = None,
+    ) -> None:
+        """Record candidate/rejected/shadow signal lifecycle data.
+
+        This intentionally does not train RL.  It only writes to signal_journal
+        so signal_validator can later validate the opportunity using future bars.
+        """
+        try:
+            if status:
+                signal["status"] = status
+            if reason:
+                signal["rejection_reason"] = reason
+
+            account_login = self._account_login_from_signal(signal)
+            account_mode = self._execution_mode_from_signal(signal)
+
+            signal_journal.record({
+                "signal_id": self._signal_id(signal),
+                "symbol_raw": signal.get("symbol"),
+                "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
+                "strategy": signal.get("strategy"),
+                "trading_type": signal.get("trading_mode", ""),
+                "mode": signal.get("trading_mode", ""),
+                "execution_mode": account_mode,
+                "direction": signal.get("direction"),
+                "confidence": float(signal.get("confidence") or 0.0),
+                "score": float(signal.get("score") or 0.0),
+                "entry": signal.get("entry") or signal.get("entry_price"),
+                "sl": signal.get("sl"),
+                "tp": signal.get("tp"),
+                "timeframe": signal.get("timeframe") or signal.get("tf"),
+                "regime": signal.get("regime"),
+                "rl_state": signal.get("rl_state"),
+                "status": status,
+                "decision": decision,
+                "reason": signal.get("rejection_reason"),
+                "account_login": account_login,
+                "account_type": signal.get("account_type", ""),
+                "user_id": signal.get("user_id", "default"),
+                "filters": filters or {},
+            })
+        except Exception as exc:
+            logger.debug(f"SignalBus: signal_journal write skipped: {exc}")
+
+    def _mark_blocked(
+        self,
+        signal: dict,
+        *,
+        reason: str,
+        decision: str,
+        filter_name: str,
+        filters: dict | None = None,
+        status: str = "blocked",
+    ) -> None:
+        payload_filters = {"filter": filter_name}
+        if filters:
+            payload_filters.update(filters)
+        signal["status"] = status
+        signal["rejection_reason"] = reason
+        self._record_signal_journal(
+            signal,
+            status=status,
+            decision=decision,
+            filters=payload_filters,
+        )
+
+    def _archive_signal(self, signal: dict, *, status: str, reason: str) -> None:
+        signal["status"] = status
+        signal["rejection_reason"] = reason
+        self._release_pending_key(signal)
+        self.archive.append(dict(signal))
+
+    def _notify_signal_generated(self, signal: dict, mode: str, *, swing_delay: int | None = None) -> None:
+        if swing_delay is not None:
+            title = "New Swing Signal"
+            message = (
+                f"{signal.get('direction', '').upper()} {signal.get('symbol')} "
+                f"via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%}) "
+                f"— auto-executes in {swing_delay}s"
+            )
+        else:
+            title = f"New {mode.replace('_', ' ').title()} Signal"
+            message = (
+                f"{signal.get('direction', '').upper()} {signal.get('symbol')} "
+                f"via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%})"
+            )
+
+        notification_manager.add(
+            type="signal_generated",
+            title=title,
+            message=message,
+            severity="info",
+            metadata={
+                "signal_id": signal["id"],
+                "symbol": signal.get("symbol"),
+                "trading_mode": mode,
+            },
+        )
+
     def purge_stale(self) -> int:
         """Remove terminal-state signals older than _SIGNAL_TTL_SECONDS, and
         expire pending signals whose expires_at has passed. Returns count removed/expired."""
@@ -197,28 +359,16 @@ class SignalBus:
                         sig["status"] = "expired"
                         sig["rejection_reason"] = "Signal expired — market conditions may have changed"
                         
-                        try:
-                            signal_journal.record({
-                                "signal_id": sig.get("id") or sid,
-                                "symbol_raw": sig.get("symbol"),
-                                "symbol_normalized": normalize_symbol(sig.get("symbol", "")),
-                                "strategy": sig.get("strategy"),
-                                "mode": sig.get("trading_mode", ""),
-                                "direction": sig.get("direction"),
-                                "confidence": float(sig.get("confidence") or 0.0),
-                                "score": float(sig.get("score") or 0.0),
-                                "status": "expired",
-                                "reason": sig.get("rejection_reason"),
-                                "account_type": sig.get("account_type", ""),
-                                "user_id": sig.get("user_id", "default"),
-                            })
-                        except Exception:
-                            pass
+                        self._record_signal_journal(
+                            sig,
+                            status="expired",
+                            decision="shadow_only",
+                            filters={"filter": "signal_expiry","expired_at": now.isoformat(),},
+                        )
 
                         logger.info(f"Signal expired: #{sid[:8]} {sig.get('symbol')} {sig.get('strategy')}")
                         # LOGIC-2: release fast-dedup key on expiry
-                        _ek = (sig.get("symbol"), sig.get("strategy"), sig.get("direction"), sig.get("trading_mode"))
-                        self._pending_keys.discard(_ek)
+                        self._release_pending_key(sig)
                         # Broadcast expiry to dashboard
                         try:
                             if _event_loop and not _event_loop.is_closed():
@@ -235,8 +385,7 @@ class SignalBus:
                 self.archive.append(dict(sig))
                 # LOGIC-2: release the fast-dedup key so the same symbol/strategy
                 # can be re-signalled after the previous attempt has settled.
-                _k = (sig.get("symbol"), sig.get("strategy"), sig.get("direction"), sig.get("trading_mode"))
-                self._pending_keys.discard(_k)
+                self._release_pending_key(sig)
         if to_delete:
             logger.debug(f"SignalBus: purged {len(to_delete)} stale signals")
             self._save_pending_swing_signals()
@@ -262,23 +411,8 @@ class SignalBus:
         # ── Dedup guard: skip if same symbol+direction+strategy+mode already active ──
         mode = str(signal.get("trading_mode") or "")
 
-        _dedup_key = (
-            signal.get("symbol"), signal.get("strategy"),
-            signal.get("direction"), mode,
-        )
-        def _signal_score(s: dict) -> float:
-            try:
-                return float(s.get("score") or s.get("confidence") or 0.0)
-            except Exception:
-                return 0.0
-
-        def _same_symbol_mode(a: dict, b: dict) -> bool:
-            return (
-                normalize_symbol(a.get("symbol", "")) == normalize_symbol(b.get("symbol", ""))
-                and a.get("trading_mode", "") == b.get("trading_mode", "")
-            )
-
-        _new_score = _signal_score(signal)
+        _dedup_key = self._pending_key(signal)
+        _new_score = self._signal_score(signal)
         _conflict_margin = 0.08  # 8 points if score/confidence is 0-1 scale
 
         # LOGIC-2: check the fast in-memory set FIRST — catches concurrent calls
@@ -289,6 +423,12 @@ class SignalBus:
             )
             # IMPROVE-4: always surface why a signal was dropped
             signal["rejection_reason"] = "Duplicate signal already pending/executing"
+            self._record_signal_journal(
+                signal,
+                status="blocked",
+                decision="blocked_by_filter",
+                filters={"filter": "duplicate_fast_set"},
+            )
             return signal
         for existing in self.queue.values():
             if existing.get("status") not in ("pending", "executing"):
@@ -302,6 +442,13 @@ class SignalBus:
                 logger.debug(
                     f"SignalBus: dedup dropped {signal.get('symbol')}/{signal.get('strategy')} "
                     f"({mode}) — already {existing['status']}"
+                )
+                signal["rejection_reason"] = "Duplicate signal already pending/executing"
+                self._record_signal_journal(
+                    signal,
+                    status="blocked",
+                    decision="blocked_by_filter",
+                    filters={"filter": "duplicate_existing_signal", "existing_status": existing.get("status")},
                 )
                 return existing
 
@@ -339,44 +486,46 @@ class SignalBus:
                             signal["rejection_reason"] = (
                                 f"Open {direction} {mode} position already exists for {sym}"
                             )
+                            self._record_signal_journal(
+                                signal,
+                                status="blocked",
+                                decision="blocked_by_risk",
+                                filters={
+                                    "filter": "open_position_exists",
+                                    "open_direction": open_dir,
+                                    "new_direction": direction,
+                                    "symbol": sym,
+                                    "trading_type": mode,
+                                },
+                            )
                         else:
                             signal["rejection_reason"] = (
                                 f"Opposite-direction conflict: open {open_dir} {mode} "
                                 f"position already exists for {sym}; new {direction} rejected"
                             )
-
+                            self._record_signal_journal(
+                                signal,
+                                status="blocked",
+                                decision="blocked_by_risk",
+                                filters={"filter": "position_conflict","open_direction": open_dir,"new_direction": direction,"symbol": sym,"trading_type": mode,},
+                            )
+                                
                         return signal
+                    
         except Exception:
             pass
-
-        try:
-            signal_journal.record({
-                "signal_id": signal.get("id"),
-                "symbol_raw": signal.get("symbol"),
-                "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
-                "strategy": signal.get("strategy"),
-                "mode": mode,
-                "direction": signal.get("direction"),
-                "confidence": float(signal.get("confidence") or 0.0),
-                "score": float(signal.get("score") or 0.0),
-                "status": "generated",
-                "account_type": signal.get("account_type", ""),
-                "user_id": signal.get("user_id", "default"),
-            })
-        except Exception as _sj_exc:
-            logger.debug(f"Signal journal write failed: {_sj_exc}")
 
         # ── Arbitration: same symbol + same mode must have only one winner ──
         for existing in list(self.queue.values()):
             if existing.get("status") not in ("pending", "executing"):
                 continue
 
-            if not _same_symbol_mode(existing, signal):
+            if not self._same_symbol_mode(existing, signal):
                 continue
 
             existing_dir = str(existing.get("direction", "")).upper()
             new_dir = str(signal.get("direction", "")).upper()
-            existing_score = _signal_score(existing)
+            existing_score = self._signal_score(existing)
 
             # Same direction: highest score wins.
             if existing_dir == new_dir:
@@ -386,12 +535,18 @@ class SignalBus:
                         f"Replaced by higher-score {new_dir} signal "
                         f"({_new_score:.2f} > {existing_score:.2f})"
                     )
-                    self._pending_keys.discard((
-                        existing.get("symbol"),
-                        existing.get("strategy"),
-                        existing.get("direction"),
-                        existing.get("trading_mode"),
-                    ))
+                    self._record_signal_journal(
+                        existing,
+                        status="rejected",
+                        decision="replaced_by_higher_score",
+                        filters={
+                            "filter": "same_direction_arbitration",
+                            "new_score": _new_score,
+                            "existing_score": existing_score,
+                            "winner_direction": new_dir,
+                        },
+                    )
+                    self._release_pending_key(existing)
                     self.archive.append(dict(existing))
                     logger.info(
                         f"SignalBus arbitration: replaced lower-score same-direction signal "
@@ -403,6 +558,16 @@ class SignalBus:
                 signal["rejection_reason"] = (
                     f"Lower-score same-direction signal rejected "
                     f"({_new_score:.2f} <= {existing_score:.2f})"
+                )
+                self._record_signal_journal(
+                    signal,
+                    status="blocked",
+                    decision="blocked_by_filter",
+                    filters={
+                        "filter": "same_direction_arbitration",
+                        "new_score": _new_score,
+                        "existing_score": existing_score,
+                    },
                 )
                 return signal
 
@@ -417,12 +582,35 @@ class SignalBus:
                 existing["rejection_reason"] = (
                     f"Direction conflict rejected against {new_dir}; gap too small"
                 )
-                self._pending_keys.discard((
-                    existing.get("symbol"),
-                    existing.get("strategy"),
-                    existing.get("direction"),
-                    existing.get("trading_mode"),
-                ))
+                self._record_signal_journal(
+                    signal,
+                    status="blocked",
+                    decision="blocked_by_filter",
+                    filters={
+                        "filter": "direction_conflict_gap_too_small",
+                        "new_direction": new_dir,
+                        "existing_direction": existing_dir,
+                        "new_score": _new_score,
+                        "existing_score": existing_score,
+                        "score_gap": score_gap,
+                        "required_gap": _conflict_margin,
+                    },
+                )
+                self._record_signal_journal(
+                    existing,
+                    status="rejected",
+                    decision="direction_conflict",
+                    filters={
+                        "filter": "direction_conflict_gap_too_small",
+                        "new_direction": new_dir,
+                        "existing_direction": existing_dir,
+                        "new_score": _new_score,
+                        "existing_score": existing_score,
+                        "score_gap": score_gap,
+                        "required_gap": _conflict_margin,
+                    },
+                )
+                self._release_pending_key(existing)
                 self.archive.append(dict(existing))
                 return signal
 
@@ -432,18 +620,37 @@ class SignalBus:
                     f"Lost direction arbitration to {new_dir} "
                     f"({_new_score:.2f} > {existing_score:.2f})"
                 )
-                self._pending_keys.discard((
-                    existing.get("symbol"),
-                    existing.get("strategy"),
-                    existing.get("direction"),
-                    existing.get("trading_mode"),
-                ))
+                self._record_signal_journal(
+                    existing,
+                    status="rejected",
+                    decision="lost_direction_arbitration",
+                    filters={
+                        "filter": "direction_arbitration",
+                        "winner_direction": new_dir,
+                        "loser_direction": existing_dir,
+                        "new_score": _new_score,
+                        "existing_score": existing_score,
+                    },
+                )
+                self._release_pending_key(existing)
                 self.archive.append(dict(existing))
                 continue
 
             signal["rejection_reason"] = (
                 f"Lost direction arbitration to existing {existing_dir} "
                 f"({existing_score:.2f} > {_new_score:.2f})"
+            )
+            self._record_signal_journal(
+                signal,
+                status="blocked",
+                decision="blocked_by_filter",
+                filters={
+                    "filter": "direction_arbitration",
+                    "winner_direction": existing_dir,
+                    "loser_direction": new_dir,
+                    "new_score": _new_score,
+                    "existing_score": existing_score,
+                },
             )
             return signal
         
@@ -473,23 +680,12 @@ class SignalBus:
                     f"Confidence {conf:.0%} below RL threshold for {mode}"
                 )
 
-                try:
-                    signal_journal.record({
-                        "signal_id": signal.get("id"),
-                        "symbol_raw": signal.get("symbol"),
-                        "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
-                        "strategy": signal.get("strategy"),
-                        "mode": mode,
-                        "direction": signal.get("direction"),
-                        "confidence": float(signal.get("confidence") or 0.0),
-                        "score": float(signal.get("score") or 0.0),
-                        "status": "rejected",
-                        "reason": signal.get("rejection_reason"),
-                        "account_type": signal.get("account_type", ""),
-                        "user_id": signal.get("user_id", "default"),
-                    })
-                except Exception:
-                    pass
+                self._record_signal_journal(
+                    signal,
+                    status="blocked",
+                    decision="blocked_by_rl",
+                    filters={"filter": "rl_confidence_threshold","confidence": conf,"trading_type": mode,},
+                )
 
                 return signal
 
@@ -512,23 +708,12 @@ class SignalBus:
                         f"Confidence {conf:.0%} below floor {_threshold:.0%}"
                     )
 
-                    try:
-                        signal_journal.record({
-                            "signal_id": signal.get("id"),
-                            "symbol_raw": signal.get("symbol"),
-                            "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
-                            "strategy": signal.get("strategy"),
-                            "mode": mode,
-                            "direction": signal.get("direction"),
-                            "confidence": float(signal.get("confidence") or 0.0),
-                            "score": float(signal.get("score") or 0.0),
-                            "status": "rejected",
-                            "reason": signal.get("rejection_reason"),
-                            "account_type": signal.get("account_type", ""),
-                            "user_id": signal.get("user_id", "default"),
-                        })
-                    except Exception:
-                        pass
+                    self._record_signal_journal(
+                        signal,
+                        status="blocked",
+                        decision="blocked_by_filter",
+                        filters={"filter": "confidence_floor","confidence": conf,"trading_type": mode,},
+                    )
 
                     return signal
                 
@@ -566,13 +751,7 @@ class SignalBus:
                 # Broadcast as pending so UI shows the card with full details
                 asyncio.create_task(broadcast_signal(dict(signal)))
                 # Notify user — swing signal queued for review window
-                notification_manager.add(
-                    type="signal_generated",
-                    title=f"New Swing Signal",
-                    message=f"{signal.get('direction', '').upper()} {signal.get('symbol')} via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%}) — auto-executes in {_review_secs}s",
-                    severity="info",
-                    metadata={"signal_id": signal["id"], "symbol": signal.get("symbol"), "trading_mode": mode}
-                )
+                self._notify_signal_generated(signal, mode, swing_delay=_review_secs)
                 logger.info(
                     f"Swing signal queued for review: {signal.get('symbol')}/{signal.get('strategy')} "
                     f"— auto-executes in {_review_secs}s unless rejected"
@@ -591,9 +770,15 @@ class SignalBus:
                             if _rm_swing is not None:
                                 _cb_ok, _cb_msg = _rm_swing.is_trading_allowed(mode)
                                 if not _cb_ok:
-                                    sig["status"] = "rejected"
+                                    sig["status"] = "blocked"
                                     sig["rejection_reason"] = _cb_msg
-                                    self._pending_keys.discard(_dedup_key)
+                                    self._release_pending_key(sig)
+                                    self._record_signal_journal(
+                                        sig,
+                                        status="blocked",
+                                        decision="blocked_by_risk",
+                                        filters={"filter": "swing_auto_circuit_breaker"},
+                                    )
                                     logger.info(f"Swing auto-execute blocked: {_cb_msg}")
                                     await broadcast_signal({**sig, "type": "signal_update"})
                                     return
@@ -624,9 +809,15 @@ class SignalBus:
                 if _rm_pre_check is not None:
                     _cb_ok, _cb_msg = _rm_pre_check.is_trading_allowed(mode or "day_trading")
                     if not _cb_ok:
-                        signal["status"] = "rejected"
+                        signal["status"] = "blocked"
                         signal["rejection_reason"] = _cb_msg
-                        self._pending_keys.discard(_dedup_key)
+                        self._release_pending_key(signal)
+                        self._record_signal_journal(
+                            signal,
+                            status="blocked",
+                            decision="blocked_by_risk",
+                            filters={"filter": "circuit_breaker_precheck"},
+                        )
                         logger.info(f"SignalBus RISK-5 pre-check blocked: {_cb_msg}")
                         asyncio.create_task(broadcast_signal({**signal, "type": "signal_update"}))
                         return signal
@@ -635,13 +826,7 @@ class SignalBus:
             # Broadcast immediately so the dashboard card appears before execution
             asyncio.create_task(broadcast_signal(dict(signal)))
             # Notify user of new auto-executed signal
-            notification_manager.add(
-                type="signal_generated",
-                title=f"New {mode.replace('_', ' ').title()} Signal",
-                message=f"{signal.get('direction', '').upper()} {signal.get('symbol')} via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%})",
-                severity="info",
-                metadata={"signal_id": signal["id"], "symbol": signal.get("symbol"), "trading_mode": mode}
-            )
+            self._notify_signal_generated(signal, mode)
             _exec_task = asyncio.create_task(self._execute_async(signal))
             self._active_tasks.add(_exec_task)
             _exec_task.add_done_callback(self._active_tasks.discard)
@@ -665,13 +850,7 @@ class SignalBus:
             asyncio.create_task(broadcast_signal(dict(signal)))
             
             # Notify user of new signal
-            notification_manager.add(
-                type="signal_generated",
-                title=f"New {mode.replace('_', ' ').title()} Signal",
-                message=f"{signal.get('direction', '').upper()} {signal.get('symbol')} via {signal.get('strategy')} (conf: {signal.get('confidence', 0):.0%})",
-                severity="info",
-                metadata={"signal_id": signal["id"], "symbol": signal.get("symbol"), "trading_mode": mode}
-            )
+            self._notify_signal_generated(signal, mode)
 
         return signal
 
@@ -698,6 +877,12 @@ class SignalBus:
                 if datetime.now(tz=timezone.utc) > exp_dt:
                     signal["status"] = "expired"
                     signal["rejection_reason"] = "Signal expired before manual approval"
+                    self._record_signal_journal(
+                        signal,
+                        status="expired",
+                        decision="shadow_only",
+                        filters={"filter": "manual_approval_expired"},
+                    )
                     raise RuntimeError(
                         f"Signal {signal_id} expired at {expires_at} — cannot execute"
                     )
@@ -721,7 +906,10 @@ class SignalBus:
 
         try:
             success = await asyncio.to_thread(self._do_execute_sync, signal)
-            signal["status"] = "executed" if success else "failed"
+            if success:
+                signal["status"] = "executed"
+            elif signal.get("status") not in _TERMINAL_STATUSES:
+                signal["status"] = "failed"
             signal["actioned_at"] = datetime.now(tz=timezone.utc).isoformat()
         except Exception as exc:
             logger.exception(f"SignalBus execution error: {exc}")
@@ -730,6 +918,12 @@ class SignalBus:
             # IMPROVE-4: ensure rejection_reason is set so dashboard can display it
             if not signal.get("rejection_reason"):
                 signal["rejection_reason"] = str(exc)
+            self._record_signal_journal(
+                signal,
+                status="failed",
+                decision="execution_error",
+                filters={"filter": "execute_async_exception"},
+            )
 
         # Notify dashboard of the outcome
         await broadcast_signal({**signal, "type": "signal_update"})
@@ -742,6 +936,12 @@ class SignalBus:
         if self._order_manager is None or self._client is None:
             # IMPROVE-4: populate rejection_reason so dashboard shows why
             signal["rejection_reason"] = "SignalBus not initialised — order manager or MT5 client missing"
+            self._record_signal_journal(
+                signal,
+                status="failed",
+                decision="execution_unavailable",
+                filters={"filter": "signal_bus_not_initialised"},
+            )
             logger.error("SignalBus: not initialised — cannot execute order")
             return False
 
@@ -767,6 +967,12 @@ class SignalBus:
                         severity="warning",
                         metadata={"trading_mode": trading_mode_check, "reason": cb_reason}
                     )
+                    self._record_signal_journal(
+                        signal,
+                        status="blocked",
+                        decision="blocked_by_risk",
+                        filters={"filter": "circuit_breaker"},
+                    )
                     return False
 
                 # ── Per-strategy circuit breaker check ────────────────────────
@@ -783,6 +989,12 @@ class SignalBus:
                             severity="warning",
                             metadata={"strategy": _strat_name, "reason": strat_reason}
                         )
+                        self._record_signal_journal(
+                            signal,
+                            status="blocked",
+                            decision="blocked_by_risk",
+                            filters={"filter": "strategy_circuit_breaker", "strategy": _strat_name},
+                        )
                         return False
 
                 # ── Concurrent + per-symbol limit check ───────────────────────
@@ -795,6 +1007,12 @@ class SignalBus:
                     )
                     if not allowed:
                         signal["rejection_reason"] = reason
+                        self._record_signal_journal(
+                            signal,
+                            status="blocked",
+                            decision="blocked_by_risk",
+                            filters={"filter": "concurrent_limit"},
+                        )
                         logger.info(f"SignalBus blocked execution: {reason}")
                         return False
         except Exception as _exc:
@@ -904,23 +1122,12 @@ class SignalBus:
                                     f"(limit {_max_prog:.0%})"
                                 )
 
-                                try:
-                                    signal_journal.record({
-                                        "signal_id": signal.get("id"),
-                                        "symbol_raw": signal.get("symbol"),
-                                        "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
-                                        "strategy": signal.get("strategy"),
-                                        "mode": trading_mode,
-                                        "direction": signal.get("direction"),
-                                        "confidence": float(signal.get("confidence") or 0.0),
-                                        "score": float(signal.get("score") or 0.0),
-                                        "status": "rejected",
-                                        "reason": signal.get("rejection_reason"),
-                                        "account_type": signal.get("account_type", ""),
-                                        "user_id": signal.get("user_id", "default"),
-                                    })
-                                except Exception:
-                                    pass
+                                self._record_signal_journal(
+                                    signal,
+                                    status="blocked",
+                                    decision="blocked_by_filter",
+                                    filters={"filter": "stale_signal","progress_to_tp": _progress,"max_progress_to_tp": _max_prog,"trading_type": signal.get("trading_mode", ""),},
+                                )
 
                                 logger.info(
                                     f"SignalBus stale-entry blocked: {signal.get('symbol')} "
@@ -970,6 +1177,16 @@ class SignalBus:
                                         signal["rejection_reason"] = (
                                             f"RL risk factor {_rf_rv:.2f} reduced revalidated lot below broker min_lot={_min_rv}; rejected"
                                         )
+                                        self._record_signal_journal(
+                                            signal,
+                                            status="blocked",
+                                            decision="blocked_by_risk",
+                                            filters={
+                                                "filter": "rl_risk_factor_below_min_lot",
+                                                "risk_factor": _rf_rv,
+                                                "min_lot": _min_rv,
+                                            },
+                                        )
                                         return False
 
                                     _new_lot = _rv_lot
@@ -990,6 +1207,12 @@ class SignalBus:
             if _lot <= 0:
                 err = "Lot size is zero — SL distance is zero or invalid; signal rejected"
                 signal["rejection_reason"] = err
+                self._record_signal_journal(
+                    signal,
+                    status="blocked",
+                    decision="blocked_by_filter",
+                    filters={"filter": "invalid_lot_size"},
+                )
                 logger.error(f"SignalBus: {err} ({signal.get('symbol')} {signal.get('direction')})")
                 return False
 
@@ -1027,23 +1250,12 @@ class SignalBus:
                                 f"— order blocked to protect funds"
                             )
                             signal["rejection_reason"] = err
-                            try:
-                                signal_journal.record({
-                                    "signal_id": signal.get("id"),
-                                    "symbol_raw": signal.get("symbol"),
-                                    "symbol_normalized": normalize_symbol(signal.get("symbol", "")),
-                                    "strategy": signal.get("strategy"),
-                                    "mode": trading_mode,
-                                    "direction": signal.get("direction"),
-                                    "confidence": float(signal.get("confidence") or 0.0),
-                                    "score": float(signal.get("score") or 0.0),
-                                    "status": "rejected",
-                                    "reason": signal.get("rejection_reason"),
-                                    "account_type": signal.get("account_type", ""),
-                                    "user_id": signal.get("user_id", "default"),
-                                })
-                            except Exception:
-                                pass
+                            self._record_signal_journal(
+                                signal,
+                                status="blocked",
+                                decision="blocked_by_filter",
+                                filters={"spread_pips": _live_spread,"max_spread_pips": _max_spread,"filter": "spread_guard",},
+                            )
 
                             logger.warning(
                                 f"SignalBus spread-guard blocked: "
@@ -1187,11 +1399,23 @@ class SignalBus:
             else:
                 err = result.error if result else "Order manager returned no result"
                 signal["rejection_reason"] = err
+                self._record_signal_journal(
+                    signal,
+                    status="failed",
+                    decision="order_send_failed",
+                    filters={"filter": "order_manager_failed"},
+                )
                 logger.warning(f"Signal execution failed: {signal['symbol']} {signal['direction']} — {err}")
                 return False
         except Exception as exc:
             # IMPROVE-4: populate rejection_reason so the dashboard card shows a cause
             signal["rejection_reason"] = f"Execution error: {exc}"
+            self._record_signal_journal(
+                signal,
+                status="failed",
+                decision="execution_exception",
+                filters={"filter": "do_execute_sync_exception"},
+            )
             logger.exception(f"_do_execute_sync error: {exc}")
             return False
 
@@ -1270,7 +1494,7 @@ class SignalBus:
             async def _restore_exec(s: dict, d: float, dk: tuple, m: str) -> None:
                 await asyncio.sleep(d)
                 if s.get("status") != "pending":
-                    self._pending_keys.discard(dk)
+                    self._release_pending_key(s)
                     return
                 s["status"] = "executing"
                 await broadcast_signal({**s, "type": "signal_update"})
@@ -1279,9 +1503,15 @@ class SignalBus:
                     if _rm_rstr is not None:
                         _ok, _msg = _rm_rstr.is_trading_allowed(m)
                         if not _ok:
-                            s["status"] = "rejected"
+                            s["status"] = "blocked"
                             s["rejection_reason"] = _msg
-                            self._pending_keys.discard(dk)
+                            self._release_pending_key(s)
+                            self._record_signal_journal(
+                                s,
+                                status="blocked",
+                                decision="blocked_by_risk",
+                                filters={"filter": "restored_swing_circuit_breaker"},
+                            )
                             logger.info(
                                 f"SignalBus restore: swing auto-execute blocked: {_msg}"
                             )
@@ -1290,7 +1520,7 @@ class SignalBus:
                 except Exception:
                     pass
                 await self._execute_async(s)
-                self._pending_keys.discard(dk)
+                self._release_pending_key(s)
                 self._save_pending_swing_signals()
 
             _task = asyncio.create_task(_restore_exec(sig, delay, _dk, _mode))
@@ -1528,6 +1758,9 @@ async def recover_unclosed_trades(client) -> None:
                 symbol_raw=entry.get("symbol_raw") or symbol,
                 symbol_normalized=entry.get("symbol_normalized") or normalize_symbol(symbol),
                 account_type=entry.get("account_type", ""),
+                account_login=int(entry.get("account_login") or current_account_login() or 0),
+                execution_mode=entry.get("account_mode") or current_mode(),
+                source=entry.get("account_mode") or current_mode(),
                 user_id=entry.get("user_id", "default"),
                 strategy=entry.get("strategy") or entry.get("comment", "unknown"),
                 trading_type=trading_type,
@@ -1545,7 +1778,7 @@ async def recover_unclosed_trades(client) -> None:
                 open_time=entry.get("open_time", close_time),
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
-                mode=entry.get("account_mode") or current_mode(),
+                mode=trading_type,
                 lstm_predicted_direction=None,  # LSTM data unavailable in recovery path
                 regime=entry.get("regime"),
                 rl_state=_rec_rl_state,
@@ -2227,6 +2460,9 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 symbol_raw=signal.get("symbol_raw") or signal.get("symbol", ""),
                 symbol_normalized=signal.get("symbol_normalized") or normalize_symbol(signal.get("symbol", "")),
                 account_type=signal.get("account_type", ""),
+                account_login=int(signal.get("account_login") or signal.get("login") or 0),
+                execution_mode=signal.get("account_mode") or _poll_mode,
+                source=signal.get("account_mode") or _poll_mode,
                 user_id=signal.get("user_id", "default"),
                 strategy=signal.get("strategy") or "unknown",
                 trading_type=signal.get("trading_mode", "day_trading"),
@@ -2244,7 +2480,7 @@ async def _poll_outcome(ticket: int, signal: dict, client) -> None:
                 open_time=open_time,
                 close_time=close_time,
                 duration_mins=round(dur_mins, 1),
-                mode=signal.get("account_mode") or _poll_mode,
+                mode=signal.get("trading_mode", "day_trading"),
                 lstm_predicted_direction=_lstm_dir_from_signal(signal),
                 regime=signal.get("regime"),
                 rl_state=_rl_state_str,

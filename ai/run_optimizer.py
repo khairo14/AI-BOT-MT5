@@ -95,12 +95,11 @@ def _run_job(args: tuple) -> tuple:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
-    """Return (symbol, trading_type) pairs from scanner.json (primary) and symbols.json (fallback)."""
-    jobs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
+def _build_jobs(config_dir: Path) -> list[tuple[str, str, str]]:
+    """Return (strategy, symbol, trading_type) jobs from scanner.json and symbols.json."""
+    symbol_type_pairs: list[tuple[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
 
-    # Primary: scanner.json (dynamic live symbols)
     scanner_path = config_dir / "scanner.json"
     if scanner_path.exists():
         try:
@@ -108,14 +107,13 @@ def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
             for trading_type in ("scalping", "day_trading", "swing"):
                 for sym in scanner_cfg.get(trading_type, {}).get("symbols", []):
                     if sym:
-                        key = (sym, trading_type)
-                        if key not in seen:
-                            jobs.append(key)
-                            seen.add(key)
+                        pair = (sym, trading_type)
+                        if pair not in seen_pairs:
+                            symbol_type_pairs.append(pair)
+                            seen_pairs.add(pair)
         except Exception as exc:
             logger.warning(f"Could not read scanner.json: {exc}")
 
-    # Fallback: symbols.json (static baseline)
     symbols_path = config_dir / "symbols.json"
     if symbols_path.exists():
         try:
@@ -124,15 +122,20 @@ def _build_jobs(config_dir: Path) -> list[tuple[str, str]]:
                 for entry in symbols_cfg.get(trading_type, []):
                     if entry.get("enabled", True):
                         sym = entry["symbol"]
-                        key = (sym, trading_type)
-                        if key not in seen:
-                            jobs.append(key)
-                            seen.add(key)
+                        pair = (sym, trading_type)
+                        if pair not in seen_pairs:
+                            symbol_type_pairs.append(pair)
+                            seen_pairs.add(pair)
         except Exception as exc:
             logger.warning(f"Could not read symbols.json: {exc}")
 
-    return jobs
+    jobs: list[tuple[str, str, str]] = []
 
+    for symbol, trading_type in symbol_type_pairs:
+        for strategy in _STRATEGIES.get(trading_type, []):
+            jobs.append((strategy, symbol, trading_type))
+
+    return jobs
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------

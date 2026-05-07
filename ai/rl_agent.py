@@ -130,6 +130,9 @@ def _state(win_rate: float, avg_conf: float, drawdown_pct: float = 0.0, vol_pct:
         f"_{_session_bucket()}_{_drawdown_bucket(drawdown_pct)}_{_vol_bucket(vol_pct)}"
     )
 
+def normalize_rl_mode(value: str | None) -> str:
+    value = str(value or "live").lower().strip()
+    return "demo" if value in ("paper", "demo", "test") else "live"
 
 # Joint actions: (conf_delta, risk_delta)
 ACTIONS: list[tuple[float, float]] = [
@@ -154,7 +157,7 @@ class RLAgent:
     def __init__(self, trading_type: str, mode: str = "live", strategy_name: str | None = None):
         self.trading_type  = trading_type
         self.strategy_name = strategy_name  # None → legacy per-type behaviour
-        self._mode         = mode   # "live" or "paper"
+        self._mode = normalize_rl_mode(mode)  # "live" or "paper/demo"
         self._lock         = threading.Lock()
 
         self._q: dict[str, list[float]] = {}   # state → Q-values for each action
@@ -426,17 +429,25 @@ class RLAgent:
                 except Exception:
                     pass
         if not path.exists():
-            # Bootstrap live agent from paper learning on first live run.
+            # Bootstrap live agent from demo learning on first live run.
             if self._mode == "live":
                 # Try strategy-specific paper file first, then fall back to legacy.
+                demo_path = (
+                    DATA_DIR / f"rl_qtable_{self.strategy_name}_{self.trading_type}_demo.json"
+                    if self.strategy_name else
+                    DATA_DIR / f"rl_qtable_{self.trading_type}_demo.json"
+                )
                 paper_path = (
                     DATA_DIR / f"rl_qtable_{self.strategy_name}_{self.trading_type}_paper.json"
                     if self.strategy_name else
                     DATA_DIR / f"rl_qtable_{self.trading_type}_paper.json"
                 )
-                if paper_path.exists():
+
+                source_path = demo_path if demo_path.exists() else paper_path
+                
+                if source_path.exists():
                     try:
-                        with open(paper_path, "r", encoding="utf-8") as f:
+                        with open(source_path, "r", encoding="utf-8") as f:
                             paper_data = json.load(f)
                         self._q           = paper_data.get("q", {})
                         self._last_state  = paper_data.get("last_state")
@@ -460,14 +471,14 @@ class RLAgent:
                             ))
                         )
                         logger.info(
-                            f"RL live agent bootstrapped from paper [{self.trading_type}]: "
+                            f"RL live agent bootstrapped from demo [{self.trading_type}]: "
                             f"conf_thresh={self._conf_thresh:.2f} "
                             f"risk_factor={self._risk_factor:.2f} "
                             f"n_updates={self._n_updates}"
                         )
                         self._force_save()
                     except Exception as exc:
-                        logger.warning(f"RL: could not bootstrap live from paper [{self.trading_type}]: {exc}")
+                        logger.warning(f"RL: could not bootstrap live from demo [{self.trading_type}]: {exc}")
             return
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -515,14 +526,6 @@ _ALL_STRATEGIES: dict[str, list[str]] = {
     "swing":       ["ema_trend_rider", "fibonacci_rsi", "weekly_breakout"],
 }
 
-# Reverse map: strategy_name → trading_type
-_STRATEGY_TYPE: dict[str, str] = {
-    s: tt
-    for tt, strategies in _ALL_STRATEGIES.items()
-    for s in strategies
-}
-
-
 class RLAgentManager:
     """
     Holds one RLAgent per strategy (9 total across 3 trading types).
@@ -536,9 +539,9 @@ class RLAgentManager:
             _mode = _cm()
         except Exception:
             _mode = "live"
-        self._mode = _mode
+        self._mode = normalize_rl_mode(_mode)
         self._agents: dict[str, RLAgent] = {
-            f"{strategy}_{trading_type}": RLAgent(trading_type, mode=_mode, strategy_name=strategy)
+            f"{strategy}_{trading_type}": RLAgent(trading_type, mode=self._mode, strategy_name=strategy)
             for trading_type, strategies in _ALL_STRATEGIES.items()
             for strategy in strategies
         }
@@ -567,7 +570,7 @@ class RLAgentManager:
         for ag in self._agents.values():
             ag.shutdown()
 
-        self._mode = new_mode
+        new_mode = normalize_rl_mode(new_mode)
         self._agents = {
             f"{strategy}_{trading_type}": RLAgent(trading_type, mode=new_mode, strategy_name=strategy)
             for trading_type, strategies in _ALL_STRATEGIES.items()

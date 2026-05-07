@@ -19,7 +19,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -29,8 +29,7 @@ VALID_DIRECTIONS = {"BUY", "SELL"}
 VALID_TRADING_TYPES = {"scalping", "day_trading", "swing"}
 
 # Broker account execution only.
-# paper is allowed only as an alias, then normalized to demo.
-VALID_EXECUTION_MODES = {"live", "demo", "paper"}
+VALID_EXECUTION_MODES = {"live", "demo", "backtest", "shadow"}
 
 VALID_OUTCOMES = {
     "tp_hit",
@@ -44,7 +43,7 @@ VALID_OUTCOMES = {
 # Only these are safe for RL learning.
 LEARNING_OUTCOMES = {"tp_hit", "sl_hit"}
 
-def normalize_execution_mode(value: str) -> str:
+def normalize_execution_mode(value: Any = None) -> str:
     value = str(value or "live").lower().strip()
 
     if value == "paper":
@@ -111,6 +110,7 @@ class TradeMemory:
         except Exception as exc:
             entry["learning_valid"] = False
             entry["validation_errors"] = [f"maintenance_validation_failed:{exc}"]
+            entry["validation_warnings"] = []
 
         entry["recorded_at"] = datetime.now(timezone.utc).isoformat() + "Z"
 
@@ -127,10 +127,20 @@ class TradeMemory:
 
         entry["direction"] = str(entry.get("direction", "")).upper().strip()
         entry["outcome"] = str(entry.get("outcome", "unknown")).lower().strip()
-        entry["trading_type"] = str(entry.get("trading_type", "")).lower().strip()
-        entry["execution_mode"] = normalize_execution_mode(
-            entry.get("execution_mode") or entry.get("mode") or "live"
+        entry["trading_type"] = str(entry.get("trading_type") or entry.get("mode") or "").lower().strip()
+        raw_execution_mode = (
+            entry.get("execution_mode")
+            or entry.get("account_mode")
+            or entry.get("extra", {}).get("execution_mode")
         )
+
+        if (
+            not raw_execution_mode
+            and str(entry.get("mode", "")).lower() in VALID_EXECUTION_MODES
+        ):
+            raw_execution_mode = entry.get("mode")
+
+        entry["execution_mode"] = normalize_execution_mode(raw_execution_mode)
 
         if not entry.get("user_id"):
             errors.append("missing_user_id")
@@ -176,7 +186,7 @@ class TradeMemory:
         entry["learning_valid"] = (
             not errors
             and entry["outcome"] in LEARNING_OUTCOMES
-            and entry["execution_mode"] in {"live", "demo", "paper"}
+            and entry["execution_mode"] in {"live", "demo"}
         )
 
         return entry
@@ -201,7 +211,11 @@ class TradeMemory:
         if trading_type:
             data = [d for d in data if d.get("trading_type") == trading_type]
         if execution_mode:
-            data = [d for d in data if d.get("execution_mode", d.get("mode")) == execution_mode]
+            execution_mode = normalize_execution_mode(execution_mode)
+            data = [
+                d for d in data
+                if normalize_execution_mode(d.get("execution_mode") or d.get("account_mode")) == execution_mode
+            ]
         if account_login is not None:
             data = [d for d in data if d.get("account_login") == account_login]
         if account_type:
@@ -215,7 +229,10 @@ class TradeMemory:
         if learning_only:
             data = [d for d in data if d.get("learning_valid") is True]
         if live_only:
-            data = [d for d in data if d.get("execution_mode", d.get("mode")) == "live"]
+            data = [
+                d for d in data
+                if normalize_execution_mode(d.get("execution_mode") or d.get("account_mode")) in {"live", "demo"}
+            ]
 
         return data[-n:]
 
@@ -278,7 +295,7 @@ class TradeMemory:
 
         Returns dict with accuracy per symbol and overall, or empty if insufficient data.
         Requires lstm_predicted_direction to be populated in TradeOutcome.extra or field.
-        mode: if set, restricts to trades from that account mode ("live" or "paper").
+        mode: if set, restricts to trades from that account mode ("live" or "demo").
         """
         outcomes = self.recent(
             n=self.MAX_BUFFER,
@@ -359,7 +376,7 @@ class TradeMemory:
         
         Logs overall LSTM accuracy for time-series tracking and auto-retrain triggers.
         Call this via a scheduled task or after every N closed trades.
-        mode: if set, restricts to trades from that account mode ("live" or "paper").
+        mode: if set, restricts to trades from that account mode ("live" or "demo").
         """
         acc = self.lstm_accuracy(
             trading_type=trading_type,
@@ -469,7 +486,7 @@ class TradeMemory:
           - lambda_threshold: sensitivity (lower = more sensitive)
 
         Returns drift detected flag and severity.
-        mode: if set, restricts to trades from that account mode (\"live\" or \"paper\").
+        mode: if set, restricts to trades from that account mode (\"live\" or \"demo\").
         """
         outcomes = self.recent(
             n=max(window * 3, 100),
@@ -550,7 +567,7 @@ class TradeMemory:
 
         Returns rolling EV per window and a stability assessment.
         Requires at least min_windows × window trades to compute.
-        mode: if set, restricts to trades from that account mode ("live" or "paper").
+        mode: if set, restricts to trades from that account mode ("live" or "demo").
         """
         outcomes = self.recent(
             n=self.MAX_BUFFER,

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from datetime import datetime, timezone, timedelta
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -13,7 +13,9 @@ DATA_DIR.mkdir(exist_ok=True)
 SIGNAL_JOURNAL_FILE = DATA_DIR / "signal_journal.jsonl"
 VALIDATED_SIGNAL_FILE = DATA_DIR / "validated_signal_memory.jsonl"
 
-
+def normalize_execution_mode(value: Any = None) -> str:
+    value = str(value or "live").lower().strip()
+    return "demo" if value == "paper" else value
 @dataclass
 class SignalValidationResult:
     signal_id: str
@@ -51,7 +53,7 @@ class SignalValidator:
         pending = [
             s for s in signals
             if not s.get("validated")
-            and s.get("status") in {"shadow", "rejected", "blocked", "missed"}
+            and s.get("status") in {"shadow", "rejected", "blocked", "missed", "expired"}
         ]
 
         return pending[-limit:]
@@ -75,6 +77,10 @@ class SignalValidator:
             signal.get("signal_id")
             or signal.get("id")
             or f"{signal.get('symbol_normalized', 'UNKNOWN')}_{signal.get('recorded_at', '')}"
+        )
+
+        signal["execution_mode"] = normalize_execution_mode(
+            signal.get("execution_mode") or signal.get("account_mode")
         )
 
         direction = str(signal.get("direction", "")).upper().strip()
@@ -228,5 +234,137 @@ class SignalValidator:
 
         return round(price_diff / pip_size, 2)
 
+    def fetch_future_bars_for_signal(
+        self,
+        signal: dict,
+        lookahead_bars: int = 100,
+    ) -> list[dict]:
+        try:
+            from engine.mt5_client import MT5Client
+        except Exception:
+            from engine.mt5_client import MT5Client
 
+        symbol = (
+            signal.get("symbol_raw")
+            or signal.get("symbol")
+            or signal.get("symbol_normalized")
+        )
+
+        timeframe = (
+            signal.get("timeframe")
+            or signal.get("tf")
+            or self._timeframe_from_trading_type(signal.get("trading_type"))
+        )
+
+        recorded_at = signal.get("recorded_at") or signal.get("signal_time")
+        if not symbol or not recorded_at:
+            return []
+
+        start = self._parse_datetime(recorded_at)
+        if start is None:
+            return []
+
+        end = start + self._lookahead_delta(timeframe, lookahead_bars)
+
+        client = MT5Client()
+        if not client.connect():
+            return []
+
+        try:
+            df = client.get_ohlcv_range(
+                symbol=str(symbol),
+                timeframe=str(timeframe),
+                date_from=start,
+                date_to=end,
+            )
+        finally:
+            client.disconnect()
+
+        if df is None or df.empty:
+            return []
+
+        return df.to_dict("records")
+    
+    def _parse_datetime(self, value: Any) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+        try:
+            text = str(value).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(text)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    def _timeframe_from_trading_type(self, trading_type: Any) -> str:
+        trading_type = str(trading_type or "").lower().strip()
+
+        if trading_type == "scalping":
+            return "M5"
+        if trading_type == "swing":
+            return "H4"
+
+        return "H1"
+
+    def _lookahead_delta(self, timeframe: str, bars: int) -> timedelta:
+        tf = str(timeframe or "H1").upper()
+
+        minutes_by_tf = {
+            "M1": 1,
+            "M2": 2,
+            "M5": 5,
+            "M15": 15,
+            "M30": 30,
+            "H1": 60,
+            "H4": 240,
+            "D1": 1440,
+        }
+
+        minutes = minutes_by_tf.get(tf, 60)
+        return timedelta(minutes=minutes * bars)
+    
+    def validate_pending_signals(self, max_signals: int = 100) -> dict:
+        pending = self.load_pending_signals(limit=max_signals)
+        already_validated = self._validated_signal_ids()
+
+        checked = 0
+        validated = 0
+        skipped = 0
+
+        for signal in pending:
+            signal_id = str(signal.get("signal_id", ""))
+
+            if signal_id and signal_id in already_validated:
+                skipped += 1
+                continue
+
+            checked += 1
+            future_bars = self.fetch_future_bars_for_signal(signal)
+
+            if not future_bars:
+                skipped += 1
+                continue
+
+            result = self.validate_signal(signal, future_bars)
+
+            if result.get("validated"):
+                self.record_validated(result)
+                validated += 1
+            else:
+                skipped += 1
+
+        return {
+            "checked": checked,
+            "validated": validated,
+            "skipped": skipped,
+        }
+    
+    def _validated_signal_ids(self) -> set[str]:
+        rows = self._read_jsonl(self.validated_signal_file)
+        return {
+            str(r.get("signal_id"))
+            for r in rows
+            if r.get("signal_id")
+        }
+    
 signal_validator = SignalValidator()

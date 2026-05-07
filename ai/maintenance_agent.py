@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -16,7 +16,7 @@ TRADE_STATE_FILE = DATA_DIR / "trade_state.json"
 
 VALID_DIRECTIONS = {"BUY", "SELL"}
 VALID_TRADING_TYPES = {"scalping", "day_trading", "swing"}
-VALID_EXECUTION_MODES = {"live", "paper", "demo", "backtest", "shadow"}
+VALID_EXECUTION_MODES = {"live", "demo", "backtest", "shadow"}
 VALID_OUTCOMES = {
     "tp_hit",
     "sl_hit",
@@ -25,6 +25,7 @@ VALID_OUTCOMES = {
     "breakeven",
     "unknown",
 }
+VALID_SOURCES = {"live", "demo", "backtest", "shadow"}
 LEARNING_OUTCOMES = {"tp_hit", "sl_hit"}
 
 def normalize_execution_mode(value: Any = None) -> str:
@@ -64,6 +65,7 @@ class MaintenanceAgent:
 
     def validate_trade_outcome(self, outcome: dict) -> dict:
         result = self._validate_trade_outcome(outcome)
+
         return {
             **result.normalized,
             "learning_valid": result.learning_valid,
@@ -95,7 +97,14 @@ class MaintenanceAgent:
             raw_execution_mode = o.get("mode")
 
         o["execution_mode"] = normalize_execution_mode(raw_execution_mode)
+        o["source"] = str(o.get("source") or o["execution_mode"]).lower().strip()
 
+        if o["source"] == "paper":
+            o["source"] = "demo"
+
+        if o["source"] not in VALID_SOURCES:
+            errors.append("invalid_source")
+            
         # Required identity fields
         required_identity = [
             "user_id",
@@ -181,6 +190,21 @@ class MaintenanceAgent:
         poisoned_samples: list[dict] = []
 
         for idx, row in enumerate(rows):
+            if row.get("_corrupt"):
+                invalid += 1
+                error_counts.update(["corrupt_jsonl_row"])
+
+                if len(poisoned_samples) < 20:
+                    poisoned_samples.append({
+                        "line": idx + 1,
+                        "ticket": None,
+                        "symbol": None,
+                        "strategy": None,
+                        "errors": ["corrupt_jsonl_row"],
+                        "warnings": [],
+                    })
+
+                continue
             checked = self.validate_trade_outcome(row)
 
             if checked.get("learning_valid"):
@@ -233,7 +257,8 @@ class MaintenanceAgent:
             "user_id",
             "account_login",
             "account_type",
-            "mode",
+            "execution_mode",
+            "trading_type",
             "strategy",
             "symbol_raw",
             "symbol_normalized",
@@ -244,6 +269,19 @@ class MaintenanceAgent:
         bad_samples: list[dict] = []
 
         for idx, row in enumerate(rows):
+            if row.get("_corrupt"):
+                missing_counts.update(["corrupt_jsonl_row"])
+
+                if len(bad_samples) < 20:
+                    bad_samples.append({
+                        "line": idx + 1,
+                        "missing": ["corrupt_jsonl_row"],
+                        "symbol": None,
+                        "strategy": None,
+                    })
+
+                continue
+
             missing = [key for key in required if row.get(key) in (None, "", 0)]
 
             if missing:
@@ -287,6 +325,7 @@ class MaintenanceAgent:
             "invalid_execution_mode",
             "invalid_outcome",
             "confidence_out_of_range",
+            "corrupt_jsonl_row",
         }
 
         error_counts = memory_scan.get("error_counts", {})
@@ -387,10 +426,18 @@ class MaintenanceAgent:
         errors: list[str],
     ) -> None:
         try:
-            value = float(o.get(key))
+            raw = o.get(key)
+
+            if raw is None:
+                errors.append(f"invalid_{key}")
+                return
+
+            value = float(raw)
+
             if value < min_value or value > max_value:
                 errors.append(f"{key}_out_of_range")
-        except Exception:
+
+        except (TypeError, ValueError):
             errors.append(f"invalid_{key}")
 
 

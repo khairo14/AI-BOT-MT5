@@ -440,11 +440,41 @@ def _simulate_trade(
 
 
 def _classify_bar_regime(df_slice: pd.DataFrame, symbol: str, timeframe: str = "h1") -> str:
-    """Classify regime at a backtest bar. Lightweight — no hysteresis in backtest."""
+    """Classify regime at a backtest bar without depending on one exact function name."""
     try:
-        from engine.regime_classifier import _classify_raw
-        return _classify_raw(df_slice, symbol, timeframe)
-    except Exception:
+        import engine.regime_classifier as rc
+
+        fn = (
+            getattr(rc, "classify_regime", None)
+            or getattr(rc, "classify_market_regime", None)
+            or getattr(rc, "detect_regime", None)
+            or getattr(rc, "_classify_raw", None)
+        )
+
+        if fn is None:
+            logger.debug("Optimizer: no regime classifier function found")
+            return "unknown"
+
+        try:
+            result = fn(df_slice, symbol=symbol, timeframe=timeframe)
+        except TypeError:
+            try:
+                result = fn(df_slice, symbol, timeframe)
+            except TypeError:
+                result = fn(df_slice)
+
+        if isinstance(result, dict):
+            return str(
+                result.get("regime")
+                or result.get("label")
+                or result.get("state")
+                or "unknown"
+            )
+
+        return str(result or "unknown")
+
+    except Exception as exc:
+        logger.debug(f"Optimizer regime classification failed: {exc}")
         return "unknown"
 
 
@@ -683,7 +713,7 @@ class ParamOptimizer:
         from ai.trade_memory import memory
         from engine.account_store import current_mode as _cur_mode_opt
         outcomes = [
-            o for o in memory.recent(n=50, live_only=True, mode=_cur_mode_opt())
+            o for o in memory.recent(n=50, live_only=True, execution_mode=_cur_mode_opt())
             if o.get("strategy") == strategy_name and o.get("symbol") == symbol
         ]
         # Count trades that closed AFTER the last optimization

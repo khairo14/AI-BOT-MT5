@@ -2,7 +2,7 @@
 Trade Journal — append-only JSONL store for all bot-executed trades.
 
 Every trade placed by the bot (auto or manual approval) is appended here
-with its account_mode tag ("paper" / "live") and account_login, so the
+with its account_mode tag ("demo" / "live") and account_login, so the
 dashboard can show a unified, filterable history across all accounts.
 
 Storage: data/trade_journal.jsonl (one JSON object per line)
@@ -13,10 +13,10 @@ Usage:
     trade_journal.log(ticket=12345, symbol="EURUSD", direction="buy",
                       volume=0.1, entry=1.0850, sl=1.0820, tp=1.0910,
                       profit=None, trading_type="scalping",
-                      account_mode="paper", account_login=1301109267,
+                      account_mode="demo", account_login=1301109267,
                       comment="EMAScalp")
 
-    entries = trade_journal.get(account="paper", account_login=1301109267, limit=50)
+    entries = trade_journal.get(account="demo", account_login=1301109267, limit=50)
 """
 
 from __future__ import annotations
@@ -32,8 +32,10 @@ from loguru import logger
 from engine.utils.symbol_utils import normalize_symbol
 
 _JOURNAL_PATH = Path(__file__).parent.parent / "data" / "trade_journal.jsonl"
-AccountMode = Literal["paper", "live"]
 
+def normalize_account_mode(value: str) -> str:
+    value = str(value or "live").lower().strip()
+    return "demo" if value == "paper" else value
 
 class TradeJournal:
     """Thread-safe append-only JSONL trade journal."""
@@ -57,7 +59,7 @@ class TradeJournal:
         tp: Optional[float],
         profit: Optional[float],
         trading_type: str,
-        account_mode: AccountMode,
+        account_mode: str,
         comment: str = "",
         open_time: Optional[str] = None,
         close_time: Optional[str] = None,
@@ -96,7 +98,7 @@ class TradeJournal:
             "trading_type": trading_type,
             "strategy":     strategy or comment,
              # Account identity
-            "account_mode": account_mode,
+            "account_mode": normalize_account_mode(account_mode),
             "account_login": account_login,
             "account_type": account_type,
             "user_id":      user_id,
@@ -133,12 +135,13 @@ class TradeJournal:
         Read journal entries, newest first.
 
         Args:
-            account:       "paper", "live", or "all"
+            account:       "demo", "live", or "all"
             trading_type:  "scalping", "day_trading", "swing", or None
             event:         "open", "close", or None
             limit:         max entries to return
             account_login: filter by specific MT5 account number
         """
+        account = normalize_account_mode(account)
         if not self._path.exists():
             return []
 
@@ -244,7 +247,12 @@ class TradeJournal:
         for e in all_entries:
             if e.get("event") == "close" and e.get("profit") is not None:
                 ticket = e.get("ticket")
-                extra = partial_profit.get(ticket, 0.0)
+                if ticket is None:
+                    continue
+                if ticket is not None:
+                    partial_profit[int(ticket)] = partial_profit.get(int(ticket), 0.0) + float(e["profit"])
+               
+                extra = partial_profit.get(int(ticket), 0.0)
                 if extra != 0.0:
                     e = dict(e)
                     e["profit"] = round(float(e["profit"]) + extra, 2)

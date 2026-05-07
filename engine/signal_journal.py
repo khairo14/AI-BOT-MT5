@@ -67,15 +67,34 @@ class SignalJournal:
         ).lower().strip()
 
         payload["recorded_at"] = datetime.now(timezone.utc).isoformat()
-
-        payload.setdefault("user_id", "default")
+        payload.setdefault("account_login", 0)
         payload.setdefault("account_type", "")
+        payload.setdefault("user_id", "default")
+
+        payload.setdefault("strategy", "")
+        payload.setdefault("confidence", 0.0)
+
+        payload.setdefault("entry", payload.get("entry_price"))
+        payload.setdefault("sl", payload.get("sl_price"))
+        payload.setdefault("tp", payload.get("tp_price"))
+
+        payload.setdefault("timeframe", payload.get("tf", ""))
+        payload.setdefault("reason", "")
+        payload.setdefault("filters", {})
+        payload.setdefault("extra", {})
+
         payload.setdefault("symbol_raw", payload.get("symbol", ""))
         payload.setdefault(
             "symbol_normalized",
-            str(payload.get("symbol", "")).upper().strip(),
+            str(
+                payload.get("symbol_normalized")
+                or payload.get("symbol_raw")
+                or payload.get("symbol")
+                or ""
+            ).upper().strip(),
         )
 
+        payload.setdefault("signal_id", self._make_signal_id(payload))
         payload.setdefault("validated", False)
         payload.setdefault("validated_outcome", None)
         payload.setdefault("future_profit_pips", None)
@@ -85,5 +104,20 @@ class SignalJournal:
             with open(FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(payload) + "\n")
 
+    def _make_signal_id(self, payload: dict) -> str:
+        symbol = (
+            payload.get("symbol_normalized")
+            or payload.get("symbol_raw")
+            or payload.get("symbol")
+            or "UNKNOWN"
+        )
+        strategy = payload.get("strategy") or "unknown_strategy"
+        direction = payload.get("direction") or "NA"
+        recorded_at = payload.get("recorded_at") or datetime.now(timezone.utc).isoformat()
+        account_login = payload.get("account_login") or 0
+
+        raw = f"{account_login}:{symbol}:{strategy}:{direction}:{recorded_at}"
+        return raw.replace(" ", "_").replace(":", "-")
+    
 
 signal_journal = SignalJournal()
