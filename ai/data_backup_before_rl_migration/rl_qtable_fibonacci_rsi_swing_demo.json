@@ -1,0 +1,1 @@
+{"q": {"med_low_active_low_tight": [0.0, 0.0, 0.0, 0.0, 0.0075, 0.0, 0.0, 0.0, 0.0]}, "conf_thresh": 0.55, "risk_factor": 1.0, "last_state": "med_low_quiet_low_tight", "last_action": 4, "n_updates": 2, "last_update_ts": 1778203828.190316}

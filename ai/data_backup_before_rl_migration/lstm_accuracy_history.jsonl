@@ -1,0 +1,5 @@
+{"timestamp": "2026-04-23T16:04:57.089180+00:00Z", "trading_type": "day_trading", "mode": "paper", "overall_accuracy": 0.3333, "correct": 4, "total": 12, "by_symbol": {}, "degraded_symbols": []}
+{"timestamp": "2026-04-24T13:58:06.835386+00:00Z", "trading_type": "scalping", "mode": "paper", "overall_accuracy": 0.4103, "correct": 16, "total": 39, "by_symbol": {}, "degraded_symbols": []}
+{"timestamp": "2026-04-24T17:29:49.617248+00:00Z", "trading_type": "day_trading", "mode": "paper", "overall_accuracy": 0.3913, "correct": 9, "total": 23, "by_symbol": {}, "degraded_symbols": []}
+{"timestamp": "2026-04-28T10:31:55.848887+00:00Z", "trading_type": "swing", "mode": "paper", "overall_accuracy": 0.4167, "correct": 10, "total": 24, "by_symbol": {}, "degraded_symbols": []}
+{"timestamp": "2026-04-30T19:53:14.557046+00:00Z", "trading_type": "swing", "mode": "paper", "overall_accuracy": 0.4706, "correct": 16, "total": 34, "by_symbol": {}, "degraded_symbols": []}

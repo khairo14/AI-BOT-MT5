@@ -50,6 +50,7 @@ def normalize_execution_mode(value: Any = None) -> str:
         return "demo"
 
     return value
+
 @dataclass
 class TradeOutcome:
     ticket:          int
@@ -105,7 +106,7 @@ class TradeMemory:
         entry = asdict(outcome)
 
         try:
-            from maintenance_agent import maintenance_agent
+            from ai.maintenance_agent import maintenance_agent
             entry = maintenance_agent.validate_trade_outcome(entry)
             entry = self._validate_and_normalize(entry)
         except Exception as exc:
@@ -197,6 +198,7 @@ class TradeMemory:
         n: int = 200,
         trading_type: Optional[str] = None,
         execution_mode: Optional[str] = None,
+        mode: Optional[str] = None,
         account_login: Optional[int] = None,
         account_type: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -209,6 +211,9 @@ class TradeMemory:
         live_only=True excludes backtest entries so RL/optimizer aren't skewed by re-runs."""
         with self._lock:
             data = list(self._buffer)
+
+        if not execution_mode and mode:
+            execution_mode = mode
 
         if trading_type:
             data = [d for d in data if d.get("trading_type") == trading_type]

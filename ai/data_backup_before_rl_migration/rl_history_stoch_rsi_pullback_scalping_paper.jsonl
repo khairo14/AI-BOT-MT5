@@ -1,0 +1,2 @@
+{"timestamp": "2026-04-21T11:18:00.679575+00:00", "strategy_name": "stoch_rsi_pullback", "trading_type": "scalping", "mode": "paper", "conf_thresh": 0.54, "risk_factor": 0.6999999999999998, "n_updates": 2099, "last_state": "low_med_active_high_tight"}
+{"timestamp": "2026-04-24T13:58:06.828375+00:00", "strategy_name": "stoch_rsi_pullback", "trading_type": "scalping", "mode": "paper", "conf_thresh": 0.54, "risk_factor": 0.6999999999999998, "n_updates": 2100, "last_state": "low_med_overlap_low_tight"}
