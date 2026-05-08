@@ -245,7 +245,7 @@ class TradeMemory:
 
     def stats(self, trading_type: Optional[str] = None, live_only: bool = False, mode: Optional[str] = None, exclude_manual: bool = False, account_login: Optional[int] = None) -> dict:
         """Aggregate stats used by the RL agent and dashboard."""
-        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, execution_mode=mode, account_login=account_login)
+        outcomes = self.recent(n=self.MAX_BUFFER, trading_type=trading_type, live_only=live_only, execution_mode=mode, account_login=account_login,learning_only=True,)
         if exclude_manual:
             outcomes = [
                 o for o in outcomes
@@ -310,6 +310,7 @@ class TradeMemory:
             live_only=live_only,
             execution_mode=mode,
             account_login=account_login,
+            learning_only=True,
         )
         # Only consider trades where LSTM prediction was recorded
         tracked = [
@@ -426,6 +427,7 @@ class TradeMemory:
             n=self.MAX_BUFFER,
             trading_type=trading_type,
             live_only=live_only,
+            learning_only=True,
         )
         # Only trades where regime was recorded
         tracked = [o for o in outcomes if o.get("regime")]
@@ -500,6 +502,7 @@ class TradeMemory:
             trading_type=trading_type,
             live_only=live_only,
             execution_mode=mode,
+            learning_only=True,
         )
         if len(outcomes) < window:
             return {
@@ -581,6 +584,7 @@ class TradeMemory:
             trading_type=trading_type,
             live_only=live_only,
             execution_mode=mode,
+            learning_only=True,
         )
         needed = window * min_windows
         if len(outcomes) < needed:

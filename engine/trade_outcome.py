@@ -1000,7 +1000,7 @@ async def _maybe_trigger_accuracy_retrain_and_optimizer(
         symbol = str(signal["symbol"]).rstrip("#+*!")
         key = f"{symbol}_{trading_type}"
         total = len([
-            outcome for outcome in trade_memory.recent(n=500, live_only=True)
+            outcome for outcome in trade_memory.recent(n=500, live_only=True, learning_only=True)
             if str(outcome.get("symbol") or "").rstrip("#+*!") == symbol
             and outcome.get("trading_type") == trading_type
         ])
@@ -1051,7 +1051,7 @@ async def _maybe_trigger_accuracy_retrain_and_optimizer(
 
         if not retrain and not predictor.is_training(symbol, trading_type):
             recent_trades = [
-                outcome for outcome in trade_memory.recent(n=50, live_only=True)
+                outcome for outcome in trade_memory.recent(n=50, live_only=True, learning_only=True)
                 if str(outcome.get("symbol") or "").rstrip("#+*!") == symbol
                 and outcome.get("trading_type") == trading_type
             ][-8:]

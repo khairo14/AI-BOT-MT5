@@ -144,7 +144,6 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
 
     # Start counters at their interval so each mode runs on the first tick
     counters = dict(INTERVALS)
-    _paper_sync_counter = 0
     _weekend_check_counter = 0  # Check weekend gap protection every 5 minutes
     logger.info(f"Strategy runner loop started. Intervals: {INTERVALS}")
 
@@ -169,19 +168,6 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                 logger.error(f"Strategy runner: MT5 reconnect error: {_rc_exc}")
                 await asyncio.sleep(30)
                 continue
-
-        # Sync paper trade ledger every 60 s when in paper mode
-        _paper_sync_counter += 5
-        if _paper_sync_counter >= 60:
-            _paper_sync_counter = 0
-            try:
-                from engine.account_store import current_mode
-                if current_mode() == "paper":
-                    from engine.paper_trade import paper_engine
-                    if paper_engine is not None:
-                        await asyncio.to_thread(paper_engine.sync_positions)
-            except Exception as _exc:
-                logger.debug(f"paper sync error: {_exc}")
                 
         # Weekend gap protection — close swing positions before Friday market close
         # Forex closes ~22:00 UTC Friday; indices/stocks close ~21:00 UTC Friday.

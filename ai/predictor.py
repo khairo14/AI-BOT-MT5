@@ -222,7 +222,7 @@ class PricePredictor:
     def is_trained(self, symbol: str, trading_type: str = "day_trading") -> bool:
         return _model_key(symbol, trading_type) in self._models
 
-    def clear_cache(self, symbol: str = None, trading_type: str = None) -> int:
+    def clear_cache(self, symbol: Optional[str] = None, trading_type: Optional[str] = None) -> int:
         """
         Clear prediction cache. If symbol/type specified, clear only that key.
         Otherwise clear all. Returns number of entries cleared.
@@ -727,7 +727,7 @@ class PricePredictor:
             from ai.trade_memory import memory as _mem
             from engine.account_store import current_mode as _cur_mode_cal
             outcomes = [
-                o for o in _mem.recent(n=500, live_only=True, mode=_cur_mode_cal())
+                o for o in _mem.recent(n=500, live_only=True, mode=_cur_mode_cal(), learning_only=True)
                 if o.get("symbol") == symbol
                 and o.get("trading_type") == trading_type
                 and o.get("lstm_predicted_direction") is not None
@@ -904,11 +904,11 @@ def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_
     if not needed.issubset(df.columns) or vol_col not in df.columns:
         return None
 
-    close = df["close"].values.astype(float)
-    open_ = df["open"].values.astype(float)
-    high  = df["high"].values.astype(float)
-    low   = df["low"].values.astype(float)
-    vol   = df[vol_col].values.astype(float)
+    close = df["close"].to_numpy(dtype=float)
+    open_ = df["open"].to_numpy(dtype=float)
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    vol = df[vol_col].to_numpy(dtype=float)
 
     eps     = 1e-10
     ret_c   = np.diff(close, prepend=close[0]) / (close + eps)
@@ -934,49 +934,80 @@ def _make_features(df: pd.DataFrame, symbol: str = "", trading_type: str = "day_
         logger.warning(f"News filter unavailable for {symbol}, news_flag zeroed: {_news_exc}")
         news_flag = np.zeros(len(close))
 
-    # ATR(14) normalised by close — volatility regime indicator (7th feature)
-    prev_close = np.concatenate([[close[0]], close[:-1]])
-    tr = np.maximum(high - low, np.maximum(
-        np.abs(high - prev_close),
-        np.abs(low  - prev_close),
-    ))
-    atr14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
+    # ATR(14) normalized by close — volatility regime indicator (7th feature)
+    prev_close = np.concatenate(([float(close[0])], close[:-1]))
+    tr = np.maximum(
+        high - low,
+        np.maximum(
+            np.abs(high - prev_close),
+            np.abs(low - prev_close),
+        ),
+    )
+
+    atr14 = (
+        pd.Series(tr, dtype="float64")
+        .rolling(14, min_periods=1)
+        .mean()
+        .to_numpy(dtype=float)
+    )
     atr_n = atr14 / (close + eps)
 
-    # ── Feature 7: EMA50/200 spread normalised by close ──────────────────
-    # Captures trend context: positive = bullish alignment, negative = bearish
-    _close_s = pd.Series(close)
-    ema50  = _close_s.ewm(span=50,  adjust=False).mean().values
-    ema200 = _close_s.ewm(span=200, adjust=False).mean().values
+    # Feature 7: EMA50/200 spread normalized by close
+    close_s = pd.Series(close, dtype="float64")
+    ema50 = close_s.ewm(span=50, adjust=False).mean().to_numpy(dtype=float)
+    ema200 = close_s.ewm(span=200, adjust=False).mean().to_numpy(dtype=float)
     ema_spread = (ema50 - ema200) / (close + eps)
 
-    # ── Feature 8: RSI(14) normalised to [0, 1] ──────────────────────────
-    delta  = np.diff(close, prepend=close[0])
-    gain   = np.where(delta > 0, delta, 0.0)
-    loss   = np.where(delta < 0, -delta, 0.0)
-    avg_gain = pd.Series(gain).ewm(com=13, adjust=False).mean().values
-    avg_loss = pd.Series(loss).ewm(com=13, adjust=False).mean().values
-    rs       = avg_gain / (avg_loss + eps)
-    rsi14    = 1.0 - 1.0 / (1.0 + rs)  # [0, 1] directly (avoid /100 then /100)
+    # Feature 8: RSI(14) normalized to [0, 1]
+    delta = np.diff(close, prepend=float(close[0]))
+    gain = np.where(delta > 0, delta, 0.0)
+    loss = np.where(delta < 0, -delta, 0.0)
 
-    # ── Feature 9: MACD histogram normalised by ATR14 ────────────────────
-    ema12   = _close_s.ewm(span=12, adjust=False).mean().values
-    ema26   = _close_s.ewm(span=26, adjust=False).mean().values
-    macd    = ema12 - ema26
-    signal9 = pd.Series(macd).ewm(span=9, adjust=False).mean().values
-    hist    = macd - signal9
-    macd_n  = hist / (atr14 + eps)  # normalise by volatility to be scale-invariant
+    avg_gain = (
+        pd.Series(gain, dtype="float64")
+        .ewm(com=13, adjust=False)
+        .mean()
+        .to_numpy(dtype=float)
+    )
+    avg_loss = (
+        pd.Series(loss, dtype="float64")
+        .ewm(com=13, adjust=False)
+        .mean()
+        .to_numpy(dtype=float)
+    )
 
-    # ── Feature 10: Bollinger Band position ──────────────────────────────
-    bb_mid   = _close_s.rolling(20, min_periods=1).mean().values
-    bb_std20 = _close_s.rolling(20, min_periods=1).std(ddof=0).fillna(0).values
-    bb_upper = bb_mid + 2.0 * bb_std20
-    bb_lower = bb_mid - 2.0 * bb_std20
-    bb_range = (bb_upper - bb_lower) + eps
-    bb_pos   = (close - bb_lower) / bb_range  # 0.0 = at lower band, 1.0 = at upper band
-    bb_pos   = np.clip(bb_pos, 0.0, 1.0)      # clamp outside-band excursions to [0,1]
+    rs = avg_gain / (avg_loss + eps)
+    rsi14 = 1.0 - 1.0 / (1.0 + rs)
 
-    # ── Feature 11: lower wick ────────────────────────────────────────────
+    # Feature 9: MACD histogram normalized by ATR14
+    ema12 = close_s.ewm(span=12, adjust=False).mean().to_numpy(dtype=float)
+    ema26 = close_s.ewm(span=26, adjust=False).mean().to_numpy(dtype=float)
+    macd = ema12 - ema26
+    signal9 = (
+        pd.Series(macd, dtype="float64")
+        .ewm(span=9, adjust=False)
+        .mean()
+        .to_numpy(dtype=float)
+    )
+    hist = macd - signal9
+    macd_n = hist / (atr14 + eps)
+
+    # Feature 10: Bollinger Band position
+    bb_mid = close_s.rolling(20, min_periods=1).mean().to_numpy(dtype=float)
+    bb_std20 = (
+        close_s.rolling(20, min_periods=1)
+        .std(ddof=0)
+        .fillna(0)
+        .to_numpy(dtype=float)
+    )
+
+    bb_upper = bb_mid + (2.0 * bb_std20)
+    bb_lower = bb_mid - (2.0 * bb_std20)
+    bb_range = bb_upper - bb_lower + eps
+    bb_pos = (close - bb_lower) / bb_range
+    bb_pos = np.clip(bb_pos, 0.0, 1.0)
+
+    # Feature 11: lower wick
     lower_wick = (close - low) / (close + eps)
 
     return np.column_stack([

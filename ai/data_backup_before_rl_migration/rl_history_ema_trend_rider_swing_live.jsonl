@@ -1,2 +1,0 @@
-{"timestamp": "2026-05-05T07:37:00.016217+00:00", "strategy_name": "ema_trend_rider", "trading_type": "swing", "mode": "live", "conf_thresh": 0.5, "risk_factor": 0.65, "n_updates": 136, "last_state": "low_med_active_high_wide"}
-{"timestamp": "2026-05-05T13:08:27.053664+00:00", "strategy_name": "ema_trend_rider", "trading_type": "swing", "mode": "live", "conf_thresh": 0.5, "risk_factor": 0.65, "n_updates": 137, "last_state": "low_med_overlap_high_wide"}

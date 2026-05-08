@@ -461,16 +461,37 @@ class OrderManager:
             )
             return OrderResult(success=False, error=err)
 
+        confirmed_pos = self._confirm_open_position(
+            symbol=req.symbol,
+            direction=req.direction,
+            magic=req.magic,
+            comment=req.comment,
+            result_order=getattr(result, "order", None),
+        )
+
+        if confirmed_pos is None:
+            err = (
+                f"Order retcode DONE but no confirmed MT5 position found "
+                f"symbol={req.symbol} direction={req.direction} order={getattr(result, 'order', None)} "
+                f"deal={getattr(result, 'deal', None)}"
+            )
+            logger.error(err)
+            return OrderResult(success=False, error=err)
+
+        position_ticket = int(confirmed_pos.ticket)
+        open_price = float(confirmed_pos.price_open or result.price)
+
         logger.info(
-            f"Order placed | #{result.order} | {req.symbol} {req.direction} "
-            f"{req.volume} lots | Entry: {result.price} | SL: {sl} | TP: {tp} | "
+            f"Order placed | #{position_ticket} | {req.symbol} {req.direction} "
+            f"{req.volume} lots | Entry: {open_price} | SL: {sl} | TP: {tp} | "
             f"Execution: {execution_time_ms}ms"
             + (f" | Slippage: {slippage:.5f}" if slippage else "")
         )
+
         return OrderResult(
             success=True,
-            ticket=result.order,
-            open_price=result.price,
+            ticket=position_ticket,
+            open_price=open_price,
             execution_time_ms=execution_time_ms,
             slippage=slippage,
             spread_pips=_captured_spread_pips,
@@ -648,6 +669,27 @@ class OrderManager:
             err = result.comment if result else str(_mt5_last_error())
             logger.error(f"close_position #{ticket} failed: {err}")
             return False
+        
+        deal = self._get_deal_by_ticket(
+            int(getattr(result, "deal", 0) or 0)
+        )
+
+        if deal is None:
+            logger.error(
+                f"close_position #{ticket}: MT5 returned DONE but close deal not found "
+                f"deal={getattr(result, 'deal', None)} — journal skipped"
+            )
+            return True
+
+        from datetime import datetime, timezone
+
+        close_time = datetime.fromtimestamp(
+            float(getattr(deal, "time", 0.0) or 0.0),
+            tz=timezone.utc,
+        ).isoformat()
+        close_profit = float(getattr(deal, "profit", 0.0) or 0.0)
+        close_swap = float(getattr(deal, "swap", 0.0) or 0.0)
+        close_commission = float(getattr(deal, "commission", 0.0) or 0.0)
 
         logger.info(
             f"Position closed | #{ticket} | {pos.symbol} | "
@@ -660,7 +702,6 @@ class OrderManager:
         try:
             from engine.trade_journal import trade_journal
             from engine.account_store import current_mode, current_account_login
-            from datetime import datetime, timezone
             trade_journal.log(
                 ticket=ticket,
                 symbol=pos.symbol,
@@ -669,13 +710,15 @@ class OrderManager:
                 entry=pos.price_open,
                 sl=pos.sl,
                 tp=pos.tp if pos.tp else None,
-                profit=pos.profit,
                 trading_type=trading_type,
                 account_mode=_normalize_account_mode(current_mode()),
                 comment=reason,
                 strategy=pos.comment or reason,
                 event="close",
-                close_time=datetime.now(tz=timezone.utc).isoformat(),
+                profit=close_profit,
+                close_time=close_time,
+                swap=close_swap,
+                commission=close_commission,
                 account_login=current_account_login(),
                 account_type=_normalize_account_mode(current_mode()),
                 user_id="default",
@@ -817,21 +860,25 @@ class OrderManager:
             from engine.account_store import current_mode, current_account_login
             from datetime import datetime, timezone
 
-            _partial_profit: float | None = None
-            _partial_swap: float | None = None
-            _partial_commission: float | None = None
-            try:
-                deal_ticket = int(getattr(result, "deal", 0) or 0)
+            deal = self._get_deal_by_ticket(int(getattr(result, "deal", 0) or 0))
 
-                if deal_ticket > 0:
-                    _deals = _mt5_history_deals_get(ticket=deal_ticket)
-                    if _deals:
-                        _partial_profit = float(_deals[0].profit)
-                        _partial_swap = float(_deals[0].swap)
-                        _partial_commission = float(_deals[0].commission)
-            except Exception:
-                pass
-            account_mode = str(current_mode() or "live")
+            if deal is None:
+                logger.error(
+                    f"partial_close #{ticket}: MT5 returned DONE but partial close deal not found "
+                    f"deal={getattr(result, 'deal', None)} — journal skipped"
+                )
+                return True
+
+            _partial_profit = float(getattr(deal, "profit", 0.0) or 0.0)
+            _partial_swap = float(getattr(deal, "swap", 0.0) or 0.0)
+            _partial_commission = float(getattr(deal, "commission", 0.0) or 0.0)
+            close_time = datetime.fromtimestamp(
+                float(getattr(deal, "time", 0.0) or 0.0),
+                tz=timezone.utc,
+            ).isoformat()
+
+
+            account_mode = _normalize_account_mode(current_mode())
             account_login = int(current_account_login() or 0)
 
             trade_journal.log(
@@ -847,10 +894,10 @@ class OrderManager:
                 account_type=account_mode,
                 user_id="default",
                 strategy=pos.comment or reason,
-                account_mode = _normalize_account_mode(current_mode()),
+                account_mode=account_mode,
                 comment=reason,
                 event="partial_close",
-                close_time=datetime.now(tz=timezone.utc).isoformat(),
+                close_time=close_time,
                 swap=_partial_swap,
                 commission=_partial_commission,
                 account_login=account_login,
@@ -886,3 +933,53 @@ class OrderManager:
                 # No mode info — fall back to blocking any bot position on this symbol/dir
                 return True
         return False
+    
+    def _get_deal_by_ticket(self, deal_ticket: int):
+        if not deal_ticket:
+            return None
+
+        with self._client._lock:
+            deals = _mt5_history_deals_get(ticket=deal_ticket)
+
+        if deals:
+            return deals[0]
+
+        return None
+
+
+    def _confirm_open_position(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        magic: int,
+        comment: str,
+        result_order: int | None,
+    ):
+        order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+
+        # First try direct ticket lookup.
+        if result_order:
+            with self._client._lock:
+                direct = _mt5_positions_get(ticket=result_order)
+            if direct:
+                return direct[0]
+
+        # Fallback: find matching live position by broker facts.
+        with self._client._lock:
+            positions = _mt5_positions_get(symbol=symbol)
+
+        if not positions:
+            return None
+
+        candidates = [
+            p for p in positions
+            if p.magic == magic
+            and p.type == order_type
+            and str(p.comment or "") == str(comment or "")[:31]
+        ]
+
+        if candidates:
+            return sorted(candidates, key=lambda p: int(getattr(p, "time", 0) or 0), reverse=True)[0]
+
+        return None

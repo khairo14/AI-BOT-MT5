@@ -1,2 +1,0 @@
-{"timestamp": "2026-05-07T19:10:27.437916+00:00", "strategy_name": "fibonacci_rsi", "trading_type": "swing", "mode": "demo", "conf_thresh": 0.55, "risk_factor": 1.0, "n_updates": 1, "last_state": "med_low_active_low_tight"}
-{"timestamp": "2026-05-08T01:30:28.191314+00:00", "strategy_name": "fibonacci_rsi", "trading_type": "swing", "mode": "demo", "conf_thresh": 0.55, "risk_factor": 1.0, "n_updates": 2, "last_state": "med_low_quiet_low_tight"}

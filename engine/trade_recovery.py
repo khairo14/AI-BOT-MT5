@@ -396,6 +396,33 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
         comment = pos.get("comment", "")
         trading_type = _trading_type_from_comment(comment)
 
+        # Only recover EVOTRADE-managed positions.
+        # Prevent manual/external MT5 positions from creating
+        # ghost journal/lifecycle rows.
+        try:
+            from engine.order_manager import BOT_MAGIC
+        except Exception:
+            BOT_MAGIC = None
+
+        pos_magic = pos.get("magic")
+        comment_text = str(comment or "")
+
+        if BOT_MAGIC is not None and pos_magic != BOT_MAGIC:
+            logger.info(
+                "Recovery: skipping non-bot position #%s magic=%s",
+                ticket,
+                pos_magic,
+            )
+            continue
+
+        if not comment_text.lower().startswith(("scalp", "day", "swing")):
+            logger.info(
+                "Recovery: skipping unknown-comment position #%s comment=%s",
+                ticket,
+                comment_text,
+            )
+            continue
+
         source = enrich_with_trade_identity({
             "account_mode": current_mode(),
             "account_login": current_account_login(),

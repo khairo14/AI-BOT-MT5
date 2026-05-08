@@ -1,1 +1,0 @@
-{"timestamp": "2026-05-05T13:09:00.506707+00:00", "strategy_name": "fibonacci_rsi", "trading_type": "swing", "mode": "live", "conf_thresh": 0.55, "risk_factor": 0.8999999999999999, "n_updates": 271, "last_state": "low_med_overlap_high_wide"}

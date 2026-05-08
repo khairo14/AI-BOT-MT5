@@ -1,5 +1,0 @@
-{"timestamp": "2026-05-07T19:10:27.390330+00:00", "strategy_name": "sr_breakout", "trading_type": "day_trading", "mode": "demo", "conf_thresh": 0.55, "risk_factor": 1.0, "n_updates": 1, "last_state": "med_low_active_low_tight"}
-{"timestamp": "2026-05-07T19:10:27.404849+00:00", "strategy_name": "sr_breakout", "trading_type": "day_trading", "mode": "demo", "conf_thresh": 0.55, "risk_factor": 1.0, "n_updates": 2, "last_state": "high_low_active_low_tight"}
-{"timestamp": "2026-05-07T19:10:27.421393+00:00", "strategy_name": "sr_breakout", "trading_type": "day_trading", "mode": "demo", "conf_thresh": 0.53, "risk_factor": 0.95, "n_updates": 3, "last_state": "med_low_active_low_tight"}
-{"timestamp": "2026-05-08T01:30:28.164799+00:00", "strategy_name": "sr_breakout", "trading_type": "day_trading", "mode": "demo", "conf_thresh": 0.53, "risk_factor": 0.95, "n_updates": 4, "last_state": "med_low_quiet_low_tight"}
-{"timestamp": "2026-05-08T01:30:28.178810+00:00", "strategy_name": "sr_breakout", "trading_type": "day_trading", "mode": "demo", "conf_thresh": 0.53, "risk_factor": 0.95, "n_updates": 5, "last_state": "low_low_quiet_low_wide"}
