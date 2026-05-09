@@ -123,17 +123,33 @@ export const patchAppConfig = (patch: Record<string, unknown>) =>
 
 // ── Trade Journal (Phase 9) ------------------------------------------------
 export const fetchTradeJournal = (
-  account: "demo" | "live" | "all" = "all",
-  tradingType?: TradingMode,
-  limit = 50
-): Promise<{ entries: JournalEntry[]; count: number }> => {
-  const params = new URLSearchParams({ account, limit: String(limit) });
-  if (tradingType) params.set("trading_type", tradingType);
+  account?: "all" | "demo" | "live",
+  event?: string,
+  limit = 100,
+  accountLogin?: number
+): Promise<{ entries: JournalEntry[] }> => {
+  const params = new URLSearchParams();
+
+  if (account) params.set("account", account);
+  if (event) params.set("event", event);
+  if (limit) params.set("limit", String(limit));
+  if (accountLogin) params.set("account_login", String(accountLogin));
+
   return api.get(`/trades/journal?${params.toString()}`).then((r) => r.data);
 };
 
-export const fetchJournalStats = (): Promise<JournalStatsResponse> =>
-  api.get("/trades/journal/stats").then((r) => r.data);
+export const fetchJournalStats = (
+  account?: "all" | "demo" | "live",
+  accountLogin?: number
+): Promise<JournalStatsResponse> => {
+  const params = new URLSearchParams();
+
+  if (account) params.set("account", account);
+  if (accountLogin) params.set("account_login", String(accountLogin));
+
+  const qs = params.toString();
+  return api.get(`/trades/journal/stats${qs ? `?${qs}` : ""}`).then((r) => r.data);
+};
 
 // -- Logs ------------------------------------------------------------------
 export const fetchLogTail = (n = 200): Promise<{ lines: string[] }> =>
