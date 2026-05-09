@@ -129,7 +129,8 @@ export default function ScannerPage() {
     setScanning(true);
     try {
       await triggerScan(tradingType, true);
-      await loadData(true);
+      await loadData(false);
+      await loadHealth();
     } catch (err) {
       console.error("Scan failed:", err);
     } finally {
@@ -252,7 +253,7 @@ export default function ScannerPage() {
               </div>
             )}
             <button
-              onClick={() => loadData(true)}
+              onClick={() => loadData(false)}
               disabled={scanning || loading}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
             >

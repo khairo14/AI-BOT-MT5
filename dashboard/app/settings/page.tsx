@@ -109,7 +109,7 @@ export default function SettingsPage() {
   const [riskSaved, setRiskSaved] = useState(false);
 
   // App / trading mode
-  const [tradingMode, setTradingMode] = useState<"paper" | "live">("paper");
+  const [tradingMode, setTradingMode] = useState<"demo" | "live">("demo");
   const [newsFilter, setNewsFilter] = useState(true);
   const [sessionFilter, setSessionFilter] = useState(true);
   const [appSaving, setAppSaving] = useState(false);
@@ -145,7 +145,7 @@ export default function SettingsPage() {
       ]);
       setExecModes(exec);
       setRisk(riskData as unknown as Record<string, unknown>);
-      setTradingMode((modeData as { mode: "paper" | "live" }).mode ?? "paper");
+      setTradingMode((modeData as { mode: "demo" | "live" }).mode ?? "demo");
       const nf = (riskData as unknown as Record<string, unknown>).news_filter as Record<string, unknown> | undefined;
       const sf = (riskData as unknown as Record<string, unknown>).session_filter as Record<string, unknown> | undefined;
       setNewsFilter((nf?.enabled as boolean) ?? true);
@@ -579,7 +579,7 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between pt-2">
           <span className="text-sm text-gray-400">Active trading mode</span>
           <div className="flex rounded-lg overflow-hidden border border-gray-700">
-            {(["paper", "live"] as const).map((m) => (
+            {(["demo", "live"] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => setTradingMode(m)}

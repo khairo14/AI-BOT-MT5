@@ -2,18 +2,18 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchJournalStats, fetchTradeJournal, fetchPositions} from "@/lib/api";
 import type { JournalStatsResponse, JournalEntry } from "@/types";
-type AccountFilter = "all" | "paper" | "live";
-type StatsMode = "paper" | "live";
+type AccountFilter = "all" | "demo" | "live";
+type StatsMode = "demo" | "live";
 
-const STATS_MODES: StatsMode[] = ["paper", "live"];
+const STATS_MODES: StatsMode[] = ["demo", "live"];
 
 const MODE_LABELS: Record<StatsMode, string> = {
-  paper: "Paper / Demo",
+  demo: "Demo",
   live: "Live",
 };
 
 const MODE_COLORS: Record<StatsMode, string> = {
-  paper: "text-emerald-400",
+  demo: "text-emerald-400",
   live: "text-red-400",
 };
 
@@ -138,7 +138,7 @@ export default function AccountPanel() {
           <div className="flex items-center gap-3">
             {/* Filter tabs */}
             <div className="flex gap-1 text-xs">
-              {(["all", "paper", "live"] as const).map((a) => (
+              {(["all", "demo", "live"] as const).map((a) => (
                 <button
                   key={a}
                   onClick={() => setAccount(a)}
@@ -148,7 +148,7 @@ export default function AccountPanel() {
                       : "bg-gray-800 text-gray-400 hover:text-white"
                   }`}
                 >
-                  {a === "all" ? "All" : a === "paper" ? "Paper / Demo" : "Live"}
+                  {a === "all" ? "All" : a === "demo" ? "Demo" : "Live"}
                 </button>
               ))}
             </div>

@@ -23,7 +23,7 @@ export const api = axios.create({ baseURL: BASE, timeout: 10_000 });
 export const fetchAccount = (): Promise<AccountInfo> =>
   api.get("/account/").then((r) => r.data);
 
-export const fetchAccountMode = (): Promise<{ mode: "paper" | "live"; login: number; type: string }> =>
+export const fetchAccountMode = (): Promise<{ mode: "demo" | "live"; login: number; type: string }> =>
   api.get("/account/mode").then((r) => r.data);
 
 // NEW: Fetch all configured MT5 accounts
@@ -123,7 +123,7 @@ export const patchAppConfig = (patch: Record<string, unknown>) =>
 
 // ── Trade Journal (Phase 9) ------------------------------------------------
 export const fetchTradeJournal = (
-  account: "paper" | "live" | "all" = "all",
+  account: "demo" | "live" | "all" = "all",
   tradingType?: TradingMode,
   limit = 50
 ): Promise<{ entries: JournalEntry[]; count: number }> => {
@@ -155,18 +155,37 @@ export const fetchRLHistory = (tradingType: "scalping" | "day_trading" | "swing"
   return api.get(`/ai/rl/history/${tradingType}?${params}`).then((r) => r.data);
 };
 
-export const fetchRLWinRateByState = (tradingType: "scalping" | "day_trading" | "swing", minSamples = 5, strategyName?: string) => {
+export const fetchRLWinRateByState = (
+  tradingType: "scalping" | "day_trading" | "swing",
+  minSamples = 5,
+  strategyName?: string,
+  accountLogin?: number
+) => {
   const params = new URLSearchParams({ min_samples: String(minSamples) });
+
   if (strategyName) params.set("strategy_name", strategyName);
-  return api.get(`/ai/rl/win-rate-by-state/${tradingType}?${params}`).then((r) => r.data);
+  if (accountLogin) params.set("account_login", String(accountLogin));
+
+  return api
+    .get(`/ai/rl/win-rate-by-state/${tradingType}?${params.toString()}`)
+    .then((r) => r.data);
 };
+
 
 export const resetRLAgent = (trading_type: string) =>
   api.post(`/ai/rl/reset/${trading_type}`).then((r) => r.data);
 
-export const fetchMemoryStats = (tradingType?: string) => {
-  const params = tradingType ? `?trading_type=${tradingType}` : "";
-  return api.get(`/ai/memory/stats${params}`).then((r) => r.data);
+export const fetchMemoryStats = (
+  tradingType?: string,
+  accountLogin?: number
+) => {
+  const params = new URLSearchParams();
+
+  if (tradingType) params.set("trading_type", tradingType);
+  if (accountLogin) params.set("account_login", String(accountLogin));
+
+  const qs = params.toString();
+  return api.get(`/ai/memory/stats${qs ? `?${qs}` : ""}`).then((r) => r.data);
 };
 
 export const fetchOptimizerStatus = () =>
@@ -224,7 +243,7 @@ export const markAllNotificationsRead = () =>
 import type { ExecutionQualityMetrics } from "@/types";
 
 export const fetchExecutionQuality = (
-  account: "paper" | "live" | "all" = "all",
+  account: "demo" | "live" | "all" = "all",
   tradingType: "scalping" | "day_trading" | "swing" | "all" = "all",
 ): Promise<ExecutionQualityMetrics> => {
   const params = new URLSearchParams({ account });
@@ -417,7 +436,7 @@ export interface ScanSummary {
 }
 
 export const fetchScanResults = (forceRefresh = false): Promise<{ status: string; data: ScanSummary }> =>
-  api.get(`/scanner/?force_refresh=${forceRefresh}`).then((r) => r.data);
+  api.get(`/scanner/?force_refresh=${forceRefresh}`, { timeout: 60_000 }).then((r) => r.data);
 
 export const fetchScanByType = (
   tradingType: "scalping" | "day_trading" | "swing",
@@ -426,7 +445,7 @@ export const fetchScanByType = (
   api.get(`/scanner/type/${tradingType}?force_refresh=${forceRefresh}`).then((r) => r.data);
 
 export const triggerScan = (tradingType?: string, forceRefresh = true) =>
-  api.post("/scanner/scan", { trading_type: tradingType, force_refresh: forceRefresh }).then((r) => r.data);
+  api.post("/scanner/scan", { trading_type: tradingType, force_refresh: forceRefresh }, { timeout: 60_000 }).then((r) => r.data);
 
 export const fetchScannerCacheStatus = () =>
   api.get("/scanner/cache").then((r) => r.data);
@@ -443,7 +462,7 @@ export const fetchScannerSystemConfig = () =>
 export const fetchScannerHealth = () =>
   api.get("/scanner/health").then((r) => r.data);
 
-export const fetchScannerPerformance = (account: "paper" | "live" | "all" = "all"): Promise<{
+export const fetchScannerPerformance = (account: "demo" | "live" | "all" = "all"): Promise<{
   status: string;
   timestamp: string;
   trading_types: Record<string, {
@@ -469,7 +488,7 @@ export const fetchScannerPerformance = (account: "paper" | "live" | "all" = "all
 
 // ── Analytics ---------------------------------------------------------------
 export const fetchAnalyticsPerformance = (
-  account: "paper" | "live" | "all" = "all",
+  account: "demo" | "live" | "all" = "all",
   tradingType: "scalping" | "day_trading" | "swing" | "all" = "all",
   limit = 5000,
 ): Promise<AnalyticsPerformance> => {
@@ -556,11 +575,43 @@ export const fetchProfitabilityStatus = (): Promise<{
 export const fetchRegimeStatus = (): Promise<{ regimes: Record<string, string> }> =>
   api.get("/analytics/regime/status").then((r) => r.data);
 
-export const fetchLstmCalibration = (minSamples = 5) =>
-  api.get(`/ai/lstm/calibration?min_samples=${minSamples}`).then((r) => r.data);
+export const fetchLstmCalibration = (
+  minSamples = 5,
+  tradingType?: string,
+  accountLogin?: number
+) => {
+  const params = new URLSearchParams({ min_samples: String(minSamples) });
 
-export const fetchLstmAccuracyHistory = (tradingType?: string, days = 30) =>
-  api.get(`/ai/lstm/accuracy/history?days=${days}${tradingType ? `&trading_type=${tradingType}` : ""}`).then((r) => r.data);
+  if (tradingType) params.set("trading_type", tradingType);
+  if (accountLogin) params.set("account_login", String(accountLogin));
 
-export const fetchLstmConfidenceDistribution = (tradingType?: string) =>
-  api.get(`/ai/lstm/confidence-distribution${tradingType ? `?trading_type=${tradingType}` : ""}`).then((r) => r.data);
+  return api.get(`/ai/lstm/calibration?${params.toString()}`).then((r) => r.data);
+};
+
+export const fetchLstmAccuracyHistory = (
+  tradingType?: string,
+  days = 30,
+  accountLogin?: number
+) => {
+  const params = new URLSearchParams({ days: String(days) });
+
+  if (tradingType) params.set("trading_type", tradingType);
+  if (accountLogin) params.set("account_login", String(accountLogin));
+
+  return api.get(`/ai/lstm/accuracy/history?${params.toString()}`).then((r) => r.data);
+};
+
+export const fetchLstmConfidenceDistribution = (
+  tradingType?: string,
+  accountLogin?: number
+) => {
+  const params = new URLSearchParams();
+
+  if (tradingType) params.set("trading_type", tradingType);
+  if (accountLogin) params.set("account_login", String(accountLogin));
+
+  const qs = params.toString();
+  return api
+    .get(`/ai/lstm/confidence-distribution${qs ? `?${qs}` : ""}`)
+    .then((r) => r.data);
+};

@@ -25,9 +25,9 @@ import {
 //  helpers 
 function relTime(iso: string | undefined): string {
   if (!iso) return "—";
-  // Normalise malformed ISO strings like "2026-03-20T21:42:17+00:00Z" (extra Z after offset)
-  const normalised = iso.replace(/([+-]\d{2}:\d{2})Z$/, "$1");
-  const d = new Date(normalised);
+  // Normalize malformed ISO strings like "2026-03-20T21:42:17+00:00Z" (extra Z after offset)
+  const normalized = iso.replace(/([+-]\d{2}:\d{2})Z$/, "$1");
+  const d = new Date(normalized);
   if (isNaN(d.getTime())) return "—";
   const diff = Date.now() - d.getTime();
   const m = Math.floor(diff / 60_000);
@@ -141,7 +141,7 @@ export default function MLPage() {
   const [rlInsightsDays, setRlInsightsDays] = useState(7);
   const [rlInsightsStrategy, setRlInsightsStrategy] = useState("sr_breakout");
   const [memStats, setMemStats] = useState<Record<string, MemStats>>({});
-  const [accountMode, setAccountMode] = useState<"paper" | "live" | null>(null);
+  const [accountMode, setAccountMode] = useState<"demo" | "live" | null>(null);
   const [optStatus, setOptStatus] = useState<OptimizerStatus>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
@@ -186,19 +186,23 @@ export default function MLPage() {
 
   const load = useCallback(async () => {
     try {
-      const [ai, rl, rlHist, rlStates, opt, appCfg, cal, accHist, confDist, acctMode, ...mems] = await Promise.allSettled([
+      const acct = await fetchAccountMode();
+      const currentLogin = Number(acct?.login || 0) || undefined;
+
+      const [ai, rl, rlHist, rlStates, opt, appCfg, cal, accHist, confDist, ...mems] = await Promise.allSettled([
         fetchAIStatus(),
         fetchRLStatus(),
         fetchRLHistory(rlInsightsMode, rlInsightsDays, rlInsightsStrategy),
-        fetchRLWinRateByState(rlInsightsMode, 1, rlInsightsStrategy),
+        fetchRLWinRateByState(rlInsightsMode, 1, rlInsightsStrategy, currentLogin),
         fetchOptimizerStatus(),
         fetchAppConfig(),
-        fetchLstmCalibration(5),
-        fetchLstmAccuracyHistory(undefined, 30),
-        fetchLstmConfidenceDistribution(),
-        fetchAccountMode(),
-        ...MODES.map((m) => fetchMemoryStats(m)),
+        fetchLstmCalibration(5, undefined, currentLogin),
+        fetchLstmAccuracyHistory(undefined, 30, currentLogin),
+        fetchLstmConfidenceDistribution(undefined, currentLogin),
+        ...MODES.map((m) => fetchMemoryStats(m, currentLogin)),
       ]);
+
+      setAccountMode(acct?.mode ?? null);
       if (ai.status === "fulfilled") setAiStatus(ai.value ?? {});
       if (rl.status === "fulfilled") setRlStatus(rl.value ?? {});
       if (rlHist.status === "fulfilled") setRlHistory((rlHist.value as RLHistory) ?? {});
@@ -243,7 +247,6 @@ export default function MLPage() {
           }
         }
       }
-      if (acctMode.status === "fulfilled") setAccountMode(acctMode.value?.mode ?? null);
       const statsMap: Record<string, MemStats> = {};
       MODES.forEach((m, i) => {
         const r = mems[i];
@@ -970,7 +973,7 @@ export default function MLPage() {
                 ? "bg-emerald-900 text-emerald-300"
                 : "bg-amber-900 text-amber-300"
             }`}>
-              {accountMode === "live" ? "Live" : "Paper (Demo)"}
+              {accountMode === "live" ? "Live" : "Demo"}
             </span>
           )}
         </div>

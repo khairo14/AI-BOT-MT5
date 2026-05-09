@@ -45,7 +45,7 @@ export default function ProfitabilityPage() {
   const [report, setReport] = useState<ProfitabilityReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<number | null>(null);
-  const [selectedAccount, setSelectedAccount] = useState<"all" | "paper" | "live">("all");
+  const [selectedAccount, setSelectedAccount] = useState<"all" | "demo" | "live">("all");
   const [selectedAccountLogin, setSelectedAccountLogin] = useState<number | null>(null);
   const [accounts, setAccounts] = useState<Array<{ login: number; server: string; type: string; broker_name?: string }>>([]);
   const [exporting, setExporting] = useState(false);
@@ -167,11 +167,11 @@ export default function ProfitabilityPage() {
             {/* Account mode filter */}
             <select
               value={selectedAccount}
-              onChange={(e) => setSelectedAccount(e.target.value as "all" | "paper" | "live")}
+              onChange={(e) => setSelectedAccount(e.target.value as "all" | "demo" | "live")}
               className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm"
             >
               <option value="all">All Modes</option>
-              <option value="paper">Paper Only</option>
+              <option value="demo">Demo Only</option>
               <option value="live">Live Only</option>
             </select>
 

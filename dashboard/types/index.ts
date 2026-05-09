@@ -12,12 +12,12 @@ export interface AccountInfo {
   leverage: number;
 
   // Backend runtime identity:
-  // demo/paper = broker demo account
+  // demo = broker demo account
   // live = real account
-  mode: "demo" | "paper" | "live";
+  mode: "demo" | "live";
 
   // New backend field from /account/
-  account_type?: "demo" | "paper" | "live";
+  account_type?: "demo" | "live";
 }
 
 // ── OHLCV ──────────────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ export interface PlaceOrderRequest {
 export type ExecutionMode = "manual" | "auto";
 
 export interface AppConfig {
-  trading_mode: "paper" | "live";
+  trading_mode: "demo" | "live";
   execution_mode: {
     scalping: ExecutionMode;
     day_trading: ExecutionMode;
@@ -139,7 +139,7 @@ export interface RiskConfig {
 }
 
 // ── Trade Journal (Phase 9) ────────────────────────────────────────────────
-export type AccountMode = "paper" | "live";
+export type AccountMode = "demo" | "live";
 
 export interface JournalEntry {
   ticket: number;
@@ -173,7 +173,7 @@ export interface JournalStats {
 }
 
 export interface JournalStatsResponse {
-  paper: JournalStats;
+  demo: JournalStats;
   live: JournalStats;
   all: JournalStats;
 }

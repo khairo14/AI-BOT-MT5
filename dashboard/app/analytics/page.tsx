@@ -31,7 +31,7 @@ function ratioColor(v: number): string {
 
 const SECTION_TABS  = ["overview", "execution"] as const;
 const SECTION_LABELS: Record<string, string> = { overview: "Overview", execution: "Execution Quality" };
-const ACCOUNT_TABS  = ["paper", "live", "all"] as const;
+const ACCOUNT_TABS  = ["demo", "live", "all"] as const;
 const MODE_TABS     = ["all", "scalping", "day_trading", "swing"] as const;
 const MODE_LABELS: Record<string, string> = {
   all: "All Modes", scalping: "Scalping", day_trading: "Day Trading", swing: "Swing"
@@ -402,7 +402,7 @@ function ExecutionQualityPanel({ metrics }: { metrics: ExecutionQualityMetrics |
 export default function AnalyticsPage() {
   const { account: currentAccount } = useBotStore();
   const [sectionTab, setSectionTab] = useState<typeof SECTION_TABS[number]>("overview");
-  const [accountTab, setAccountTab]  = useState<typeof ACCOUNT_TABS[number]>("paper");
+  const [accountTab, setAccountTab]  = useState<typeof ACCOUNT_TABS[number]>("demo");
   const [modeTab,    setModeTab]     = useState<typeof MODE_TABS[number]>("all");
   const [selectedAccountLogin, setSelectedAccountLogin] = useState<number | null>(null);
   const [accounts, setAccounts] = useState<Array<{ login: number; type: string }>>([]);

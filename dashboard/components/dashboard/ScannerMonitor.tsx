@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { fetchScannerPerformance } from "@/lib/api";
 import { useBotStore } from "@/lib/store";
 
-type AccountFilter = "paper" | "live" | "all";
+type AccountFilter = "demo" | "live" | "all";
 
 interface PairStat {
   symbol: string;
@@ -38,13 +38,13 @@ function normalizeAccountFilter(mode?: string | null): AccountFilter {
   const normalized = String(mode || "").toLowerCase();
 
   if (normalized === "live") return "live";
-  if (normalized === "demo" || normalized === "paper") return "paper";
+  if (normalized === "demo") return "demo";
 
-  return "paper";
+  return "demo";
 }
 
 function accountFilterLabel(filter: AccountFilter) {
-  if (filter === "paper") return "Demo";
+  if (filter === "demo") return "Demo";
   if (filter === "live") return "Live";
   return "All";
 }
@@ -120,7 +120,7 @@ export default function ScannerMonitor() {
 
         <div className="flex items-center gap-3">
           <div className="flex gap-1 bg-gray-800 rounded-lg p-0.5">
-            {(["paper", "live", "all"] as const).map((opt) => (
+            {(["demo", "live", "all"] as const).map((opt) => (
               <button
                 key={opt}
                 onClick={() => setAccountFilter(opt)}
@@ -128,7 +128,7 @@ export default function ScannerMonitor() {
                   accountFilter === opt
                     ? opt === "live"
                       ? "bg-red-600 text-white"
-                      : opt === "paper"
+                      : opt === "demo"
                         ? "bg-emerald-600 text-white"
                         : "bg-blue-600 text-white"
                     : "text-gray-400 hover:text-white"

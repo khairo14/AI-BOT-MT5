@@ -35,11 +35,20 @@ function money(value?: number | null, currency = "USD") {
 }
 
 function normalizeAccountMode(account: AccountInfo | null) {
-  const rawMode = String(
-    account?.account_type || account?.mode || ""
-  ).toLowerCase();
+  const modeFields = account as
+    | (AccountInfo & { account_mode?: string | null })
+    | null;
 
-  if (rawMode === "demo" || rawMode === "paper") return "demo";
+  const rawMode = String(
+    modeFields?.account_type ||
+      modeFields?.account_mode ||
+      modeFields?.mode ||
+      ""
+  )
+    .toLowerCase()
+    .trim();
+
+  if (rawMode === "demo") return "demo";
   if (rawMode === "live") return "live";
 
   return "unknown";

@@ -5,28 +5,32 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useBotStore } from "@/lib/store";
 import TradeSwitchModal from "@/components/account/TradeSwitchModal";
-import type { AccountMode } from "@/types";
 
 // ── Account mode helpers ───────────────────────────────────────────────────
 // Backend now uses demo/live.
-// Some old dashboard/API switch logic still uses paper/live.
-// Treat paper === demo broker account.
 function normalizeRuntimeMode(mode?: string | null): "demo" | "live" | "unknown" {
-  const value = String(mode || "").toLowerCase();
+  const value = String(mode || "")
+    .toLowerCase()
+    .trim();
 
+  if (value === "demo") return "demo";
   if (value === "live") return "live";
-  if (value === "demo" || value === "paper") return "demo";
 
   return "unknown";
 }
 
-function toSwitchTarget(mode?: string | null): AccountMode {
-  const normalized = normalizeRuntimeMode(mode);
-
-  // TradeSwitchModal still expects legacy AccountMode: "paper" | "live"
-  // demo/paper current account should switch to live.
-  // live current account should switch to paper/demo.
-  return normalized === "live" ? "paper" : "live";
+function getAccountRuntimeMode(
+  account:
+    | {
+        account_type?: string | null;
+        account_mode?: string | null;
+        mode?: string | null;
+      }
+    | null
+): "demo" | "live" | "unknown" {
+  return normalizeRuntimeMode(
+    account?.account_type || account?.account_mode || account?.mode
+  );
 }
 
 // ── Market session definitions ─────────────────────────────────────────────
@@ -364,7 +368,7 @@ export default function Sidebar() {
   const unreadCount = notifications.length;
 
   const [collapsed, setCollapsed] = useState(false);
-  const [switchTarget, setSwitchTarget] = useState<AccountMode | null>(null);
+  const [showSwitchModal, setShowSwitchModal] = useState(false);
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     Tools: false,
@@ -372,18 +376,16 @@ export default function Sidebar() {
     System: false,
   });
 
-  const runtimeMode = normalizeRuntimeMode(
-    account?.account_type || account?.mode
-  );
+  const runtimeMode = getAccountRuntimeMode(account);
   const isLive = runtimeMode === "live";
 
   const toggleSection = (title: string) => {
     setOpenSections((prev) => ({ ...prev, [title]: !prev[title] }));
   };
 
-  const handleModeToggle = () => {
+  const handleAccountSwitch = () => {
     if (!account) return;
-    setSwitchTarget(toSwitchTarget(account.account_type || account.mode));
+    setShowSwitchModal(true);
   };
 
   return (
@@ -496,16 +498,16 @@ export default function Sidebar() {
 
         <div className="px-2 py-4 border-t border-gray-800 space-y-3">
           <button
-            onClick={handleModeToggle}
-            disabled={!account}
-            title={isLive ? "Switch to DEMO" : "Switch to LIVE"}
+              onClick={handleAccountSwitch}
+              disabled={!account}
+              title="Switch Account"
             className={`w-full text-xs px-2 py-1.5 rounded-full font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               isLive
-                ? "bg-emerald-700 hover:bg-emerald-600 text-white"
-                : "bg-red-600 hover:bg-red-700 text-white"
+                ? "bg-red-600 hover:bg-red-700 text-white"
+                : "bg-emerald-700 hover:bg-emerald-600 text-white"
             }`}
           >
-            {collapsed ? isLive ? "🟢" : "🔴" : isLive ? "Switch to DEMO" : "Switch to LIVE"}
+            {collapsed ? "🔁" : "Switch Account"}
           </button>
 
           <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -528,11 +530,8 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {switchTarget && (
-        <TradeSwitchModal
-          targetMode={switchTarget}
-          onClose={() => setSwitchTarget(null)}
-        />
+      {showSwitchModal && (
+        <TradeSwitchModal onClose={() => setShowSwitchModal(false)} />
       )}
     </>
   );

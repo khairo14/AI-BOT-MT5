@@ -48,7 +48,7 @@ export default function OverviewPage() {
         <PositionTable positions={positions} onRefresh={refresh} showMode />
       </div>
 
-      {/* Phase 9: paper vs live journal */}
+      {/* Phase 9: demo vs live journal */}
       <div>
         <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Account Performance</h3>
         <AccountPanel />
