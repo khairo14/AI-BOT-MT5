@@ -20,7 +20,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from ai.trade_memory import TradeOutcome, memory
 from engine.notification_manager import notification_manager
@@ -61,6 +61,23 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     except Exception:
         return default
 
+def _notify_lifecycle_event(
+    *,
+    title: str,
+    message: str,
+    severity: Literal["info", "success", "warning", "error"] = "info",
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        notification_manager.add(
+            type="risk_alert",
+            title=title,
+            message=message,
+            severity=severity,
+            metadata=metadata or {},
+        )
+    except Exception:
+        pass
 
 async def poll_trade_outcome(ticket: int, signal: dict[str, Any], client) -> None:
     """
@@ -229,11 +246,43 @@ async def _handle_open_position_lifecycle(
                 mark_trailing_active(ticket, source=signal)
                 logger.info("Trail SL → %s | #%s %s", rounded, ticket, signal.get("symbol"))
 
+                _notify_lifecycle_event(
+                    title=f"Trailing Stop Updated — {signal.get('symbol')}",
+                    message=(
+                        f"{str(signal.get('direction', '')).upper()} {signal.get('symbol')} "
+                        f"#{ticket}: trailing SL moved to {rounded:.5g}"
+                    ),
+                    severity="info",
+                    metadata={
+                        "ticket": ticket,
+                        "symbol": signal.get("symbol"),
+                        "direction": signal.get("direction"),
+                        "new_sl": rounded,
+                        "trading_mode": signal.get("trading_mode"),
+                    },
+                )
+
         elif direction == "SELL" and (pos.sl == 0 or rounded < pos.sl - 1e-9):
             ok = await asyncio.to_thread(om.modify_position, ticket, rounded)
             if ok:
                 mark_trailing_active(ticket, source=signal)
                 logger.info("Trail SL → %s | #%s %s", rounded, ticket, signal.get("symbol"))
+                
+                _notify_lifecycle_event(
+                    title=f"Trailing Stop Updated — {signal.get('symbol')}",
+                    message=(
+                        f"{str(signal.get('direction', '')).upper()} {signal.get('symbol')} "
+                        f"#{ticket}: trailing SL moved to {rounded:.5g}"
+                    ),
+                    severity="info",
+                    metadata={
+                        "ticket": ticket,
+                        "symbol": signal.get("symbol"),
+                        "direction": signal.get("direction"),
+                        "new_sl": rounded,
+                        "trading_mode": signal.get("trading_mode"),
+                    },
+                )
 
     async def _get_atr(timeframe: str, period: int = 14) -> float:
         now_mono = time.monotonic()
@@ -509,7 +558,23 @@ async def _move_to_be_if_improves(
                 signal.get("symbol"),
                 entry_px,
             )
-
+            _notify_lifecycle_event(
+                title=f"Break-Even Moved — {signal.get('symbol')}",
+                message=(
+                    f"{str(signal.get('direction', '')).upper()} {signal.get('symbol')} "
+                    f"#{ticket}: SL moved to break-even at {entry_px:.5g}"
+                ),
+                severity="success",
+                metadata={
+                    "ticket": ticket,
+                    "symbol": signal.get("symbol"),
+                    "direction": signal.get("direction"),
+                    "event": event_key,
+                    "break_even_price": entry_px,
+                    "trading_mode": signal.get("trading_mode"),
+                },
+            )
+            
     except Exception as exc:
         logger.warning("%s failed #%s: %s", event_key, ticket, exc)
 
@@ -577,9 +642,18 @@ async def _process_closed_position(
 ) -> None:
     deal = closed_deals[-1]
 
-    profit = float(getattr(deal, "profit", 0.0) or 0.0)
+    def _deal_net(d) -> float:
+        return (
+            float(getattr(d, "profit", 0.0) or 0.0)
+            + float(getattr(d, "swap", 0.0) or 0.0)
+            + float(getattr(d, "commission", 0.0) or 0.0)
+            + float(getattr(d, "fee", 0.0) or 0.0)
+        )
+
+    profit = float(_deal_net(deal))
+
     if len(closed_deals) > 1:
-        profit = float(sum(float(getattr(d, "profit", 0.0) or 0.0) for d in closed_deals))
+        profit = float(sum(_deal_net(d) for d in closed_deals))
 
     close_px = float(getattr(deal, "price", 0.0) or 0.0)
     entry_px = _safe_float(signal.get("fill_price") or signal.get("entry_price"), 0.0)

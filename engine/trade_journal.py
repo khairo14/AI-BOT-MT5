@@ -33,9 +33,24 @@ from engine.utils.symbol_utils import normalize_symbol
 
 _JOURNAL_PATH = Path(__file__).parent.parent / "data" / "trade_journal.jsonl"
 
-def normalize_account_mode(value: str) -> str:
-    value = str(value or "live").lower().strip()
-    return "demo" if value == "paper" else value
+def normalize_account_mode(
+    value: str | None,
+    account_login: int | None = None,
+) -> str:
+    value = str(value or "").lower().strip()
+    
+    if value in ("all", "demo", "live"):
+        return value
+
+    # Fallback reconciliation for known accounts
+    if str(account_login or "") == "1301109267":
+        return "demo"
+
+    if str(account_login or "") == "430044251":
+        return "live"
+
+    # Default safe fallback
+    return "demo"
 
 class TradeJournal:
     """Thread-safe append-only JSONL trade journal."""
@@ -98,9 +113,9 @@ class TradeJournal:
             "trading_type": trading_type,
             "strategy":     strategy or comment,
              # Account identity
-            "account_mode": normalize_account_mode(account_mode),
+            "account_mode": normalize_account_mode(account_mode, account_login),
             "account_login": account_login,
-            "account_type": normalize_account_mode(account_type or account_mode),
+            "account_type": normalize_account_mode(account_type or account_mode, account_login),
             "user_id":      user_id,
 
             "comment":      comment,
@@ -141,7 +156,7 @@ class TradeJournal:
             limit:         max entries to return
             account_login: filter by specific MT5 account number
         """
-        account = normalize_account_mode(account)
+        account = normalize_account_mode(account, account_login)
         if not self._path.exists():
             return []
 
@@ -159,7 +174,15 @@ class TradeJournal:
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if account != "all" and record.get("account_mode") != account:
+            record_mode = normalize_account_mode(
+                record.get("account_mode") or record.get("account_type"),
+                record.get("account_login"),
+            )
+
+            record["account_mode"] = record_mode
+            record["account_type"] = record_mode
+
+            if account != "all" and record_mode != account:
                 continue
             if account_login is not None and record.get("account_login") != account_login:
                 continue
@@ -174,15 +197,19 @@ class TradeJournal:
         return results
 
     def stats(self, account: str = "all", account_login: Optional[int] = None) -> dict:
-        """Return summary stats for the given account filter, deduped by ticket."""
+        """Return summary stats for the given account filter, deduped by ticket.
+
+        Latest close row is authoritative. partial_close rows are only used for
+        legacy tickets that do not have a final close row.
+        """
         entries = self.get(account=account, limit=100_000, account_login=account_login)
 
-        closed_events = [
+        events = [
             e for e in entries
             if e.get("event") in ("close", "partial_close") and e.get("profit") is not None
         ]
 
-        if not closed_events:
+        if not events:
             return {
                 "total": 0,
                 "wins": 0,
@@ -198,42 +225,42 @@ class TradeJournal:
 
         from collections import defaultdict
 
-        ticket_profit: dict[int, float] = defaultdict(float)
-        ticket_today_profit: dict[int, float] = defaultdict(float)
+        ticket_profit: dict[int, float] = {}
+        ticket_today_profit: dict[int, float] = {}
         ticket_trading_type: dict[int, str] = {}
-
         seen_close_tickets: set[int] = set()
+
+        legacy_partial_profit: dict[int, float] = defaultdict(float)
+        legacy_partial_today_profit: dict[int, float] = defaultdict(float)
         seen_partial_keys: set[tuple] = set()
 
-        for e in reversed(closed_events):
-            ticket = e.get("ticket")
-            if ticket is None:
+        # self.get() returns newest first.
+        # First close row per ticket is latest/authoritative.
+        for e in events:
+            ticket_raw = e.get("ticket")
+            if ticket_raw is None:
                 continue
 
-            ticket = int(ticket)
+            ticket = int(ticket_raw)
             event = e.get("event")
             profit = float(e.get("profit") or 0.0)
 
-            if e.get("trading_type"):
+            if e.get("trading_type") and ticket not in ticket_trading_type:
                 ticket_trading_type[ticket] = e["trading_type"]
 
             is_today = (e.get("close_time") or e.get("logged_at") or "")[:10] == today_str
 
             if event == "close":
-                # Count only one final close per ticket.
-                # Because get() returns newest first, reversed() makes this oldest -> newest.
-                # This means the latest close overwrites older duplicate recovery closes.
                 if ticket in seen_close_tickets:
                     continue
 
                 seen_close_tickets.add(ticket)
-                ticket_profit[ticket] += profit
+                ticket_profit[ticket] = profit
 
                 if is_today:
-                    ticket_today_profit[ticket] += profit
+                    ticket_today_profit[ticket] = profit
 
             elif event == "partial_close":
-                # Dedup partial-close rows by ticket + logged/close time + profit.
                 partial_key = (
                     ticket,
                     e.get("close_time") or e.get("logged_at"),
@@ -244,10 +271,20 @@ class TradeJournal:
                     continue
 
                 seen_partial_keys.add(partial_key)
-                ticket_profit[ticket] += profit
+                legacy_partial_profit[ticket] += profit
 
                 if is_today:
-                    ticket_today_profit[ticket] += profit
+                    legacy_partial_today_profit[ticket] += profit
+
+        # Legacy fallback: only count partial_close-only tickets if no close row exists.
+        for ticket, profit in legacy_partial_profit.items():
+            if ticket in seen_close_tickets:
+                continue
+
+            ticket_profit[ticket] = profit
+
+            if ticket in legacy_partial_today_profit:
+                ticket_today_profit[ticket] = legacy_partial_today_profit[ticket]
 
         net_trades = list(ticket_profit.items())
 
@@ -281,7 +318,7 @@ class TradeJournal:
             "today_trades": len(ticket_today_profit),
             "today_pnl": round(sum(ticket_today_profit.values()), 2),
         }
-
+    
     def get_closed_merged(
         self,
         account: str = "all",
@@ -289,7 +326,7 @@ class TradeJournal:
         limit: int = 10_000,
         account_login: Optional[int] = None,
     ) -> list[dict]:
-        """Return one dict per closed ticket with the true net profit."""
+        """Return one dict per closed ticket with latest close row as authority."""
         all_entries = self.get(account=account, limit=limit, account_login=account_login)
 
         if trading_type:
@@ -299,18 +336,32 @@ class TradeJournal:
             ]
 
         partial_profit: dict[int, float] = {}
+        seen_partial_keys: set[tuple] = set()
 
         for e in all_entries:
             if e.get("event") == "partial_close" and e.get("profit") is not None:
                 ticket = e.get("ticket")
+                if ticket is None:
+                    continue
 
-                if ticket is not None:
-                    partial_profit[int(ticket)] = (
-                        partial_profit.get(int(ticket), 0.0) + float(e["profit"])
-                    )
+                profit = float(e.get("profit") or 0.0)
+                partial_key = (
+                    int(ticket),
+                    e.get("close_time") or e.get("logged_at"),
+                    round(profit, 2),
+                )
+
+                if partial_key in seen_partial_keys:
+                    continue
+
+                seen_partial_keys.add(partial_key)
+                partial_profit[int(ticket)] = partial_profit.get(int(ticket), 0.0) + profit
 
         merged: list[dict] = []
+        seen_close_tickets: set[int] = set()
 
+        # self.get() returns newest first.
+        # First close row per ticket is authoritative.
         for e in all_entries:
             if e.get("event") == "close" and e.get("profit") is not None:
                 ticket = e.get("ticket")
@@ -318,15 +369,30 @@ class TradeJournal:
                 if ticket is None:
                     continue
 
-                close_profit = float(e["profit"])
-                partials = partial_profit.get(int(ticket), 0.0)
+                ticket = int(ticket)
+
+                if ticket in seen_close_tickets:
+                    continue
+
+                seen_close_tickets.add(ticket)
 
                 merged_entry = dict(e)
-                merged_entry["profit"] = round(close_profit + partials, 2)
+
+                # Normal current architecture: final close already contains full net PnL.
+                # Legacy fallback only: if older rows have partial_close events, add them
+                # unless this close row is an explicit reconciliation correction.
+                if not merged_entry.get("recovered") and not merged_entry.get("reconciliation"):
+                    merged_entry["profit"] = round(
+                        float(merged_entry.get("profit") or 0.0)
+                        + partial_profit.get(ticket, 0.0),
+                        2,
+                    )
+                else:
+                    merged_entry["profit"] = round(float(merged_entry.get("profit") or 0.0), 2)
 
                 merged.append(merged_entry)
 
-        return merged
+        return merged  
     
     def get_unclosed_tickets(self) -> list[dict]:
         """Return a list of journal "open" entry dicts that have no matching

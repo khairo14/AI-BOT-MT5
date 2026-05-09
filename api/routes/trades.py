@@ -4,8 +4,7 @@ Trades routes — open positions, trade history, manual close, OHLCV data.
 
 from datetime import datetime
 from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 
 from api.dependencies import get_client
@@ -30,7 +29,7 @@ def _get_risk_manager() -> RiskManager:
 
 class PlaceOrderRequest(BaseModel):
     symbol: str
-    direction: str            # "buy"/"sell" or "BUY"/"SELL" — normalised in handler
+    direction: str            # "buy"/"sell" or "BUY"/"SELL" — normalized in handler
     # Absolute price levels (used by strategy runner)
     sl: Optional[float] = None
     tp: Optional[float] = None
@@ -100,7 +99,7 @@ def get_ohlcv(
     df = client.get_ohlcv(symbol, timeframe, count=count)
     if df is None:
         raise HTTPException(status_code=404, detail=f"No OHLCV data for {symbol} {timeframe}")
-    # Convert to list of dicts for JSON serialisation (timestamps as ISO strings)
+    # Convert to list of dicts for JSON serialization (timestamps as ISO strings)
     df["time"] = df["time"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     return df.to_dict(orient="records")
 
@@ -108,13 +107,14 @@ def get_ohlcv(
 @router.post("/place")
 def place_order(
     body: PlaceOrderRequest,
+    background_tasks: BackgroundTasks,
     client: MT5Client = Depends(get_client),
 ):
     """
     Place a market order. Validates risk rules before sending.
     Used by the manual confirmation flow and the strategy runner.
     """
-    # Normalise direction and resolve trading_mode/mode alias
+    # Normalize direction and resolve trading_mode/mode alias
     direction = body.direction.upper()
     trading_mode = body.trading_mode or body.mode
     if not trading_mode:
@@ -222,8 +222,7 @@ def place_order(
     # Schedule outcome polling so ML/RL modules learn from manual trades
     if result.ticket:
         try:
-            import asyncio
-            from api.signal_bus import _poll_outcome
+            from api.signal_bus import bus
             _fake_signal = {
                 "symbol":       body.symbol,
                 "direction":    direction,
@@ -236,8 +235,12 @@ def place_order(
                 "lot_size":     lot,
                 "confidence":   0.5,
             }
-            asyncio.get_running_loop().create_task(
-                _poll_outcome(ticket=result.ticket, signal=_fake_signal, client=client)
+
+            background_tasks.add_task(
+                bus.schedule_poll,
+                ticket=result.ticket,
+                signal=_fake_signal,
+                client=client,
             )
         except Exception:
             pass
@@ -263,7 +266,9 @@ def close_position(
     # Get position info before closing for notification
     import MetaTrader5 as mt5
     with client._lock:
-        positions = mt5.positions_get(ticket=ticket)
+        positions_get = getattr(mt5, "positions_get", None)
+        positions = positions_get(ticket=ticket) if positions_get else None
+        
     pos_info = positions[0] if positions else None
     
     om = OrderManager(client)
@@ -337,7 +342,7 @@ def get_trailing_stops():
 
 @router.get("/journal")
 def get_journal(
-    account: str = Query("all", description="paper | live | all"),
+    account: str = Query("all", description="demo | live | all"),
     account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
     trading_type: Optional[str] = Query(None, description="scalping | day_trading | swing"),
     event: Optional[str] = Query(None, description="open | close"),
@@ -349,8 +354,8 @@ def get_journal(
     """
     from engine.trade_journal import trade_journal
 
-    if account not in ("paper", "live", "all"):
-        raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
+    if account not in ("demo", "live", "all"):
+        raise HTTPException(status_code=400, detail="account must be 'demo', 'live', or 'all'")
 
     # If account_login is provided, use it (overrides account mode filter)
     if account_login is not None:
@@ -392,27 +397,27 @@ def get_journal(
 
 @router.get("/journal/stats")
 def get_journal_stats(
-    account: str = Query("all", description="paper | live | all"),
+    account: str = Query("all", description="demo | live | all"),
     account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
 ):
     """Return win/loss/profit summary from the trade journal."""
     from engine.trade_journal import trade_journal
 
-    if account not in ("paper", "live", "all"):
-        raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
+    if account not in ("demo", "live", "all"):
+        raise HTTPException(status_code=400, detail="account must be 'demo', 'live', or 'all'")
 
     # If account_login is provided, use it for all stats
     if account_login is not None:
-        paper_stats = trade_journal.stats(account="paper", account_login=account_login)
+        demo_stats = trade_journal.stats(account="demo", account_login=account_login)
         live_stats = trade_journal.stats(account="live", account_login=account_login)
         all_stats = trade_journal.stats(account="all", account_login=account_login)
     else:
-        paper_stats = trade_journal.stats(account="paper")
+        demo_stats = trade_journal.stats(account="demo")
         live_stats = trade_journal.stats(account="live")
         all_stats = trade_journal.stats(account="all")
 
     return {
-        "paper": paper_stats,
+        "demo": demo_stats,
         "live":  live_stats,
         "all":   all_stats,
     }
@@ -420,7 +425,7 @@ def get_journal_stats(
 
 @router.get("/journal/export")
 def export_journal(
-    account: str = Query("all", description="paper | live | all"),
+    account: str = Query("all", description="demo | live | all"),
     account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
     trading_type: Optional[str] = Query(None, description="scalping | day_trading | swing"),
     days: Optional[int] = Query(None, description="Filter trades from last N days"),
@@ -437,8 +442,8 @@ def export_journal(
     
     from engine.trade_journal import trade_journal
 
-    if account not in ("paper", "live", "all"):
-        raise HTTPException(status_code=400, detail="account must be 'paper', 'live', or 'all'")
+    if account not in ("demo", "live", "all"):
+        raise HTTPException(status_code=400, detail="account must be 'demo', 'live', or 'all'")
     
     if format not in ("csv", "excel"):
         raise HTTPException(status_code=400, detail="format must be 'csv' or 'excel'")
@@ -553,6 +558,9 @@ def export_journal(
         
         wb = Workbook()
         ws = wb.active
+        if ws is None:
+            raise HTTPException(status_code=500, detail="Could not create Excel worksheet")
+        
         ws.title = "Trade Journal"
         
         if export_rows:
@@ -577,9 +585,10 @@ def export_journal(
             for row_idx in range(2, ws.max_row + 1):
                 cell = ws.cell(row=row_idx, column=profit_col_idx)
                 try:
-                    if float(cell.value or 0) > 0:
+                    profit_value = float(str(cell.value or "0"))
+                    if profit_value > 0:
                         cell.fill = green_fill
-                    elif float(cell.value or 0) < 0:
+                    elif profit_value < 0:
                         cell.fill = red_fill
                 except (ValueError, TypeError):
                     pass

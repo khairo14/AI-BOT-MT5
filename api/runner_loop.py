@@ -134,7 +134,8 @@ async def _run_one_mode(runner, bus, mode: str, sym_override) -> None:
 async def _runner_loop(client, order_manager, risk_manager) -> None:
     from api.signal_bus import bus
     from engine.strategy_runner import StrategyRunner
-
+    from engine.notification_manager import notification_manager
+    
     runner = StrategyRunner(
         client=client,
         order_manager=order_manager,
@@ -213,9 +214,40 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                                         f"Weekend gap: closed #{_pos['ticket']} "
                                         f"{_pos['symbol']} swing (P&L: ${_pos.get('profit', 0):.2f})"
                                     )
+
+                                    notification_manager.add(
+                                        type="risk_alert",
+                                        title="Weekend Gap Protection",
+                                        message=(
+                                            f"Closed swing position #{_pos['ticket']} "
+                                            f"{_pos['symbol']} before weekend gap risk."
+                                        ),
+                                        severity="warning",
+                                        metadata={
+                                            "ticket": _pos["ticket"],
+                                            "symbol": _pos["symbol"],
+                                            "profit": _pos.get("profit", 0),
+                                            "reason": "weekend_gap_protection",
+                                        },
+                                    )
                                 except Exception as _wge:
                                     logger.warning(
                                         f"Weekend gap: failed to close #{_pos['ticket']}: {_wge}"
+                                    )
+                                    notification_manager.add(
+                                        type="risk_alert",
+                                        title="Weekend Gap Close Failed",
+                                        message=(
+                                            f"Failed to close swing position #{_pos['ticket']} "
+                                            f"{_pos['symbol']} before weekend: {_wge}"
+                                        ),
+                                        severity="error",
+                                        metadata={
+                                            "ticket": _pos["ticket"],
+                                            "symbol": _pos["symbol"],
+                                            "error": str(_wge),
+                                            "reason": "weekend_gap_protection_failed",
+                                        },
                                     )
                         # Log check even if no positions found (helps with debugging)
                         elif _is_friday and 20 <= _hour < 21:

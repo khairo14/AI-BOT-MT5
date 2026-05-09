@@ -211,15 +211,18 @@ class OrderManager:
                 max_risk_pct = 1.5
 
             if actual_risk_pct > max_risk_pct + 1e-9:
-                return (
-                    False,
-                    f"Final risk audit failed: {actual_risk_pct:.2f}% > max {max_risk_pct:.2f}% "
-                    f"(risk=${money_risk:.2f}, volume={volume})"
+                return False, (
+                    f"Final risk audit failed | {symbol} {direction} | "
+                    f"entry={entry_price} sl={sl_price} volume={volume} | "
+                    f"risk=${money_risk:.2f} / balance=${balance:.2f} "
+                    f"({actual_risk_pct:.2f}% > max {max_risk_pct:.2f}%)"
                 )
 
             return True, (
-                f"Final risk audit OK: {actual_risk_pct:.2f}% "
-                f"(risk=${money_risk:.2f}, volume={volume})"
+                f"Final risk audit OK | {symbol} {direction} | "
+                f"entry={entry_price} sl={sl_price} volume={volume} | "
+                f"risk=${money_risk:.2f} / balance=${balance:.2f} "
+                f"({actual_risk_pct:.2f}% <= max {max_risk_pct:.2f}%)"
             )
 
         except Exception as exc:
@@ -338,6 +341,51 @@ class OrderManager:
                         tp = round(_ref + min_dist, sym_info.digits)
                     else:
                         tp = round(_ref - min_dist, sym_info.digits)
+
+                    # Revalidate reward:risk after live reanchor and broker stop-distance adjustment.
+                    # Broker stop adjustment can widen SL or pull TP closer, so a signal that was
+                    # valid at strategy time may no longer meet minimum RR at execution time.
+        try:
+            _mode_prefix_rr = req.comment.split("|")[0] if "|" in req.comment else ""
+            _mode_map_rr = {"scalp": "scalping", "day": "day_trading", "swing": "swing"}
+            _tt_rr = _mode_map_rr.get(_mode_prefix_rr, "")
+
+            if tp is not None:
+                risk_dist = abs(price - sl)
+                reward_dist = abs(tp - price)
+
+                if risk_dist <= 0:
+                    return OrderResult(
+                        success=False,
+                        error="Adjusted RR invalid: risk distance is zero",
+                    )
+
+                adjusted_rr = reward_dist / risk_dist
+
+                try:
+                    from api.runner_loop import _risk_manager
+
+                    _risk_cfg = getattr(_risk_manager, "_config", {}) if _risk_manager else {}
+                    _by_mode = _risk_cfg.get("risk_reward_min_by_mode", {})
+                    min_rr = float(
+                        _by_mode.get(
+                            _tt_rr,
+                            _risk_cfg.get("risk_reward_min", 1.2),
+                        )
+                    )
+                except Exception:
+                    min_rr = 1.2
+
+                if adjusted_rr < min_rr - 1e-9:
+                    return OrderResult(
+                        success=False,
+                        error=(
+                            f"Adjusted RR {adjusted_rr:.2f} below minimum {min_rr:.2f} "
+                            f"after SL/TP reanchor [{_tt_rr or 'unknown'}]"
+                        ),
+                    )
+        except Exception as _rr_exc:
+            logger.debug(f"Adjusted RR validation skipped: {_rr_exc}")
         # Live spread gate — block entry if current spread exceeds mode limit.
         # Uses real-time spread from MT5 (not hardcoded) so news spikes are caught.
         _captured_spread_pips: Optional[float] = None
@@ -347,9 +395,8 @@ class OrderManager:
             _mode_map = {"scalp": "scalping", "day": "day_trading", "swing": "swing"}
             _tt = _mode_map.get(_mode_prefix, "")
             if _tt:
-                _current_sp = sym_info.spread * sym_info.point * (
-                    10 if sym_info.digits in (3, 5) else 1
-                )
+                _points_per_pip = 10 if sym_info.digits in (3, 5) else 1
+                _current_sp = float(sym_info.spread) / _points_per_pip
                 _captured_spread_pips = round(_current_sp, 2)
                 _spread_limits = _app_cfg.get("max_spread_pips", {})
                 _max_sp = _spread_limits.get(_tt)
@@ -483,7 +530,7 @@ class OrderManager:
 
         logger.info(
             f"Order placed | #{position_ticket} | {req.symbol} {req.direction} "
-            f"{req.volume} lots | Entry: {open_price} | SL: {sl} | TP: {tp} | "
+            f"{vol} lots | Entry: {open_price} | SL: {sl} | TP: {tp} | "
             f"Execution: {execution_time_ms}ms"
             + (f" | Slippage: {slippage:.5f}" if slippage else "")
         )
@@ -913,7 +960,7 @@ class OrderManager:
     def _has_open_position(self, symbol: str, direction: str, comment: str = "") -> bool:
         """Return True if a bot-placed position already exists for symbol+direction+mode.
         Mode is derived from the comment prefix (scalp|, day|, swing|).
-        An empty/unrecognised prefix falls back to matching any bot position on that symbol.
+        An empty/unrecognized prefix falls back to matching any bot position on that symbol.
         """
         with self._client._lock:
             positions = _mt5_positions_get(symbol=symbol)

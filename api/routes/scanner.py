@@ -329,7 +329,7 @@ async def add_symbol_to_config(request: Request, body: AddSymbolRequest):
 @limiter.limit("60/minute")  # Task #7: Rate limiting
 async def get_scanner_performance(
     request: Request,
-    account: str = Query("all", regex="^(paper|live|all)$"),
+    account: str = Query("all", regex="^(demo|live|all)$"),
 ):
     """
     Get live scanner performance metrics:

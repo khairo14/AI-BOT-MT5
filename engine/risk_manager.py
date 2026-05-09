@@ -13,7 +13,7 @@ import tempfile
 import threading
 from datetime import datetime, date, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 from loguru import logger
 from engine.account_store import current_account_login, current_mode
@@ -36,6 +36,25 @@ def _load_presets() -> dict:
         logger.warning(f"Risk presets not found at {_PRESETS_PATH}, using defaults")
         return {"current_preset": "moderate", "presets": {}}
 
+def _notify_risk_alert(
+    *,
+    title: str,
+    message: str,
+    severity: Literal["info", "success", "warning", "error"] = "warning",
+    metadata: dict | None = None,
+) -> None:
+    try:
+        from engine.notification_manager import notification_manager
+
+        notification_manager.add(
+            type="circuit_breaker",
+            title=title,
+            message=message,
+            severity=severity,
+            metadata=metadata or {},
+        )
+    except Exception:
+        pass
 
 class RiskManager:
     """
@@ -136,11 +155,11 @@ class RiskManager:
             }
             state_path = self._state_path()
             state_path.parent.mkdir(parents=True, exist_ok=True)
-            _serialised = json.dumps(state)
+            _serialized = json.dumps(state)
             fd, _tmp = tempfile.mkstemp(dir=str(state_path.parent), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as _f:
-                    _f.write(_serialised)
+                    _f.write(_serialized)
                 os.replace(_tmp, state_path)
             except Exception:
                 try:
@@ -443,6 +462,19 @@ class RiskManager:
                         f"CIRCUIT BREAKER: Daily drawdown {daily_dd:.2f}% >= {daily_limit}%. "
                         "All new trades halted for today."
                     )
+                    _notify_risk_alert(
+                        title="Daily Circuit Breaker",
+                        message=(
+                            f"Daily drawdown reached {daily_dd:.2f}% "
+                            f"(limit {daily_limit:.2f}%). New trades halted for today."
+                        ),
+                        severity="error",
+                        metadata={
+                            "type": "daily_drawdown",
+                            "drawdown_pct": round(daily_dd, 2),
+                            "limit_pct": daily_limit,
+                        },
+                    )
                     if self._on_circuit_breaker:
                         self._on_circuit_breaker("daily", f"Daily drawdown {daily_dd:.2f}% reached {daily_limit}% limit")
 
@@ -454,6 +486,19 @@ class RiskManager:
                     logger.warning(
                         f"CIRCUIT BREAKER: Weekly drawdown {weekly_dd:.2f}% >= {weekly_limit}%. "
                         "All new trades halted until next Monday."
+                    )
+                    _notify_risk_alert(
+                        title="Weekly Circuit Breaker",
+                        message=(
+                            f"Weekly drawdown reached {weekly_dd:.2f}% "
+                            f"(limit {weekly_limit:.2f}%). New trades halted until next week."
+                        ),
+                        severity="error",
+                        metadata={
+                            "type": "weekly_drawdown",
+                            "drawdown_pct": round(weekly_dd, 2),
+                            "limit_pct": weekly_limit,
+                        },
                     )
                     if self._on_circuit_breaker:
                         self._on_circuit_breaker("weekly", f"Weekly drawdown {weekly_dd:.2f}% reached {weekly_limit}% limit")
@@ -474,6 +519,20 @@ class RiskManager:
                     f"Mode '{mode}' paused for {pause_hours}h after "
                     f"{self._consecutive_losses[mode]} consecutive losses."
                 )
+                _notify_risk_alert(
+                    title="Mode Paused",
+                    message=(
+                        f"{mode} paused for {pause_hours}h after "
+                        f"{self._consecutive_losses[mode]} consecutive losses."
+                    ),
+                    severity="warning",
+                    metadata={
+                        "type": "mode_consecutive_losses",
+                        "mode": mode,
+                        "losses": self._consecutive_losses[mode],
+                        "pause_hours": pause_hours,
+                    },
+                )
             if strategy_name:
                 self._strategy_losses[strategy_name] = self._strategy_losses.get(strategy_name, 0) + 1
                 strat_limit = self._config["drawdown"].get("max_strategy_consecutive_losses", limit)
@@ -483,6 +542,20 @@ class RiskManager:
                     logger.warning(
                         f"Strategy '{strategy_name}' paused for {strat_pause_hours}h after "
                         f"{self._strategy_losses[strategy_name]} consecutive losses."
+                    )
+                    _notify_risk_alert(
+                        title="Strategy Paused",
+                        message=(
+                            f"{strategy_name} paused for {strat_pause_hours}h after "
+                            f"{self._strategy_losses[strategy_name]} consecutive losses."
+                        ),
+                        severity="warning",
+                        metadata={
+                            "type": "strategy_consecutive_losses",
+                            "strategy": strategy_name,
+                            "losses": self._strategy_losses[strategy_name],
+                            "pause_hours": strat_pause_hours,
+                        },
                     )
             self._save_state()
 
@@ -715,11 +788,11 @@ class RiskManager:
         self._config["drawdown"] = preset.get("drawdown", {})
         
         try:
-            _serialised = json.dumps(self._config, indent=2)
+            _serialized = json.dumps(self._config, indent=2)
             _fd, _tmp = tempfile.mkstemp(dir=str(CONFIG_PATH.parent), suffix=".tmp")
             try:
                 with os.fdopen(_fd, "w", encoding="utf-8") as _tf:
-                    _tf.write(_serialised)
+                    _tf.write(_serialized)
                 os.replace(_tmp, CONFIG_PATH)
             except Exception:
                 try:

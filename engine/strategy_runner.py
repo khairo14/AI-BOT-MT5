@@ -38,8 +38,6 @@ from engine.strategies.swing.ema_trend_rider import EMATrendRider
 from engine.strategies.swing.fibonacci_rsi import FibonacciRSI
 from engine.strategies.swing.weekly_breakout import WeeklyBreakout
 
-from engine.order_manager import BOT_MAGIC
-
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 # ── App config TTL cache (M-1/M-10 fix) ──────────────────────────────────────
@@ -551,18 +549,26 @@ class StrategyRunner:
         # Volatility-adjusted position sizing — reduce lot during high ATR regimes
         # ATR% is computed from the primary timeframe df already fetched above.
         try:
-            _close_arr = primary_df["close"].values.astype(float)
-            _high_arr  = primary_df["high"].values.astype(float)
-            _low_arr   = primary_df["low"].values.astype(float)
+            _close_arr = primary_df["close"].to_numpy(dtype=float)
+            _high_arr  = primary_df["high"].to_numpy(dtype=float)
+            _low_arr   = primary_df["low"].to_numpy(dtype=float)
+
             if len(_close_arr) >= 15:
                 import numpy as _np
-                _prev_close = _np.concatenate([[_close_arr[0]], _close_arr[:-1]])
+
+                _prev_close = _np.concatenate(
+                    (
+                        _np.array([_close_arr[0]], dtype=float),
+                        _close_arr[:-1],
+                    )
+                )
+
                 _tr = _np.maximum(
                     _high_arr - _low_arr,
                     _np.maximum(
                         _np.abs(_high_arr - _prev_close),
-                        _np.abs(_low_arr  - _prev_close),
-                    )
+                        _np.abs(_low_arr - _prev_close),
+                    ),
                 )
                 _atr14 = float(_np.mean(_tr[-14:]))
                 _atr_pct = _atr14 / max(abs(_close_arr[-1]), 1e-8) * 100.0
@@ -786,27 +792,26 @@ class StrategyRunner:
 
         mode_prefix = sig.comment.split("|")[0] if "|" in sig.comment else ""
         try:
-            with self.client._lock:
-                positions = mt5.positions_get()
+            positions = self.client.get_open_positions()
             if not positions:
                 return True
 
             count = 0
             for p in positions:
-                if p.magic != BOT_MAGIC:
+                if p.get("magic") != BOT_MAGIC:
                     continue
                 if mode_prefix and not (
-                    p.comment.startswith(mode_prefix + "|") or p.comment == mode_prefix
+                    str(p.get("comment", "")).startswith(mode_prefix + "|")
                 ):
                     continue
-                p_dir = "BUY" if p.type == mt5.ORDER_TYPE_BUY else "SELL"
+                p_dir = "BUY" if p.get("type") == "buy" else "SELL"
 
                 # Check USD correlation
-                if this_usd_dir and _usd_direction(p.symbol, p_dir) == this_usd_dir:
+                if this_usd_dir and _usd_direction(str(p.get("symbol")), p_dir) == this_usd_dir:
                     count += 1
                     continue
                 # Check asset-group correlation
-                if this_asset_grp and _asset_group_direction(p.symbol, p_dir) == this_asset_grp:
+                if this_asset_grp and _asset_group_direction(str(p.get("symbol")), p_dir) == this_asset_grp:
                     count += 1
 
             if count >= max_corr:

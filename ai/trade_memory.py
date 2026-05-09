@@ -378,6 +378,7 @@ class TradeMemory:
         min_samples: int = 10,
         live_only: bool = True,
         mode: Optional[str] = None,
+        account_login: Optional[int] = None,
     ) -> None:
         """
         Append a daily accuracy snapshot to history file.
@@ -390,7 +391,8 @@ class TradeMemory:
             trading_type=trading_type,
             min_samples=min_samples,
             live_only=live_only,
-            mode=mode,
+            mode=normalize_execution_mode(mode),
+            account_login=account_login,
         )
         
         if not acc.get("sufficient_data"):
@@ -401,7 +403,8 @@ class TradeMemory:
         snapshot = {
             "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "trading_type": trading_type or "all",
-            "mode": mode or "all",
+            "mode": normalize_execution_mode(mode) if mode else "all",
+            "account_login": account_login,
             "overall_accuracy": acc["overall_accuracy"],
             "correct": acc["correct"],
             "total": acc["total"],
@@ -417,6 +420,8 @@ class TradeMemory:
         trading_type: Optional[str] = None,
         min_samples: int = 5,
         live_only: bool = True,
+        mode: Optional[str] = None,
+        account_login: Optional[int] = None,
     ) -> dict:
         """
         Compute win rate and avg PnL per regime per strategy.
@@ -427,6 +432,8 @@ class TradeMemory:
             n=self.MAX_BUFFER,
             trading_type=trading_type,
             live_only=live_only,
+            execution_mode=mode,
+            account_login=account_login,
             learning_only=True,
         )
         # Only trades where regime was recorded
@@ -483,6 +490,7 @@ class TradeMemory:
         lambda_threshold: float = 10.0,
         live_only: bool = True,
         mode: Optional[str] = None,
+        account_login: Optional[int] = None,
     ) -> dict:
         """
         Page-Hinkley drift detection on rolling win rate.
@@ -502,6 +510,7 @@ class TradeMemory:
             trading_type=trading_type,
             live_only=live_only,
             execution_mode=mode,
+            account_login=account_login,
             learning_only=True,
         )
         if len(outcomes) < window:
@@ -569,6 +578,7 @@ class TradeMemory:
         min_windows: int = 3,
         live_only: bool = True,
         mode: Optional[str] = None,
+        account_login: Optional[int] = None,
     ) -> dict:
         """
         Track EV stability across rolling windows.
@@ -584,6 +594,7 @@ class TradeMemory:
             trading_type=trading_type,
             live_only=live_only,
             execution_mode=mode,
+            account_login=account_login,
             learning_only=True,
         )
         needed = window * min_windows

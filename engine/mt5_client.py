@@ -158,21 +158,19 @@ class MT5Client:
 
     def switch_account(self, login: int) -> bool:
         """Switch to a specific MT5 account by login number."""
-        self.disconnect()     
-        
-        # Reload credentials for the new account
+        self.disconnect()
+
         self._credentials = self._load_credentials(login)
-        
-        # Determine trading mode for backward compat
-        acc_type = self._credentials.get("type", "")
-        self._trading_mode = "demo" if acc_type == "demo" else "live"
-        
+
+        acc_type = str(self._credentials.get("type", "")).lower().strip()
+        self._trading_mode = acc_type
+
         success = self.connect()
         if success:
             from engine.account_store import save_account
             save_account(login, acc_type)
-        return success
 
+        return success
     # ------------------------------------------------------------------
     # Account Info
     # ------------------------------------------------------------------

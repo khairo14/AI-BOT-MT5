@@ -20,7 +20,7 @@ This module intentionally does NOT:
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Literal
 
 from engine.notification_manager import notification_manager
 from engine.order_manager import OrderRequest
@@ -154,6 +154,35 @@ def _block_signal(
 
     return ExecutionResult(False, signal, error=reason)
 
+def _notify_trade_blocked(
+    signal: dict[str, Any],
+    *,
+    title: str,
+    reason: str,
+    severity: Literal["info", "success", "warning", "error"] = "warning",
+    block_type: str = "risk_block",
+) -> None:
+    try:
+        notification_manager.add(
+            type="risk_alert",
+            title=title,
+            message=(
+                f"{signal.get('symbol')} {str(signal.get('direction', '')).upper()} "
+                f"via {signal.get('strategy', 'unknown')}: {reason}"
+            ),
+            severity=severity,
+            metadata={
+                "symbol": signal.get("symbol"),
+                "direction": signal.get("direction"),
+                "strategy": signal.get("strategy"),
+                "trading_mode": signal.get("trading_mode"),
+                "signal_id": signal.get("id"),
+                "reason": reason,
+                "block_type": block_type,
+            },
+        )
+    except Exception:
+        pass
 
 class TradeExecutionService:
     """
@@ -176,13 +205,13 @@ class TradeExecutionService:
         schedule_poll receives (ticket, signal) after successful open.
         """
         if self.order_manager is None or self.client is None:
-            err = "TradeExecutionService not initialised — order manager or MT5 client missing"
+            err = "TradeExecutionService not initialized — order manager or MT5 client missing"
             signal["rejection_reason"] = err
             _record_signal_journal_safe(
                 signal,
                 status="failed",
                 decision="execution_unavailable",
-                filters={"filter": "trade_execution_not_initialised"},
+                filters={"filter": "trade_execution_not_initialized"},
             )
             logger.error(err)
             return ExecutionResult(False, signal, error=err)
@@ -239,6 +268,13 @@ class TradeExecutionService:
                     symbol=signal.get("symbol"),
                 )
                 if not concurrent_ok:
+                    _notify_trade_blocked(
+                        signal,
+                        title="Concurrent Trade Limit",
+                        reason=concurrent_reason,
+                        block_type="concurrent_limit",
+                    )
+                    
                     return _block_signal(
                         signal,
                         reason=concurrent_reason,
@@ -306,9 +342,17 @@ class TradeExecutionService:
         lot = self._revalidate_lot(signal, entry_raw)
 
         if lot <= 0:
+            reason = "Lot size is zero — SL distance is zero or invalid; signal rejected"
+            _notify_trade_blocked(
+                signal,
+                title="Invalid Lot Size",
+                reason=reason,
+                block_type="invalid_lot_size",
+            )
+
             return _block_signal(
                 signal,
-                reason="Lot size is zero — SL distance is zero or invalid; signal rejected",
+                reason=reason,
                 decision="blocked_by_filter",
                 filter_name="invalid_lot_size",
             )
@@ -341,6 +385,40 @@ class TradeExecutionService:
             err = result.error if result else "Order manager returned no result"
             signal["rejection_reason"] = err
             signal["status"] = "failed"
+            severity = "error"
+            title = "Order Failed"
+
+            if "Final risk audit failed" in str(err):
+                severity = "warning"
+                title = "Risk Audit Blocked Trade"
+            elif "Spread too wide" in str(err):
+                severity = "warning"
+                title = "Spread Blocked Trade"
+            elif "Duplicate rejected" in str(err):
+                severity = "warning"
+                title = "Duplicate Trade Blocked"
+            elif "Lot size is zero" in str(err) or "invalid" in str(err).lower():
+                severity = "warning"
+                title = "Invalid Trade Blocked"
+
+            notification_manager.add(
+                type="risk_alert",
+                title=title,
+                message=(
+                    f"{signal.get('symbol')} {str(signal.get('direction', '')).upper()} "
+                    f"via {signal.get('strategy', 'unknown')}: {err}"
+                ),
+                severity=severity,
+                metadata={
+                    "symbol": signal.get("symbol"),
+                    "direction": signal.get("direction"),
+                    "strategy": signal.get("strategy"),
+                    "trading_mode": signal.get("trading_mode"),
+                    "signal_id": signal.get("id"),
+                    "reason": err,
+                },
+            )
+            
             _record_signal_journal_safe(
                 signal,
                 status="failed",
@@ -505,12 +583,21 @@ class TradeExecutionService:
                 max_progress = 0.80
 
             if progress >= max_progress:
+                reason = (
+                    f"Stale signal: price already {progress:.0%} to TP "
+                    f"(limit {max_progress:.0%})"
+                )
+
+                _notify_trade_blocked(
+                    signal,
+                    title="Stale Signal Blocked",
+                    reason=reason,
+                    block_type="stale_signal",
+                )
+
                 return _block_signal(
                     signal,
-                    reason=(
-                        f"Stale signal: price already {progress:.0%} to TP "
-                        f"(limit {max_progress:.0%})"
-                    ),
+                    reason=reason,
                     decision="blocked_by_filter",
                     filter_name="stale_signal",
                     filters={
@@ -550,6 +637,7 @@ class TradeExecutionService:
                 balance=current_balance,
                 entry=entry,
                 sl=sl,
+                symbol=signal["symbol"],
                 tick_value=symbol_info.get("pip_value", 1.0),
                 tick_size=symbol_info.get("tick_size", 0.00001),
                 min_lot=symbol_info.get("min_lot", 0.01),

@@ -25,6 +25,7 @@ from engine.trade_learning import apply_trade_learning
 from engine.trade_lifecycle import already_closed, mark_trade_closed, mark_trade_open
 from engine.trade_state import trade_state_store
 from engine.utils.symbol_utils import normalize_symbol
+from engine.notification_manager import notification_manager
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +346,23 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
             direction,
             profit,
         )
+        notification_manager.add(
+            type="position_closed",
+            title=f"Recovered Closed Trade — {symbol}",
+            message=(
+                f"{direction.upper()} {symbol} #{ticket} was closed while API was offline. "
+                f"Recovered P&L: {profit:+.2f}"
+            ),
+            severity="success" if profit > 0 else ("error" if profit < 0 else "info"),
+            metadata={
+                "ticket": ticket,
+                "symbol": symbol,
+                "direction": direction.upper(),
+                "profit": profit,
+                "trading_type": trading_type,
+                "recovery": True,
+            },
+        )
 
     # Re-launch poll for journal-open tickets that are still live.
     if poll_callback is not None:
@@ -493,4 +511,23 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
             ticket,
             symbol,
             direction,
+        )
+
+        notification_manager.add(
+            type="position_opened",
+            title=f"Recovered Live Position — {symbol}",
+            message=(
+                f"Found untracked live bot position #{ticket}: "
+                f"{direction.upper()} {symbol} ({volume} lots). "
+                "Journal/lifecycle tracking restored."
+            ),
+            severity="warning",
+            metadata={
+                "ticket": ticket,
+                "symbol": symbol,
+                "direction": direction.upper(),
+                "volume": volume,
+                "trading_type": trading_type,
+                "recovery": True,
+            },
         )

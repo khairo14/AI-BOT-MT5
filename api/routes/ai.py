@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional, cast
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -32,6 +32,7 @@ from ai.predictor import predictor, TRADING_TYPE_TF
 
 from ai.rl_agent import rl_manager
 from ai.trade_memory import memory
+import pandas as pd
 
 router = APIRouter()
 
@@ -43,6 +44,16 @@ _TRAIN_BARS: dict[str, int] = {
     "day_trading":  50_000,  # H1  ≈ 5.7 years
     "swing":         30_000,  # H4  ≈ 13.7 years
 }
+
+
+def _as_df(value: Any) -> pd.DataFrame | None:
+    if value is None:
+        return None
+
+    if isinstance(value, pd.DataFrame):
+        return value
+
+    return cast(pd.DataFrame, value)
 
 
 class TrainRequest(BaseModel):
@@ -120,7 +131,7 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
 
             # ── Phase 1: fetch each symbol ────────────────────────────────────
             mode_bars = req.bars if req.bars > 0 else _TRAIN_BARS.get(trading_type, 5_000)
-            ohlcv: dict[str, object] = {}
+            ohlcv: dict[str, pd.DataFrame] = {}
             for symbol in entries:
                 if not symbol or predictor.is_training(symbol, trading_type):
                     continue
@@ -133,6 +144,11 @@ async def train_all_symbols(req: TrainAllRequest = TrainAllRequest()):
                     )
                 else:
                     df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, mode_bars)
+
+                df = _as_df(df)
+                if df is None or df.empty:
+                    continue
+
                 ohlcv[symbol] = df
                 await asyncio.sleep(0.3)  # rest between pairs
 
@@ -500,7 +516,13 @@ def get_accuracy_history(
     _history_path = Path("ai/data") / "lstm_accuracy_history.jsonl"
     from engine.account_store import current_mode as _cur_mode
     _mode = _cur_mode()
-    
+
+    from ai.trade_memory import normalize_execution_mode
+    _mode = normalize_execution_mode(_mode)
+    if _mode not in {"demo", "live"}:
+        _mode = "demo"
+
+
     if not _history_path.exists():
         # No history yet — create first snapshot
         from ai.trade_memory import memory
@@ -530,7 +552,7 @@ def get_accuracy_history(
             
             # Filter by account mode — skip snapshots from the other mode.
             # Snapshots without a "mode" field (legacy) are included for backward compat.
-            entry_mode = entry.get("mode", "all")
+            entry_mode = normalize_execution_mode(entry.get("mode", "all"))
             if entry_mode not in ("all", _mode):
                 continue
             
@@ -549,11 +571,22 @@ def get_accuracy_history(
             })
     
     if not snapshots:
+        from ai.trade_memory import memory
+
+        memory.snapshot_accuracy(
+            trading_type=trading_type,
+            min_samples=10,
+            live_only=True,
+            mode=_mode,
+            account_login=account_login,
+        )
+
         return {
             "trading_type": trading_type or "all",
+            "mode": _mode,
             "days": days,
             "snapshots": [],
-            "message": f"No snapshots in the last {days} days"
+            "message": "Created a fresh LSTM accuracy snapshot. Refresh this endpoint once."
         }
     
     # Calculate statistics
@@ -722,13 +755,10 @@ def get_rl_history(
     import json
     
     # Read account mode
-    _mode_path = Path("config/account_mode.json")
-    if not _mode_path.exists():
-        return {"error": "account_mode.json not found", "snapshots": []}
-    
-    with open(_mode_path, encoding="utf-8") as f:
-        _mode_data = json.load(f)
-        _mode = _mode_data.get("mode", "paper")
+    from engine.account_store import current_mode
+
+    _mode = current_mode()
+    _mode = "demo" if _mode == "demo" else "live"
     
     if strategy_name:
         _history_path = Path("ai/data") / f"rl_history_{strategy_name}_{trading_type}_{_mode}.jsonl"
@@ -963,7 +993,7 @@ def get_rl_qtable(
     """
     from ai.rl_agent import ACTIONS
 
-    agent = rl_manager.agent(strategy_name, trading_type)
+    agent = rl_manager.agent(strategy_name or "", trading_type)
     
     # Get Q-table (protected by lock in status())
     agent_status = agent.status()
@@ -1156,7 +1186,7 @@ def get_cache_stats():
     return predictor.cache_stats()
 
 @router.post("/lstm/cache/clear")
-def clear_cache(symbol: str = None, trading_type: str = None):
+def clear_cache(symbol: Optional[str] = None, trading_type: Optional[str] = None):
     """
     Clear prediction cache. If symbol/trading_type provided, clear only that entry.
     Otherwise clear all cached predictions.
@@ -1277,7 +1307,7 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
         scanner_cfg = {}
 
     async def _bg_task() -> None:
-        ohlcv_cache: dict[tuple[str, str], object] = {}
+        ohlcv_cache: dict[tuple[str, str], pd.DataFrame] = {}
 
         for trading_type in ("scalping", "day_trading", "swing"):
             active   = strategies_cfg.get(trading_type, {}).get("active_strategies", [])
@@ -1316,6 +1346,11 @@ async def run_optimizer_all(req: OptimizeRequest = OptimizeRequest()):
                         )
                     else:
                         df = await asyncio.to_thread(client.get_ohlcv, symbol, tf_str, n_bars)
+
+                    df = _as_df(df)
+                    if df is None or df.empty:
+                        continue
+
                     ohlcv_cache[cache_key] = df
                 await asyncio.sleep(0.3)  # rest between pairs — gives live bot MT5 lock
 

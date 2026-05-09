@@ -1,0 +1,16 @@
+{
+  "account_login": 1301109267,
+  "account_mode": "demo",
+  "bot_magic": 20260318,
+  "broker_bot_closed_positions": 158,
+  "broker_bot_total_pnl": -4210.36,
+  "journal_closed_tickets": 158,
+  "journal_total_pnl": -4210.36,
+  "missing_in_journal_count": 0,
+  "extra_in_journal_count": 0,
+  "pnl_mismatch_count": 0,
+  "manual_or_unknown_closed_positions": 1,
+  "missing_in_journal": [],
+  "extra_in_journal": [],
+  "pnl_mismatches": []
+}

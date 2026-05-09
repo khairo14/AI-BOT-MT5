@@ -60,7 +60,7 @@ def _detect_category(symbol: str) -> str:
         return "commodity"
     
     # Stocks (company names)
-    stocks = {"APPLE", "TESLA", "NVDA", "MICROSOFT", "AMAZON", "GOOGLE", "META", "NETFLIX", "ADV"},
+    stocks = {"APPLE", "TESLA", "NVDA", "MICROSOFT", "AMAZON", "GOOGLE", "META", "NETFLIX", "ADV"}
     if any(stk in clean for stk in stocks):
         return "stock"
     
@@ -149,9 +149,9 @@ class RegimeClassifier:
         if len(df) < 50:
             return "quiet"
 
-        close = df["close"].values.astype(float)
-        high = df["high"].values.astype(float)
-        low = df["low"].values.astype(float)
+        close = np.asarray(df["close"].to_numpy(dtype=float), dtype=float)
+        high = np.asarray(df["high"].to_numpy(dtype=float), dtype=float)
+        low = np.asarray(df["low"].to_numpy(dtype=float), dtype=float)
 
         # ── 1. Trend strength via ADX ────────────────────────────────────────
         adx = self._compute_adx(high, low, close, period=14)
@@ -175,9 +175,19 @@ class RegimeClassifier:
 
         # ── 4. Price structure for breakout detection ────────────────────────
         bb_upper, bb_lower = self._bollinger_bands(close, period=20, std=2)
-        bb_width = (bb_upper[-1] - bb_lower[-1]) / close[-1] if close[-1] > 0 else 0
-        bb_width_expanding = bb_width > np.percentile(bb_width[-50:], 80) if len(bb_width) >= 50 else False
 
+        bb_width_series = np.where(
+            close > 0,
+            (bb_upper - bb_lower) / close,
+            0.0,
+        )
+
+        current_bb_width = float(bb_width_series[-1]) if len(bb_width_series) else 0.0
+        bb_width_expanding = (
+            current_bb_width > float(np.percentile(bb_width_series[-50:], 80))
+            if len(bb_width_series) >= 50
+            else False
+        )
         # ── 5. Decision tree ─────────────────────────────────────────────────
         
         # Quiet market (no movement)
@@ -233,7 +243,7 @@ class RegimeClassifier:
             self._atr_high_thresholds[symbol] = float(high_thresh)
             self._atr_baselines[symbol] = float(baseline if 'baseline' in locals() else baseline_pct)
         
-        return low_thresh, high_thresh
+        return float(low_thresh), float(high_thresh)
 
     # ── Technical indicators ─────────────────────────────────────────────────
 

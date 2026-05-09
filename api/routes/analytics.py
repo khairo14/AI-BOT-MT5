@@ -1,10 +1,10 @@
 """
-Analytics routes — performance metrics for live and paper accounts,
+Analytics routes — performance metrics for live and demo accounts,
 segmented by trading mode (scalping / day_trading / swing).
 
 Endpoints:
     GET /analytics/performance
-        ?account=paper|live|all
+        ?account=demo|live|all
         &trading_type=scalping|day_trading|swing  (optional)
         &limit=5000
 
@@ -66,7 +66,7 @@ def _daily_returns(closed: list[dict]) -> list[float]:
 
 
 def _sharpe(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
-    """Annualised Sharpe ratio from daily returns."""
+    """Annualized Sharpe ratio from daily returns."""
     if len(daily_rets) < 2:
         return 0.0
     arr = np.array(daily_rets) - risk_free_daily
@@ -78,7 +78,7 @@ def _sharpe(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
 
 
 def _sortino(daily_rets: list[float], risk_free_daily: float = 0.0) -> float:
-    """Annualised Sortino ratio (downside deviation only)."""
+    """Annualized Sortino ratio (downside deviation only)."""
     if len(daily_rets) < 2:
         return 0.0
     arr = np.array(daily_rets) - risk_free_daily
@@ -202,7 +202,7 @@ def _trade_quality_distribution(closed: list[dict]) -> dict[str, int]:
 
 @router.get("/performance")
 def get_performance(
-    account: str = Query("all", pattern="^(paper|live|all)$"),
+    account: str = Query("all", pattern="^(demo|live|all)$"),
     trading_type: str = Query("all", pattern="^(scalping|day_trading|swing|all)$"),
     account_login: Optional[int] = Query(None, description="Filter by specific MT5 account login number"),
     limit: int = Query(5000, ge=1, le=50_000),
@@ -211,7 +211,7 @@ def get_performance(
     Return comprehensive trading performance analytics.
 
     Query params:
-        account       — paper | live | all
+        account       — demo | live | all
         trading_type  — scalping | day_trading | swing | all
         account_login — optional filter by specific MT5 account login
         limit         — max closed trades to analyse (default 5000)
@@ -318,20 +318,69 @@ def get_performance(
         },
     }
 
-
+# ── market analysis endpoint ─────────────────────────────────────────────────────────────────
 @router.get("/regime/status")
 def get_regime_status():
-    """Return the current market regime label for all classified symbols."""
+    """Return current market regime labels for scanner symbols."""
     try:
+        import json
+
+        from api.main import get_mt5_client
         from engine.regime_classifier import regime_classifier
-        # Return regimes from the classifier's cache
-        regimes = {}
-        with regime_classifier._lock:
-            for key, (regime, _) in regime_classifier._cache.items():
-                # Extract symbol from cache key (format: "symbol_timeframe")
-                symbol = key.split("_", 1)[0] if "_" in key else key
-                if symbol not in regimes:
-                    regimes[symbol] = regime
-        return {"regimes": regimes}
+
+        # Load scanner symbol configuration
+        scanner_path = "config/scanner.json"
+
+        with open(scanner_path, "r") as f:
+            scanner_cfg = json.load(f)
+
+        # Collect all configured symbols
+        symbols: set[str] = set()
+
+        for ttype in ["scalping", "day_trading", "swing"]:
+            cfg = scanner_cfg.get(ttype, {})
+
+            for sym in cfg.get("symbols", []):
+                if sym:
+                    symbols.add(sym)
+
+        # Get MT5 client once
+        client = get_mt5_client()
+
+        if client is None or not client.is_connected():
+            return {
+                "regimes": {},
+                "error": "MT5 not connected",
+            }
+
+        regimes: dict[str, str] = {}
+
+        # Classify each symbol
+        for symbol in symbols:
+            try:
+                df = client.get_ohlcv(symbol, "H1", 250)
+
+                if df is None or len(df) < 50:
+                    continue
+
+                regime = regime_classifier.classify(
+                    symbol=symbol,
+                    df=df,
+                    timeframe="H1",
+                    force_refresh=False,
+                )
+
+                regimes[symbol] = regime
+
+            except Exception:
+                continue
+
+        return {
+            "regimes": regimes,
+        }
+
     except Exception as exc:
-        return {"regimes": {}, "error": str(exc)}
+        return {
+            "regimes": {},
+            "error": str(exc),
+        }
