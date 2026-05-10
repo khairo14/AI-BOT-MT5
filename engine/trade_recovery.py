@@ -88,6 +88,16 @@ def _trading_type_from_comment(comment: str) -> str:
     return "day_trading"
 
 
+def _strategy_from_recovery_entry(entry: dict[str, Any]) -> str:
+    """
+    Recovery must not trust MT5 comments as strategy names because broker
+    comments can be truncated. Use stored strategy only. If missing, mark it
+    explicitly unknown instead of inventing/truncating a strategy.
+    """
+    strategy = str(entry.get("strategy") or "").strip()
+    return strategy if strategy else "unknown_recovered"
+
+
 def _classify_outcome(
     *,
     direction: str,
@@ -196,6 +206,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
         entry_price = float(entry.get("entry") or 0.0)
         direction = str(entry.get("direction", "buy")).upper()
         trading_type = entry.get("trading_mode") or entry.get("trading_type") or "day_trading"
+        strategy = _strategy_from_recovery_entry(entry)
 
         pip_value = 0.01 if "JPY" in str(symbol).upper() else 0.0001
         pips = ((close_price - entry_price) if direction == "BUY" else (entry_price - close_price)) / pip_value
@@ -224,7 +235,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
         trade_journal.log(
             ticket=ticket,
             symbol=symbol,
-            strategy=entry.get("strategy") or entry.get("comment", ""),
+            strategy=strategy,
             account_type=identity.account_type,
             user_id=identity.user_id,
             direction=entry.get("direction", "buy"),
@@ -272,7 +283,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                     avg_conf=stats.get("avg_conf", 0.5),
                     drawdown_pct=0.0,
                     vol_pct=abs(entry_price - sl) / entry_price * 100.0 if entry_price > 0 else 0.5,
-                    strategy_name=entry.get("strategy") or entry.get("comment") or None,
+                    strategy_name=strategy if strategy != "unknown_recovered" else None,
                 )
             except Exception:
                 rl_state = None
@@ -287,7 +298,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                 execution_mode=identity.account_mode,
                 source=identity.account_mode,
                 user_id=identity.user_id,
-                strategy=entry.get("strategy") or entry.get("comment", "unknown"),
+                strategy=strategy,
                 trading_type=trading_type,
                 direction=direction,
                 confidence=float(entry.get("confidence") or 0.5),
@@ -373,7 +384,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                 "symbol": entry.get("symbol"),
                 "direction": entry.get("direction", "buy"),
                 "trading_mode": entry.get("trading_mode") or entry.get("trading_type") or "day_trading",
-                "strategy": entry.get("strategy") or entry.get("comment", ""),
+                "strategy": _strategy_from_recovery_entry(entry),
                 "fill_price": entry.get("entry"),
                 "entry_price": entry.get("entry"),
                 "sl": entry.get("sl"),
@@ -413,6 +424,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
         volume = float(pos.get("volume") or 0.01)
         comment = pos.get("comment", "")
         trading_type = _trading_type_from_comment(comment)
+        strategy = "unknown_recovered"
 
         # Only recover EVOTRADE-managed positions.
         # Prevent manual/external MT5 positions from creating
@@ -459,6 +471,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                 tp=tp if tp else None,
                 profit=None,
                 trading_type=trading_type,
+                strategy=strategy,
                 account_mode=source["account_mode"],
                 account_login=source["account_login"],
                 account_type=source["account_type"],
@@ -476,7 +489,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                 "symbol_raw": symbol,
                 "symbol_normalized": normalize_symbol(symbol),
                 "mode": trading_type,
-                "strategy": comment,
+                "strategy": strategy,
                 "direction": direction.upper(),
                 "entry": entry_price,
                 "sl": sl,

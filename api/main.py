@@ -32,6 +32,7 @@ from api.dependencies import verify_api_key
 from engine.mt5_client import MT5Client
 from engine.order_manager import OrderManager
 from engine.risk_manager import RiskManager
+from api.routes import maintenance as maintenance_routes
 
 # ---------------------------------------------------------------------------
 # Logging setup (Task #11: Logging Improvements)
@@ -312,6 +313,7 @@ async def lifespan(app: FastAPI):
     # Register the running event loop so thread executors can schedule coroutines safely
     _set_event_loop(asyncio.get_running_loop())
     mt5_client = MT5Client()
+    app.state.mt5_client = mt5_client
     connected = mt5_client.connect()
     if not connected:
         logger.error("MT5 failed to connect at startup — check credentials and MT5 terminal.")
@@ -458,6 +460,7 @@ app.include_router(execution_quality_routes.router, prefix="/execution-quality",
 app.include_router(portfolio_routes.router, prefix="/portfolio", tags=["Portfolio Optimization"])
 app.include_router(prometheus_routes.router, prefix="/metrics", tags=["Prometheus Metrics"])
 app.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
+app.include_router(maintenance_routes.router)
 
 
 # Internal endpoint for optimizer completion notification

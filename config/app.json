@@ -1,6 +1,6 @@
 {
   "accounts": {
-    "paper": {
+    "demo": {
       "login": 1301109267,
       "server": "XMGlobal-MT5 6",
       "comment": "XM Demo Account"
