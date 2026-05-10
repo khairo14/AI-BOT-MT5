@@ -20,13 +20,15 @@ Notification Types:
 from __future__ import annotations
 
 import threading
-import time
 from collections import deque
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from loguru import logger
+import json
+import requests
+from pathlib import Path
 
 NotificationType = Literal[
     "signal_generated",
@@ -54,6 +56,91 @@ class Notification:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+_APP_CFG_CACHE: dict[str, object] | None = None
+
+
+def _load_app_cfg() -> dict[str, object]:
+    global _APP_CFG_CACHE
+
+    if isinstance(_APP_CFG_CACHE, dict):
+        return _APP_CFG_CACHE
+
+    cfg: dict[str, object] = {}
+
+    try:
+        cfg_path = Path("config/app.json")
+
+        if cfg_path.exists():
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+
+            if isinstance(loaded, dict):
+                cfg = loaded
+    except Exception:
+        cfg = {}
+
+    _APP_CFG_CACHE = cfg
+    return cfg
+
+def _send_ntfy(
+    *,
+    title: str,
+    message: str,
+    severity: str,
+    type: str,
+) -> None:
+    try:
+        cfg = _load_app_cfg()
+
+        notifications_cfg = cfg.get("notifications", {})
+        if not isinstance(notifications_cfg, dict):
+            return
+
+        ntfy_cfg = notifications_cfg.get("ntfy", {})
+        if not isinstance(ntfy_cfg, dict):
+            return
+
+        allowed_types = ntfy_cfg.get("send_types", [])
+
+        if type not in allowed_types:
+            return
+
+        priority_map = {
+            "info": "default",
+            "success": "default",
+            "warning": "high",
+            "error": "urgent",
+        }
+
+        min_priority = ntfy_cfg.get("priority_min", "warning")
+
+        severity_rank = {
+            "info": 0,
+            "success": 1,
+            "warning": 2,
+            "error": 3,
+        }
+
+        if severity_rank.get(severity, 0) < severity_rank.get(min_priority, 2):
+            return
+
+        server = str(ntfy_cfg.get("server", "https://ntfy.sh")).rstrip("/")
+        topic = ntfy_cfg.get("topic", "evotrade-live")
+
+        requests.post(
+            f"{server}/{topic}",
+            data=message.encode("utf-8"),
+            headers={
+                "Title": title,
+                "Priority": priority_map.get(severity, "default"),
+                "Tags": "money_bag",
+            },
+            timeout=5,
+        )
+
+    except Exception as exc:
+        logger.debug(f"ntfy send failed: {exc}")
 
 
 class NotificationManager:
@@ -95,6 +182,17 @@ class NotificationManager:
             self._notifications.append(notification)
             self._next_id += 1
             logger.debug(f"Notification added: {type} | {title}")
+
+            try:
+                _send_ntfy(
+                    title=title,
+                    message=message,
+                    severity=severity,
+                    type=type,
+                )
+            except Exception:
+                pass
+
             return notification
 
     def get_all(self, unread_only: bool = False, type_filter: Optional[NotificationType] = None) -> list[dict]:
