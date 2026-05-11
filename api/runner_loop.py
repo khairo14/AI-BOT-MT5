@@ -77,56 +77,70 @@ def resume_runner() -> None:
 
 
 def _get_probe_symbol(mode: str) -> str:
-    """Return the first enabled symbol for a mode from symbols.json, default EURUSD."""
+    """Return the first active scanner symbol for a mode from scanner.json."""
     try:
-        syms_cfg = json.loads(
-            (CONFIG_DIR / "symbols.json").read_text(encoding="utf-8-sig")
+        scan_cfg = json.loads(
+            (CONFIG_DIR / "scanner.json").read_text(encoding="utf-8-sig")
         )
-        for entry in syms_cfg.get(mode, []):
-            if isinstance(entry, dict) and entry.get("enabled", False):
-                return entry["symbol"]
-    except Exception:
-        pass
+        mode_cfg = scan_cfg.get(mode, {})
+        symbols = mode_cfg.get("symbols", [])
+
+        if isinstance(symbols, list):
+            for symbol in symbols:
+                if symbol:
+                    return str(symbol)
+
+    except Exception as exc:
+        logger.warning(f"Runner [{mode}]: could not read scanner.json for probe symbol: {exc}")
+
     return "EURUSD"
 
 
 def _new_bar_closed(client, mode: str) -> bool:
-    """
-    Return True if a new primary-timeframe bar has closed since the last scan.
-    Fetches only the latest 2 bars (minimal MT5 lock time) to compare timestamps.
-
-    First call seeds the latest bar timestamp and returns False so a restart
-    does not re-run strategies on already-processed candles.
-    Falls back to True on any MT5 error so a data failure never silently
-    suppresses trading — the strategy runner handles missing data gracefully.
-    """
     global _last_bar_time
-    tf     = _MODE_PRIMARY_TF.get(mode, "M1")
-    symbol = _get_probe_symbol(mode)
-    try:
-        df = client.get_ohlcv(symbol, tf, count=2)
-        if df is None or df.empty:
-            return True   # fail-open
-        latest = df.iloc[-1]["time"]
-        prev   = _last_bar_time.get(mode)
-        if prev is None:
-            _last_bar_time[mode] = latest
-            return False
-        if latest > prev:
-            _last_bar_time[mode] = latest
-            return True
-        return False
-    except Exception:
-        return True   # fail-open: never suppress trading on a fetch error
 
+    tf = _MODE_PRIMARY_TF.get(mode, "M1")
+    symbol = _get_probe_symbol(mode)
+
+    try:
+        df = client.get_ohlcv(symbol, tf, count=3)
+
+        if df is None or len(df) < 2:
+            logger.warning(f"Runner [{mode}]: bar guard fail-open — no enough {tf} bars for {symbol}")
+            return True
+
+        # Use last CLOSED candle, not currently-forming candle
+        latest_closed = df.iloc[-2]["time"]
+        prev = _last_bar_time.get(mode)
+
+        if prev is None:
+            _last_bar_time[mode] = latest_closed
+            logger.info(f"Runner [{mode}]: bar guard seeded {symbol} {tf} closed={latest_closed}")
+            return False
+
+        if latest_closed > prev:
+            _last_bar_time[mode] = latest_closed
+            logger.info(f"Runner [{mode}]: new closed {tf} bar detected {symbol} closed={latest_closed}")
+            return True
+
+        logger.debug(f"Runner [{mode}]: waiting for next closed {tf} bar")
+        return False
+
+    except Exception as exc:
+        logger.warning(f"Runner [{mode}]: bar guard error fail-open: {exc}")
+        return True
 
 async def _run_one_mode(runner, bus, mode: str, sym_override) -> None:
     """Run a single mode scan as a fire-and-forget task — non-blocking."""
+    logger.info(f"Runner [{mode}]: StrategyRunner START symbols={sym_override or 'default'}")
     try:
         signals = await asyncio.to_thread(runner.run_mode, mode, sym_override)
+        logger.info(f"Runner [{mode}]: StrategyRunner END generated={len(signals)}")
+
         for sig in signals:
             await bus.add_signal(_signal_to_dict(sig, mode))
-            logger.debug(f"Runner signal queued: {mode}/{sig.symbol}/{sig.strategy}")
+            logger.info(f"Runner signal queued: {mode}/{sig.symbol}/{sig.strategy}")
+
     except Exception as exc:
         logger.exception(f"Runner loop error [{mode}]: {exc}")
 
@@ -268,7 +282,10 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                 # The guard uses a lightweight 2-bar fetch on the probe symbol.
                 # Falls back to True on any error so a data issue never blocks trading.
                 if not await asyncio.to_thread(_new_bar_closed, client, mode):
-                    logger.debug(f"Runner [{mode}]: no new bar — skipping tick")
+                    logger.debug(
+                        f"Runner [{mode}]: strategy scan skipped until next "
+                        f"{_MODE_PRIMARY_TF.get(mode, 'M1')} close"
+                    )
                     continue
                 # Re-read scanner.json every tick so dashboard changes apply immediately
                 _sym_override = None
@@ -297,8 +314,11 @@ async def _runner_loop(client, order_manager, risk_manager) -> None:
                 # prevents task accumulation under high MT5 latency.
                 _prev = _mode_tasks.get(mode)
                 if _prev and not _prev.done():
-                    logger.debug(f"Runner [{mode}]: previous task still running — skipping tick")
+                    logger.warning(f"Runner [{mode}]: previous StrategyRunner task still running — skipping scan")
                     continue
+
+                logger.info(f"Runner [{mode}]: launching StrategyRunner symbols={_sym_override or 'default'}")
+
                 _t = asyncio.create_task(_run_one_mode(runner, bus, mode, _sym_override))
                 _mode_tasks[mode] = _t
 

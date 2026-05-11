@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import threading
 from typing import Any
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 FILE = DATA_DIR / "signal_journal.jsonl"

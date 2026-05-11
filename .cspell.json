@@ -121,5 +121,6 @@
     "ntfy",
     "dotenv",
     "unvalidated",
+    "wdata",
   ]
 }

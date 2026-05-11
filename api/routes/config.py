@@ -165,15 +165,15 @@ def _load(filename: str) -> dict:
 
 
 def _save(filename: str, data: dict) -> None:
-    """Atomic write: serialise to a temp file then rename over the target.
-    Guarantees the config file is never left empty on a crash or serialisation error."""
+    """Atomic write: serialize to a temp file then rename over the target.
+    Guarantees the config file is never left empty on a crash or serialization error."""
     path = CONFIG_DIR / filename
-    serialised = json.dumps(data, indent=2)
+    serialized = json.dumps(data, indent=2)
     # Write to a temp file in the same directory (same filesystem → atomic rename)
     fd, tmp_path = tempfile.mkstemp(dir=str(CONFIG_DIR), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(serialised)
+            f.write(serialized)
         os.replace(tmp_path, path)   # atomic on POSIX; near-atomic on Windows
     except Exception:
         try:
@@ -365,7 +365,7 @@ def update_strategies_config(body: PatchRequest):
     _validate_numeric_fields(body.data)
     # Validate active_strategies lists contain only known strategy names
     _KNOWN_STRATEGIES = {
-        "ema_scalp", "bb_squeeze", "vwap_reversion",
+        "ema_scalp", "bb_squeeze", "vwap_reversion","stoch_rsi_pullback",
         "macd_ema_trend", "sr_breakout", "rsi_divergence",
         "ema_trend_rider", "fibonacci_rsi", "weekly_breakout",
     }
