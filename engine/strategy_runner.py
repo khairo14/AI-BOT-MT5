@@ -25,6 +25,9 @@ from engine.order_manager import BOT_MAGIC, OrderManager, OrderRequest
 from engine.risk_manager import RiskManager
 from engine.session_filter import session_filter
 from engine.strategies.base_strategy import StrategyResult
+from engine.signal_journal import signal_journal
+from engine.account_store import current_account_login, current_mode
+from engine.utils.symbol_utils import normalize_symbol
 
 # ── strategy imports ──────────────────────────────────────────────────────────
 from engine.strategies.scalping.ema_scalp import EMAScalp
@@ -477,6 +480,18 @@ class StrategyRunner:
         )
         if not sl_ok:
             logger.debug(f"{strat_name}/{symbol}: R:R validation failed — signal skipped")
+            self._journal_blocked_signal(
+                symbol=symbol,
+                strategy_name=strat_name,
+                trading_type=trading_type,
+                signal=sig,
+                reason="sl_tp_validation_failed",
+                decision="blocked_by_risk",
+                filters={
+                    "filter": "sl_tp_validation",
+                    "detail": _err,
+                },
+            )
             return None
 
         # (is_trading_allowed already checked at the top of this method)
@@ -508,6 +523,20 @@ class StrategyRunner:
                     f"{strat_name}/{symbol}: spread {_current_spread:.2f}pip > "
                     f"max {_max_spread}pip — signal skipped"
                 )
+
+                self._journal_blocked_signal(
+                    symbol=symbol,
+                    strategy_name=strat_name,
+                    trading_type=trading_type,
+                    signal=sig,
+                    reason="spread_too_high",
+                    decision="blocked_by_filter",
+                    filters={
+                        "filter": "spread",
+                        "spread_pips": _current_spread,
+                        "max_spread_pips": _max_spread,
+                    },
+                )
                 return None
 
         lot = self.risk_manager.calculate_lot_size(
@@ -519,6 +548,21 @@ class StrategyRunner:
             tick_value=sym_info.get("pip_value", 1.0),
             tick_size=sym_info.get("tick_size", 0.00001),
         )
+
+        if lot <= 0:
+            self._journal_blocked_signal(
+                symbol=symbol,
+                strategy_name=strat_name,
+                trading_type=trading_type,
+                signal=sig,
+                reason="risk_manager_rejected_lot_size",
+                filters={
+                    "filter": "risk_manager_lot_guard",
+                    "calculated_lot": lot,
+                    "min_lot": sym_info.get("min_lot", 0.01),
+                },
+            )
+            return None
 
         # Apply RL agent risk-factor multiplier (1.0 = neutral, 0.5–1.5 range).
         # The RL agent learns whether to scale position size up or down based on
@@ -536,6 +580,21 @@ class StrategyRunner:
                         logger.warning(
                             f"RL risk factor {rf:.2f} reduced lot below broker min_lot={min_lot}. "
                             f"Rejecting trade instead of forcing min lot [{symbol}/{trading_type}]."
+                        )
+                        self._journal_blocked_signal(
+                            symbol=symbol,
+                            strategy_name=strat_name,
+                            trading_type=trading_type,
+                            signal=sig,
+                            reason="below_min_lot_after_rl_risk_factor",
+                            filters={
+                                "filter": "rl_risk_factor_min_lot_guard",
+                                "risk_factor": rf,
+                                "raw_lot": lot,
+                                "intended_lot": _intended_lot,
+                                "min_lot": min_lot,
+                                "lot_step": lot_step,
+                            },
                         )
                         return None
 
@@ -606,6 +665,23 @@ class StrategyRunner:
                     logger.warning(
                         f"Regime factor {_regime_factor:.2f} reduced lot below broker min_lot={_min_l}. "
                         f"Rejecting trade instead of forcing min lot [{symbol}/{trading_type}/{_regime}]."
+                    )
+
+                    self._journal_blocked_signal(
+                        symbol=symbol,
+                        strategy_name=strat_name,
+                        trading_type=trading_type,
+                        signal=sig,
+                        reason="below_min_lot_after_regime_factor",
+                        filters={
+                            "filter": "regime_factor_min_lot_guard",
+                            "regime": _regime,
+                            "regime_factor": _regime_factor,
+                            "raw_lot": lot,
+                            "adjusted_lot": _regime_adj,
+                            "min_lot": _min_l,
+                            "lot_step": _step_l,
+                        },
                     )
                     return None
 
@@ -711,6 +787,19 @@ class StrategyRunner:
                             f"AI confidence gate blocked {strat_name}/{symbol}: "
                             f"{strat_sig.confidence:.2f} < {_threshold:.2f}"
                         )
+                        self._journal_blocked_signal(
+                            symbol=symbol,
+                            strategy_name=strat_name,
+                            trading_type=trading_type,
+                            signal=strat_sig,
+                            reason="confidence_below_threshold",
+                            decision="blocked_by_filter",
+                            filters={
+                                "filter": "confidence_threshold",
+                                "confidence": strat_sig.confidence,
+                                "threshold": _threshold,
+                            },
+                        )
                         return None
             except Exception:
                 pass
@@ -719,6 +808,17 @@ class StrategyRunner:
 
         # Correlation guard — prevent double USD-direction exposure within same mode
         if not self._correlation_ok(strat_sig):
+            self._journal_blocked_signal(
+                symbol=symbol,
+                strategy_name=strat_name,
+                trading_type=trading_type,
+                signal=strat_sig,
+                reason="correlation_guard_blocked",
+                decision="blocked_by_risk",
+                filters={
+                    "filter": "correlation_guard",
+                },
+            )
             return None
 
         return strat_sig
@@ -998,3 +1098,42 @@ class StrategyRunner:
         except Exception:
             pass
         return base
+    
+    def _journal_blocked_signal(
+        self,
+        *,
+        symbol: str,
+        strategy_name: str,
+        trading_type: str,
+        signal,
+        reason: str,
+        decision: str = "blocked_by_risk",
+        filters: dict | None = None,
+    ) -> None:
+        try:
+            signal_journal.record({
+                "symbol_raw": symbol,
+                "symbol_normalized": normalize_symbol(symbol),
+                "strategy": strategy_name,
+                "trading_type": trading_type,
+                "mode": trading_type,
+                "execution_mode": current_mode(),
+                "direction": getattr(signal, "direction", ""),
+                "confidence": float(getattr(signal, "confidence", 0.0) or 0.0),
+                "score": float(getattr(signal, "confidence", 0.0) or 0.0),
+                "entry": getattr(signal, "entry_price", None),
+                "sl": getattr(signal, "sl_price", None),
+                "tp": getattr(signal, "tp_price", None),
+                "timeframe": getattr(signal, "timeframe", ""),
+                "regime": getattr(signal, "regime", None),
+                "rl_state": getattr(signal, "rl_state", None),
+                "status": "blocked",
+                "decision": decision,
+                "reason": reason,
+                "account_login": current_account_login(),
+                "account_type": current_mode(),
+                "user_id": "default",
+                "filters": filters or {},
+            })
+        except Exception as exc:
+            logger.debug(f"Signal journal blocked write skipped: {exc}")

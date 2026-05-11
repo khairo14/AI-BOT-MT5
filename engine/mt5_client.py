@@ -214,7 +214,7 @@ class MT5Client:
         if result is None:
             logger.warning(f"mt5.symbols_get() returned None: {mt5.last_error()}")
             return []
-        return list(result)
+        return [s for s in list(result) if bool(getattr(s, "visible", False))]
 
     def get_symbol_info(self, symbol: str) -> Optional[dict]:
         """Return tick size, pip value, spread, and trading constraints."""
@@ -226,9 +226,12 @@ class MT5Client:
                 logger.warning(f"Symbol not found: {symbol}")
                 return None
             # Ensure symbol is visible in Market Watch
+            #if not info.visible:
+            #   if not mt5.symbol_select(symbol, True):
+            #        logger.warning(f"symbol_select failed for {symbol}: {mt5.last_error()}")
             if not info.visible:
-                if not mt5.symbol_select(symbol, True):
-                    logger.warning(f"symbol_select failed for {symbol}: {mt5.last_error()}")
+                logger.debug(f"Skipping non-visible Market Watch symbol: {symbol}")
+                return None
             tick = mt5.symbol_info_tick(symbol)
 
         # Convert MT5 spread (in points) to pips — instrument-aware.

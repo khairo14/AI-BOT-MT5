@@ -27,19 +27,18 @@
     "drawdown_alert": true,
     "circuit_breaker_triggered": true,
     "news_pause": true,
-
-  "ntfy": {
-    "enabled": true,
-    "server": "https://ntfy.sh",
-    "topic": "evotrade-live-051002026",
-    "priority_min": "warning",
-    "send_types": [
-      "position_opened",
-      "position_closed",
-      "risk_alert",
-      "circuit_breaker"
-    ]
-  }
+    "ntfy": {
+      "enabled": true,
+      "server": "https://ntfy.sh",
+      "topic": "evotrade-live-051002026",
+      "priority_min": "warning",
+      "send_types": [
+        "position_opened",
+        "position_closed",
+        "risk_alert",
+        "circuit_breaker"
+      ]
+    }
   },
   "max_spread_pips": {
     "scalping": 3.0,

@@ -33,6 +33,7 @@ from engine.mt5_client import MT5Client
 from engine.order_manager import OrderManager
 from engine.risk_manager import RiskManager
 from api.routes import maintenance as maintenance_routes
+from api.routes.signal_journal import router as signal_journal_router
 
 # ---------------------------------------------------------------------------
 # Logging setup (Task #11: Logging Improvements)
@@ -461,7 +462,7 @@ app.include_router(portfolio_routes.router, prefix="/portfolio", tags=["Portfoli
 app.include_router(prometheus_routes.router, prefix="/metrics", tags=["Prometheus Metrics"])
 app.include_router(ws_router, prefix="/ws", tags=["WebSocket"])
 app.include_router(maintenance_routes.router)
-
+app.include_router(signal_journal_router)
 
 # Internal endpoint for optimizer completion notification
 @app.post("/internal/optimizer-complete", tags=["Internal"])

@@ -337,6 +337,7 @@ const NAV_SECTIONS = [
     title: "Tools",
     items: [
       { href: "/scanner", label: "Market Scanner", icon: "🔍" },
+      { href: "/signal-journal", label: "Signal Journal", icon: "🧾" },
       { href: "/ml", label: "AI / ML Brain", icon: "🧠" },
       { href: "/backtest", label: "Backtest", icon: "📈" },
     ],
