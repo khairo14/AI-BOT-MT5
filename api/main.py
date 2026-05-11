@@ -29,11 +29,13 @@ from api.websocket.feed import router as ws_router
 from api.signal_bus import bus, _set_event_loop
 from api.runner_loop import start_runner_loop
 from api.dependencies import verify_api_key
+from api.routes import maintenance as maintenance_routes
+from api.routes.signal_journal import router as signal_journal_router
 from engine.mt5_client import MT5Client
 from engine.order_manager import OrderManager
 from engine.risk_manager import RiskManager
-from api.routes import maintenance as maintenance_routes
-from api.routes.signal_journal import router as signal_journal_router
+from ai.signal_validator import signal_validator
+
 
 # ---------------------------------------------------------------------------
 # Logging setup (Task #11: Logging Improvements)
@@ -307,6 +309,43 @@ async def _market_scanner_loop() -> None:
         # Wait 60 minutes before next scan
         await asyncio.sleep(3600)
 
+async def _signal_validation_loop() -> None:
+    """
+    Background task that validates old enough signal-journal entries.
+
+    Runs every 15 minutes.
+    Validation is analytics-only and does NOT affect RL/LSTM learning.
+    """
+    await asyncio.sleep(180)
+
+    while True:
+        try:
+            if mt5_client is None or not mt5_client.is_connected():
+                logger.debug("Signal validator: MT5 not connected, skipping cycle")
+                await asyncio.sleep(300)
+                continue
+
+            result = signal_validator.validate_pending_signals(
+                max_signals=100,
+                client=mt5_client,
+            )
+
+            checked = int(result.get("checked", 0))
+            validated = int(result.get("validated", 0))
+
+            if checked > 0 or validated > 0:
+                logger.info(
+                    f"Signal validator: "
+                    f"checked={checked} | "
+                    f"validated={validated} | "
+                    f"pending_seen={result.get('pending_seen', 0)}"
+                )
+
+        except Exception as exc:
+            logger.exception(f"Signal validator loop failed: {exc}")
+
+        await asyncio.sleep(15 * 60)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global mt5_client, _risk_manager
@@ -365,6 +404,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_rl_idle_decay_loop())
         # Market scanner — runs every 60 min to discover new trading opportunities
         asyncio.create_task(_market_scanner_loop())
+        # signal validation loop
+        asyncio.create_task(_signal_validation_loop())
     yield
     # Shutdown
     try:
