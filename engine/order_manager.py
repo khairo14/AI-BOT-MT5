@@ -448,8 +448,40 @@ class OrderManager:
         )
 
         if not audit_ok:
-            logger.warning(audit_msg)
-            return OrderResult(success=False, error=audit_msg)
+            original_vol = vol
+
+            # Reduce volume step-by-step until final live risk audit passes.
+            # Do NOT change SL/TP here; only reduce exposure.
+            while step > 0:
+                next_vol = round(math.floor((vol - step) / step) * step, 10)
+
+                if next_vol < sym_info.volume_min:
+                    break
+
+                retry_ok, retry_msg = self._final_risk_audit(
+                    symbol=req.symbol,
+                    direction=req.direction,
+                    volume=next_vol,
+                    entry_price=price,
+                    sl_price=sl,
+                )
+
+                if retry_ok:
+                    logger.warning(
+                        f"Final risk audit adjusted volume | {req.symbol} {req.direction} | "
+                        f"{original_vol} -> {next_vol} | {retry_msg}"
+                    )
+                    vol = next_vol
+                    audit_ok = True
+                    audit_msg = retry_msg
+                    break
+
+                vol = next_vol
+                audit_msg = retry_msg
+
+            if not audit_ok:
+                logger.warning(audit_msg)
+                return OrderResult(success=False, error=audit_msg)
 
         logger.debug(audit_msg)
 
