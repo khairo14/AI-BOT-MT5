@@ -13,7 +13,8 @@ from ai.signal_validator import signal_validator
 
 router = APIRouter(prefix="/signal-journal", tags=["signal-journal"])
 
-SIGNAL_JOURNAL_PATH = Path("engine/data/signal_journal.jsonl")
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SIGNAL_JOURNAL_PATH = ROOT_DIR / "data" / "signal_journal.jsonl"
 
 
 def _read_signal_rows() -> list[dict[str, Any]]:
@@ -71,7 +72,7 @@ def get_signal_journal(
 
     filtered = sorted(
         filtered,
-        key=lambda r: r.get("timestamp", ""),
+        key=lambda r: r.get("recorded_at", ""),
         reverse=True,
     )
 
