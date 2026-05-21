@@ -12,9 +12,9 @@
     }
   },
   "execution_mode": {
-    "scalping": "auto",
-    "day_trading": "auto",
-    "swing": "auto"
+    "scalping": "manual",
+    "day_trading": "manual",
+    "swing": "manual"
   },
   "ea_enabled": true,
   "bot_magic": 20260318,
@@ -154,5 +154,17 @@
     "H4": 14400,
     "D1": 86400,
     "W1": 604800
+  },
+  "maintenance": {
+    "enabled": true,
+    "audit_interval_minutes": 30,
+    "auto_repair_enabled": false,
+    "notify_summary": true,
+    "quarantine_corrupt_jsonl": true,
+    "archive_oversized_jsonl": true,
+    "delete_old_junk_logs": true,
+    "oversized_jsonl_mb": 100,
+    "archive_keep_recent_rows": 50000,
+    "junk_log_retention_days": 30
   }
 }

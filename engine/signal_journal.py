@@ -19,6 +19,7 @@ VALID_SIGNAL_STATUSES = {
     "expired",
     "cancelled",
     "missed",
+    "failed",
 }
 
 VALID_DECISIONS = {
@@ -28,6 +29,12 @@ VALID_DECISIONS = {
     "blocked_by_risk",
     "blocked_by_filter",
     "shadow_only",
+    "order_send_failed",
+    "execution_error",
+    "execution_unavailable",
+    "replaced_by_higher_score",
+    "direction_conflict",
+    "lost_direction_arbitration",
 }
 
 def normalize_execution_mode(value: Any = None) -> str:

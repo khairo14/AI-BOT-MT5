@@ -87,6 +87,15 @@ def _trading_type_from_comment(comment: str) -> str:
 
     return "day_trading"
 
+def _deal_net_profit(deal: Any) -> float:
+    """
+    Match normal trade outcome accounting:
+    net = profit + swap + commission + fee
+    """
+    return float(getattr(deal, "profit", 0.0) or 0.0) + \
+        float(getattr(deal, "swap", 0.0) or 0.0) + \
+        float(getattr(deal, "commission", 0.0) or 0.0) + \
+        float(getattr(deal, "fee", 0.0) or 0.0)
 
 def _strategy_from_recovery_entry(entry: dict[str, Any]) -> str:
     """
@@ -146,16 +155,16 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
     from engine.trade_journal import trade_journal
     from engine.account_store import current_mode, current_account_login
 
-    unclosed = trade_journal.get_unclosed_tickets()
+    unclosed = trade_journal.get_unclosed_tickets() or []
 
-    if not unclosed:
-        return
-
-    logger.info(
-        "Recovery: found %s unclosed journal ticket(s): %s",
-        len(unclosed),
-        [entry.get("ticket") for entry in unclosed],
-    )
+    if unclosed:
+        logger.info(
+            "Recovery: found %s unclosed journal ticket(s): %s",
+            len(unclosed),
+            [entry.get("ticket") for entry in unclosed],
+        )
+    else:
+        logger.info("Recovery: no unclosed journal tickets; checking MT5 live positions")
 
     live_raw = await asyncio.to_thread(client.get_open_positions)
     live_positions = live_raw or []
@@ -198,9 +207,9 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
         deal = closed[-1]
         close_time = _safe_iso_from_timestamp(getattr(deal, "time", 0), offset_secs=server_offset)
 
-        profit = float(getattr(deal, "profit", 0.0) or 0.0)
+        profit = _deal_net_profit(deal)
         if len(closed) > 1:
-            profit = float(sum(float(getattr(d, "profit", 0.0) or 0.0) for d in closed))
+            profit = float(sum(_deal_net_profit(d) for d in closed))
 
         close_price = float(getattr(deal, "price", 0.0) or 0.0)
         entry_price = float(entry.get("entry") or 0.0)
@@ -230,29 +239,6 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
             duration_mins = (close_dt - open_dt).total_seconds() / 60
         except Exception:
             duration_mins = 0.0
-
-        # Write close journal once; lifecycle guard is checked above.
-        trade_journal.log(
-            ticket=ticket,
-            symbol=symbol,
-            strategy=strategy,
-            account_type=identity.account_type,
-            user_id=identity.user_id,
-            direction=entry.get("direction", "buy"),
-            volume=float(entry.get("volume") or 0.01),
-            entry=entry_price,
-            sl=sl,
-            tp=tp if tp else None,
-            profit=profit,
-            trading_type=trading_type,
-            account_mode=identity.account_mode,
-            account_login=identity.account_login,
-            comment=entry.get("comment", ""),
-            event="close",
-            close_time=close_time,
-            swap=getattr(deal, "swap", None),
-            commission=getattr(deal, "commission", None),
-        )
 
         try:
             risk_balance = 0.0
@@ -321,6 +307,8 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                 extra={"source": "recovery", "slippage_pips": 0.0},
             )
 
+
+
             newly_closed = mark_trade_closed(
                 ticket,
                 source=entry,
@@ -338,6 +326,29 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                     ticket,
                 )
                 continue
+
+            # Write close journal once; lifecycle guard is checked above.
+            trade_journal.log(
+                ticket=ticket,
+                symbol=symbol,
+                strategy=strategy,
+                account_type=identity.account_type,
+                user_id=identity.user_id,
+                direction=entry.get("direction", "buy"),
+                volume=float(entry.get("volume") or 0.01),
+                entry=entry_price,
+                sl=sl,
+                tp=tp if tp else None,
+                profit=profit,
+                trading_type=trading_type,
+                account_mode=identity.account_mode,
+                account_login=identity.account_login,
+                comment=entry.get("comment", ""),
+                event="close",
+                close_time=close_time,
+                swap=getattr(deal, "swap", None),
+                commission=getattr(deal, "commission", None),
+            )
 
             apply_trade_learning(
                 outcome,
@@ -380,7 +391,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
         still_open = [entry for entry in unclosed if int(entry["ticket"]) in live_tickets]
 
         for entry in still_open:
-            fake_signal = {
+            trade_context = {
                 "symbol": entry.get("symbol"),
                 "direction": entry.get("direction", "buy"),
                 "trading_mode": entry.get("trading_mode") or entry.get("trading_type") or "day_trading",
@@ -399,7 +410,26 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
                 "user_id": entry.get("user_id", "default"),
             }
 
-            await poll_callback(ticket=int(entry["ticket"]), signal=fake_signal, client=client)
+            mark_trade_open(
+                int(entry["ticket"]),
+                source=trade_context,
+                payload={
+                    "symbol_raw": entry.get("symbol_raw") or entry.get("symbol"),
+                    "symbol_normalized": entry.get("symbol_normalized") or normalize_symbol(entry.get("symbol", "")),
+                    "mode": trade_context["trading_mode"],
+                    "strategy": trade_context["strategy"],
+                    "direction": str(trade_context["direction"]).upper(),
+                    "entry": trade_context["entry_price"],
+                    "sl": trade_context["sl"],
+                    "tp1": trade_context["tp"],
+                    "tp2": trade_context["tp2"],
+                    "tp3": trade_context["tp3"],
+                    "volume": trade_context["lot_size"],
+                    "last_event": "recovered_still_open",
+                },
+            )
+
+            await poll_callback(ticket=int(entry["ticket"]), signal=trade_context, client=client)
 
             logger.info(
                 "Recovery: re-launched poll for still-open #%s %s",
@@ -499,11 +529,11 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
             },
         )
 
-        fake_signal = {
+        trade_context = {
             "symbol": symbol,
             "direction": direction,
             "trading_mode": trading_type,
-            "strategy": comment,
+            "strategy": strategy,
             "fill_price": entry_price,
             "entry_price": entry_price,
             "sl": sl,
@@ -517,7 +547,7 @@ async def recover_unclosed_trades(client, *, poll_callback=None) -> None:
         }
 
         if poll_callback is not None:
-            await poll_callback(ticket=ticket, signal=fake_signal, client=client)
+            await poll_callback(ticket=ticket, signal=trade_context, client=client)
 
         logger.info(
             "Recovery: found untracked live position #%s %s %s — wrote journal open-event",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import gzip
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,7 @@ LOG_DIR = ROOT_DIR / "logs"
 MODELS_DIR = AI_DIR / "models"
 
 TRADE_MEMORY_FILE = AI_DATA_DIR / "trade_memory.jsonl"
-SIGNAL_JOURNAL_FILE = ENGINE_DATA_DIR / "signal_journal.jsonl"
+SIGNAL_JOURNAL_FILE = ROOT_DATA_DIR / "signal_journal.jsonl"
 TRADE_JOURNAL_FILE = ROOT_DATA_DIR / "trade_journal.jsonl"
 TRADE_STATE_FILE = ROOT_DATA_DIR / "trade_state.json"
 APP_CONFIG_FILE = CONFIG_DIR / "app.json"
@@ -39,7 +40,7 @@ VALID_OUTCOMES = {
     "breakeven",
     "unknown",
 }
-VALID_SOURCES = {"live", "demo", "backtest", "shadow", "broker"}
+VALID_SOURCES = {"live", "demo", "backtest", "shadow", "broker", "mt5_reconciliation"}
 LEARNING_OUTCOMES = {"tp_hit", "sl_hit"}
 SEVERITY_ORDER = {"ok": 0, "info": 1, "warning": 2, "error": 3, "critical": 4}
 
@@ -202,7 +203,7 @@ class MaintenanceAgent:
         if o["source"] not in VALID_SOURCES:
             errors.append("invalid_source")
 
-        if o["source"] == "broker":
+        if o["source"] in {"broker", "mt5_reconciliation"}:
             o["source"] = o["execution_mode"]
 
         if not o.get("symbol_raw") and o.get("symbol"):
@@ -513,10 +514,18 @@ class MaintenanceAgent:
             for r in journal_rows
             if r.get("event") == "close" and not r.get("_corrupt")
         }
-        journal_open_rows = [r for r in open_rows if self._ticket_key(r) not in close_ticket_keys]
-        journal_open_tickets = {self._safe_int(r.get("ticket")) for r in journal_open_rows if self._safe_int(r.get("ticket"))}
-
+        
         if client is None:
+            journal_open_rows = [
+                r for r in open_rows
+                if self._ticket_key(r) not in close_ticket_keys
+            ]
+            journal_open_tickets = {
+                self._safe_int(r.get("ticket"))
+                for r in journal_open_rows
+                if self._safe_int(r.get("ticket"))
+            }
+
             return {
                 "severity": "info",
                 "available": False,
@@ -526,8 +535,25 @@ class MaintenanceAgent:
 
         try:
             live_positions = client.get_open_positions() or []
+            account_info = client.get_account_info() or {}
+            current_login = self._safe_int(account_info.get("login"))
         except Exception as exc:
             return {"severity": "error", "available": False, "reason": f"open_positions_failed:{exc}"}
+
+        journal_open_rows = [
+            r for r in open_rows
+            if self._ticket_key(r) not in close_ticket_keys
+            and (
+                current_login is None
+                or self._safe_int(r.get("account_login")) == current_login
+            )
+        ]
+
+        journal_open_tickets = {
+            self._safe_int(r.get("ticket"))
+            for r in journal_open_rows
+            if self._safe_int(r.get("ticket"))
+        }
 
         live_tickets = {self._safe_int(p.get("ticket")) for p in live_positions if self._safe_int(p.get("ticket"))}
         journal_open_no_longer_live = [r for r in journal_open_rows if self._safe_int(r.get("ticket")) not in live_tickets]
@@ -555,7 +581,7 @@ class MaintenanceAgent:
         severity = "ok"
         if orphan_bot_positions or broker_closed_missing_journal_close:
             severity = "error"
-        elif journal_open_no_longer_live or live_missing_journal_open:
+        elif journal_open_no_longer_live:
             severity = "warning"
 
         return {
@@ -585,8 +611,9 @@ class MaintenanceAgent:
             closed = bool(row.get("closed"))
             if not closed:
                 active_state.append((key, row))
-            if closed and (row.get("trailing_active") or row.get("last_event") in {"opened", "tp1_hit", "trailing_update"}):
-                closed_left_active.append({"key": key, "ticket": row.get("ticket"), "last_event": row.get("last_event")})
+            if closed and row.get("last_event") in {"opened", "tp1_hit", "trailing_update", "tp1_partial_close", "tp1_be_moved"}:
+                flag_warnings.append({
+                    "key": key, "ticket": row.get("ticket"), "reason": "closed_trade_has_non_terminal_last_event", "last_event": row.get("last_event"),})
             if row.get("tp2_hit") and not row.get("tp1_hit"):
                 flag_warnings.append({"key": key, "reason": "tp2_hit_without_tp1_hit"})
             if row.get("trailing_active") and not (row.get("break_even_moved") or row.get("tp1_hit")):
@@ -594,20 +621,38 @@ class MaintenanceAgent:
             if row.get("closed") and not row.get("closed_at") and not row.get("close_time"):
                 flag_warnings.append({"key": key, "reason": "closed_without_close_time"})
 
+        current_login = None
         live_tickets: set[int] = set()
+
         if client is not None:
             try:
                 live_positions = client.get_open_positions() or []
-                live_tickets: set[int] = {int(ticket) for ticket in (p.get("ticket") for p in live_positions) if ticket is not None}
+                account_info = client.get_account_info() or {}
+                current_login = self._safe_int(account_info.get("login"))
+                live_tickets = {
+                    int(ticket)
+                    for ticket in (p.get("ticket") for p in live_positions)
+                    if ticket is not None
+                }
             except Exception:
                 live_tickets = set()
+                current_login = None
 
         active_not_live = []
-        if live_tickets:
+        if client is not None:
             for key, row in active_state:
+                row_login = self._safe_int(row.get("account_login"))
+                if current_login is not None and row_login != current_login:
+                    continue
+
                 ticket = self._ticket_from_state_key(key, row)
                 if ticket and ticket not in live_tickets:
-                    active_not_live.append({"key": key, "ticket": ticket, "symbol": row.get("symbol_raw") or row.get("symbol")})
+                    active_not_live.append({
+                        "key": key,
+                        "ticket": ticket,
+                        "symbol": row.get("symbol_raw") or row.get("symbol"),
+                        "account_login": row.get("account_login"),
+                    })
 
         severity = "ok"
         if active_not_live or closed_left_active:
@@ -801,8 +846,15 @@ class MaintenanceAgent:
         }
 
     # ------------------------------------------------------------------
-    # Safe repair workflow: dry-run only for now
+    # Safe repair workflow: dry-run + explicitly enabled low-risk writes
     # ------------------------------------------------------------------
+
+    def _maintenance_config(self) -> dict[str, Any]:
+        cfg = self._read_json_file(APP_CONFIG_FILE, default={})
+        if not isinstance(cfg, dict):
+            return {}
+        maintenance = cfg.get("maintenance")
+        return maintenance if isinstance(maintenance, dict) else {}
 
     def dry_run_validate_trade_memory(self) -> dict[str, Any]:
         rows = self._read_jsonl(self.trade_memory_file)
@@ -818,8 +870,13 @@ class MaintenanceAgent:
 
     def dry_run_safe_repairs(self) -> dict[str, Any]:
         """List low-risk repair actions. Does not write anything."""
+        cfg = self._maintenance_config()
         actions = []
-        for path in (self.trade_memory_file, self.signal_journal_file, self.trade_journal_file, LSTM_ACCURACY_HISTORY_FILE):
+        oversized_mb = int(cfg.get("oversized_jsonl_mb", 100) or 100)
+        keep_recent_rows = int(cfg.get("archive_keep_recent_rows", 50000) or 50000)
+        junk_retention_days = int(cfg.get("junk_log_retention_days", 30) or 30)
+
+        for path in self._repairable_jsonl_files():
             hygiene = self._audit_file_hygiene(path)
             if hygiene.get("corrupt_rows", 0) > 0:
                 actions.append({
@@ -830,26 +887,28 @@ class MaintenanceAgent:
                     "risk": "low",
                     "writes_performed": False,
                 })
-            if hygiene.get("oversized"):
+            if float(hygiene.get("size_mb") or 0.0) > oversized_mb:
                 actions.append({
                     "action": "archive_old_jsonl_rows",
                     "file": str(path),
                     "size_mb": hygiene.get("size_mb"),
+                    "keep_recent_rows": keep_recent_rows,
                     "requires_backup": True,
                     "risk": "low",
                     "writes_performed": False,
                 })
 
-        config_hygiene = self.audit_config_hygiene()
-        for issue in config_hygiene.get("issues", []):
-            if issue.get("code") == "paper_account_key_present":
-                actions.append({
-                    "action": "manual_config_cleanup_recommended",
-                    "file": str(APP_CONFIG_FILE),
-                    "issue": issue,
-                    "risk": "manual_review",
-                    "writes_performed": False,
-                })
+        junk_files = self._find_old_junk_files(retention_days=junk_retention_days)
+        if junk_files:
+            actions.append({
+                "action": "delete_old_junk_logs",
+                "file_count": len(junk_files),
+                "retention_days": junk_retention_days,
+                "sample_files": [str(p) for p in junk_files[:20]],
+                "requires_backup": False,
+                "risk": "low",
+                "writes_performed": False,
+            })
 
         return {
             "severity": "info" if actions else "ok",
@@ -857,13 +916,7 @@ class MaintenanceAgent:
             "writes_performed": False,
             "safe_actions_available": len(actions),
             "actions": actions,
-            "blocked_actions": [
-                "modify_rl_qtables",
-                "modify_lstm_model_files",
-                "modify_optimizer_outputs",
-                "mark_recovered_old_account_trades_learning_valid",
-                "place_or_close_trades",
-            ],
+            "blocked_actions": self._blocked_repair_actions(),
         }
 
     def backup_file(self, path: Path) -> Optional[Path]:
@@ -877,6 +930,223 @@ class MaintenanceAgent:
         shutil.copy2(path, target)
         return target
 
+    def _repairable_jsonl_files(self) -> tuple[Path, ...]:
+        return (
+            self.trade_memory_file,
+            self.signal_journal_file,
+            self.trade_journal_file,
+            LSTM_ACCURACY_HISTORY_FILE,
+        )
+
+    def _blocked_repair_actions(self) -> list[str]:
+        return [
+            "modify_trade_state",
+            "backfill_trade_journal_close_rows",
+            "modify_learning_valid_flags",
+            "rewrite_strategy_names",
+            "modify_rl_qtables",
+            "modify_lstm_model_files",
+            "modify_optimizer_outputs",
+            "mark_recovered_old_account_trades_learning_valid",
+            "place_or_close_trades",
+        ]
+
+    def run_safe_repairs(self, *, config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        cfg = dict(self._maintenance_config())
+        if config:
+            cfg.update(config)
+
+        if not bool(cfg.get("auto_repair_enabled", False)):
+            return {
+                "severity": "info",
+                "enabled": False,
+                "writes_performed": False,
+                "actions": [],
+                "blocked_actions": self._blocked_repair_actions(),
+                "reason": "maintenance_auto_repair_disabled",
+            }
+
+        actions = []
+        errors = []
+
+        if bool(cfg.get("quarantine_corrupt_jsonl", True)):
+            for path in self._repairable_jsonl_files():
+                try:
+                    action = self._quarantine_corrupt_jsonl_rows(path)
+                    if action:
+                        actions.append(action)
+                except Exception as exc:
+                    errors.append({"action": "quarantine_corrupt_jsonl_rows", "file": str(path), "error": str(exc)})
+
+        if bool(cfg.get("archive_oversized_jsonl", True)):
+            oversized_mb = int(cfg.get("oversized_jsonl_mb", 100) or 100)
+            keep_recent_rows = int(cfg.get("archive_keep_recent_rows", 50000) or 50000)
+            for path in self._repairable_jsonl_files():
+                try:
+                    action = self._archive_oversized_jsonl(path, max_mb=oversized_mb, keep_recent_rows=keep_recent_rows)
+                    if action:
+                        actions.append(action)
+                except Exception as exc:
+                    errors.append({"action": "archive_old_jsonl_rows", "file": str(path), "error": str(exc)})
+
+        if bool(cfg.get("delete_old_junk_logs", True)):
+            retention_days = int(cfg.get("junk_log_retention_days", 30) or 30)
+            try:
+                action = self._delete_old_junk_logs(retention_days=retention_days)
+                if action:
+                    actions.append(action)
+            except Exception as exc:
+                errors.append({"action": "delete_old_junk_logs", "error": str(exc)})
+
+        return {
+            "severity": "error" if errors else ("warning" if actions else "ok"),
+            "enabled": True,
+            "writes_performed": bool(actions),
+            "actions_performed": len(actions),
+            "actions": actions,
+            "errors": errors,
+            "blocked_actions": self._blocked_repair_actions(),
+        }
+    
+    def _quarantine_corrupt_jsonl_rows(self, path: Path) -> Optional[dict[str, Any]]:
+        if not path.exists() or path.suffix != ".jsonl":
+            return None
+
+        good_lines = []
+        bad_lines = []
+
+        with path.open("r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, 1):
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                    if isinstance(payload, dict):
+                        good_lines.append(raw)
+                    else:
+                        bad_lines.append(json.dumps({"line": line_no, "raw": raw[:2000], "reason": "jsonl_row_not_object"}, ensure_ascii=False))
+                except Exception as exc:
+                    bad_lines.append(json.dumps({"line": line_no, "raw": raw[:2000], "reason": f"json_decode_error:{exc}"}, ensure_ascii=False))
+
+        if not bad_lines:
+            return None
+
+        backup = self.backup_file(path)
+        quarantine_dir = ROOT_DATA_DIR / "maintenance_quarantine"
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        stamp = _utc_now().strftime("%Y%m%d_%H%M%S")
+        quarantine_file = quarantine_dir / f"{path.name}.{stamp}.corrupt.jsonl"
+        quarantine_file.write_text("\n".join(bad_lines) + "\n", encoding="utf-8")
+
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(("\n".join(good_lines) + "\n") if good_lines else "", encoding="utf-8")
+        tmp.replace(path)
+
+        return {
+            "action": "quarantine_corrupt_jsonl_rows",
+            "file": str(path),
+            "corrupt_rows_quarantined": len(bad_lines),
+            "remaining_rows": len(good_lines),
+            "backup_file": str(backup) if backup else None,
+            "quarantine_file": str(quarantine_file),
+            "writes_performed": True,
+        }
+
+    def _archive_oversized_jsonl(self, path: Path, *, max_mb: int, keep_recent_rows: int) -> Optional[dict[str, Any]]:
+        if not path.exists() or path.suffix != ".jsonl":
+            return None
+
+        size_mb = path.stat().st_size / (1024 * 1024)
+        if size_mb <= max_mb:
+            return None
+
+        lines = [line.rstrip("\n") for line in path.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
+        if len(lines) <= keep_recent_rows:
+            return None
+
+        archive_lines = lines[:-keep_recent_rows]
+        keep_lines = lines[-keep_recent_rows:]
+        backup = self.backup_file(path)
+
+        archive_dir = ROOT_DATA_DIR / "maintenance_archives"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        stamp = _utc_now().strftime("%Y%m%d_%H%M%S")
+        archive_file = archive_dir / f"{path.name}.{stamp}.archived.jsonl.gz"
+
+        with gzip.open(archive_file, "wt", encoding="utf-8") as gz:
+            gz.write("\n".join(archive_lines) + "\n")
+
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text("\n".join(keep_lines) + "\n", encoding="utf-8")
+        tmp.replace(path)
+
+        return {
+            "action": "archive_old_jsonl_rows",
+            "file": str(path),
+            "size_mb_before": round(size_mb, 2),
+            "archived_rows": len(archive_lines),
+            "remaining_rows": len(keep_lines),
+            "backup_file": str(backup) if backup else None,
+            "archive_file": str(archive_file),
+            "writes_performed": True,
+        }
+
+    def _find_old_junk_files(self, *, retention_days: int) -> list[Path]:
+        if not LOG_DIR.exists():
+            return []
+
+        cutoff = _utc_now().timestamp() - (retention_days * 86400)
+        patterns = (
+            "*.tmp",
+            "*.bak",
+            "*.old",
+            "*.zip",
+            "api_*.json",
+            "api_*.log.*",
+            "errors_*.log.*",
+        )
+
+        found = []
+        for pattern in patterns:
+            for path in LOG_DIR.glob(pattern):
+                try:
+                    if path.is_file() and path.stat().st_mtime < cutoff:
+                        found.append(path)
+                except Exception:
+                    continue
+
+        return sorted(set(found), key=lambda p: str(p))
+
+    def _delete_old_junk_logs(self, *, retention_days: int) -> Optional[dict[str, Any]]:
+        files = self._find_old_junk_files(retention_days=retention_days)
+        if not files:
+            return None
+
+        trash_dir = ROOT_DATA_DIR / "maintenance_deleted_junk"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        stamp = _utc_now().strftime("%Y%m%d_%H%M%S")
+        batch_dir = trash_dir / stamp
+        batch_dir.mkdir(parents=True, exist_ok=True)
+
+        moved = []
+        for path in files:
+            target = batch_dir / path.name
+            counter = 1
+            while target.exists():
+                target = batch_dir / f"{path.stem}.{counter}{path.suffix}"
+                counter += 1
+            shutil.move(str(path), str(target))
+            moved.append(str(target))
+
+        return {
+            "action": "delete_old_junk_logs",
+            "retention_days": retention_days,
+            "files_moved_to_recoverable_trash": len(moved),
+            "trash_dir": str(batch_dir),
+            "sample_files": moved[:25],
+            "writes_performed": True,
+        }
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

@@ -342,7 +342,7 @@ class TradeExecutionService:
         lot = self._revalidate_lot(signal, entry_raw)
 
         if lot <= 0:
-            reason = "Lot size is zero — SL distance is zero or invalid; signal rejected"
+            reason = signal.get("rejection_reason") or "Lot size is zero — SL distance is zero or invalid; signal rejected"
             _notify_trade_blocked(
                 signal,
                 title="Invalid Lot Size",

@@ -130,6 +130,22 @@ async def approve_signal(request: Request, signal_id: str):
             if datetime.now(tz=timezone.utc) >= exp:
                 signal["status"] = "expired"
                 signal["rejection_reason"] = "Signal expired — market conditions may have changed"
+                signal["actioned_at"] = datetime.now(tz=timezone.utc).isoformat()
+
+                try:
+                    bus._record_signal_journal(
+                        signal,
+                        status="expired",
+                        decision="shadow_only",
+                        filters={"filter": "manual_approval_expired"},
+                    )
+                    bus._release_pending_key(signal)
+                    bus.archive.append(dict(signal))
+                    from api.websocket.feed import broadcast_signal
+                    asyncio.create_task(broadcast_signal({**signal, "type": "signal_update"}))
+                except Exception:
+                    pass
+
                 raise HTTPException(
                     status_code=410,
                     detail={
@@ -141,11 +157,11 @@ async def approve_signal(request: Request, signal_id: str):
             raise
         except Exception:
             pass
+    
     try:
         return await bus.execute_signal(signal_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Signal not found")
-
 
 class RejectRequest(BaseModel):
     reason: Optional[str] = None
@@ -162,14 +178,22 @@ async def reject_signal(signal_id: str, body: RejectRequest = RejectRequest()):
     if body.reason:
         signal["rejection_reason"] = body.reason
     bus.queue.pop(signal_id, None)
+    try:
+        bus._record_signal_journal(
+            signal,
+            status="rejected",
+            decision="skipped",
+            reason=signal.get("rejection_reason") or "manual_reject",
+            filters={"filter": "manual_reject"},
+        )
+        bus.archive.append(dict(signal))
+    except Exception:
+        pass
     # Release dedup key so the next bar can generate a fresh signal for this
     # symbol/strategy/direction. Without this, the key stays locked until
     # purge_stale TTL (1 hr) — but purge_stale never sees the signal because
     # it was already removed from the queue here.
-    _dk = (
-        signal.get("symbol"), signal.get("strategy"),
-        signal.get("direction"), signal.get("trading_mode"),
-    )
+    _dk = bus._pending_key(signal)
     # Hold the dedup key for 60 s after rejection to prevent the strategy from
     # immediately re-firing a duplicate signal on the next scanner tick (every
     # 30 s). Without this hold, a rejection + re-fire within the same bar would

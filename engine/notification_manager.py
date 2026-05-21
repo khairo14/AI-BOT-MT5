@@ -83,6 +83,13 @@ def _load_app_cfg() -> dict[str, object]:
     _APP_CFG_CACHE = cfg
     return cfg
 
+def _ntfy_header(value: object) -> str:
+    """
+    ntfy supports UTF-8 header values, but requests/urllib3 only accepts
+    latin-1 strings for headers. This preserves UTF-8 bytes through latin-1.
+    """
+    return str(value).encode("utf-8").decode("latin-1")
+
 def _send_ntfy(
     *,
     title: str,
@@ -132,7 +139,7 @@ def _send_ntfy(
             f"{server}/{topic}",
             data=message.encode("utf-8"),
             headers={
-                "Title": title,
+                "Title": _ntfy_header(title),
                 "Priority": priority_map.get(severity, "default"),
                 "Tags": "money_bag",
             },

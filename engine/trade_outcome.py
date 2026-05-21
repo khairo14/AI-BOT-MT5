@@ -339,41 +339,67 @@ async def _handle_open_position_lifecycle(
 
                 if om and entry_px:
                     partial_pct = 0.4 if trading_mode == "swing" else 0.5
-                    partial_ok = await asyncio.to_thread(om.partial_close, ticket, partial_pct)
+                    partial_ok = await asyncio.to_thread(
+                        om.partial_close,
+                        ticket,
+                        partial_pct,
+                    )
 
-                    if partial_ok:
-                        mark_tp1_hit(
+                    if not partial_ok:
+                        logger.warning(
+                            "TP1 partial-close did not complete: #%s %s",
+                            ticket,
+                            signal.get("symbol"),
+                        )
+                        return
+
+                    mark_tp1_hit(
+                        ticket,
+                        source=signal,
+                        extra={
+                            "last_event": "tp1_partial_close",
+                        },
+                    )
+
+                    try:
+                        from engine.trade_state import trade_state_store
+
+                        identity = current_trade_identity(signal)
+                        trade_state_store.mark_partial_close(
+                            identity.account_mode,
+                            identity.account_login,
+                            ticket,
+                            pct=partial_pct,
+                            reason="tp1",
+                        )
+                    except Exception:
+                        pass
+
+                    be_ok = await asyncio.to_thread(om.modify_position, ticket, entry_px, tp2)
+
+                    if be_ok:
+                        mark_break_even(
                             ticket,
                             source=signal,
                             extra={
-                                "day_be_triggered": True,
-                                "break_even_moved": True,
-                                "last_event": "tp1_partial_close",
+                                "day_be_triggered": trading_mode != "swing",
+                                "swing_pre_tp1_be_triggered": trading_mode == "swing",
+                                "last_event": "tp1_be_moved",
                             },
                         )
-
-                        try:
-                            from engine.trade_state import trade_state_store
-
-                            identity = current_trade_identity(signal)
-                            trade_state_store.mark_partial_close(
-                                identity.account_mode,
-                                identity.account_login,
-                                ticket,
-                                pct=partial_pct,
-                                reason="tp1",
-                            )
-                        except Exception:
-                            pass
-
-                        await asyncio.to_thread(om.modify_position, ticket, entry_px, tp2)
+                    else:
+                        logger.warning(
+                            "TP1 partial-close succeeded but BE move failed: #%s %s",
+                            ticket,
+                            signal.get("symbol"),
+                        )
 
                     logger.info(
                         "TP1 partial-close fired: #%s %s %s%% closed, BE=%s → TP2=%s",
                         ticket,
                         signal.get("symbol"),
                         int(partial_pct * 100),
-                        entry_px,
+                        entry_px if be_ok else "not_moved",
                         tp2,
                     )
 
@@ -761,7 +787,7 @@ async def _process_closed_position(
         close_price=close_px,
         sl_price=sl,
         tp_price=check_tp,
-        volume=float(signal.get("lot_size", 0.01)),
+        volume=float(getattr(deal, "volume", signal.get("lot_size", 0.01)) or 0.01),
         profit=profit,
         profit_pips=round(pips, 1),
         profit_pct=mem_profit_pct,
@@ -959,7 +985,7 @@ def _write_close_journal(
             ticket=ticket,
             symbol=signal.get("symbol", ""),
             direction=signal.get("direction", ""),
-            volume=float(signal.get("lot_size", 0.01)),
+            volume=float(getattr(deal, "volume", signal.get("lot_size", 0.01)) or 0.01),
             entry=entry_px,
             sl=sl,
             tp=tp if tp else None,

@@ -68,7 +68,7 @@ class TrailingState:
     direction: str  # "BUY" or "SELL"
     entry_price: float
     current_sl: float
-    highest_profit_price: float  # BUY: highest ask seen, SELL: lowest bid seen
+    highest_profit_price: float  # BUY: highest bid seen, SELL: lowest ask seen
     last_trail_at: Optional[datetime] = None
     pips_trailed: float = 0.0
     consecutive_failures: int = 0  # suppress retry spam after repeated modify errors
@@ -215,7 +215,7 @@ class TrailingStopManager:
                 if not price_data:
                     continue
 
-                current_price = price_data["ask"] if direction == "BUY" else price_data["bid"]
+                current_price = price_data["bid"] if direction == "BUY" else price_data["ask"]
                 pip_value = self._get_pip_value(symbol)
 
                 # Initialize state if new position
@@ -239,13 +239,6 @@ class TrailingStopManager:
                 else:  # SELL
                     if current_price < state.highest_profit_price:
                         state.highest_profit_price = current_price
-
-                # Skip if SL is already moved to breakeven or better (let _poll_outcome own it)
-                if current_sl > 0:
-                    if direction == "BUY" and current_sl >= entry_price:
-                        continue
-                    if direction == "SELL" and current_sl <= entry_price:
-                        continue
 
                 # Symbol-level overrides — escape hatch for truly exceptional setups
                 sym_override = mode_cfg.get("symbol_overrides", {}).get(symbol, {})
@@ -319,9 +312,9 @@ class TrailingStopManager:
                 # Only move SL in profit direction (never backwards)
                 should_update = False
                 if direction == "BUY":
-                    should_update = new_sl > current_sl
+                    should_update = current_sl <= 0 or new_sl > current_sl
                 else:
-                    should_update = new_sl < current_sl
+                    should_update = current_sl <= 0 or new_sl < current_sl
 
                 if should_update:
                     # Back off for 12 ticks (~60 s) after 3 consecutive failures

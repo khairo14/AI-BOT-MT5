@@ -122,5 +122,6 @@
     "dotenv",
     "unvalidated",
     "wdata",
+    "dedup",
   ]
 }

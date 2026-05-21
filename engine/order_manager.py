@@ -948,9 +948,12 @@ class OrderManager:
                 )
                 return True
 
-            _partial_profit = float(getattr(deal, "profit", 0.0) or 0.0)
+            _partial_profit_raw = float(getattr(deal, "profit", 0.0) or 0.0)
             _partial_swap = float(getattr(deal, "swap", 0.0) or 0.0)
             _partial_commission = float(getattr(deal, "commission", 0.0) or 0.0)
+            _partial_fee = float(getattr(deal, "fee", 0.0) or 0.0)
+
+            _partial_profit = _partial_profit_raw + _partial_swap + _partial_commission + _partial_fee
             close_time = datetime.fromtimestamp(
                 float(getattr(deal, "time", 0.0) or 0.0),
                 tz=timezone.utc,
@@ -972,7 +975,7 @@ class OrderManager:
                 trading_type=trading_type,
                 account_type=account_mode,
                 user_id="default",
-                strategy=pos.comment or reason,
+                strategy=reason,
                 account_mode=account_mode,
                 comment=reason,
                 event="partial_close",

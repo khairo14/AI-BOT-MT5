@@ -390,8 +390,9 @@ async def lifespan(app: FastAPI):
         try:
             from api.signal_bus import recover_unclosed_trades
             await recover_unclosed_trades(mt5_client)
+            asyncio.create_task(_trade_recovery_loop())
             start_runner_loop(mt5_client, order_manager, _risk_manager)
-            logger.info("Startup validation complete | ""trade_state loaded | ""recovery complete | ""runner enabled")
+            logger.info("Startup validation complete | trade_state loaded | recovery complete | runner enabled")
         except Exception as _rec_exc:
             logger.warning(f"Startup recovery task failed to launch: {_rec_exc}")
         try:
@@ -406,6 +407,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_market_scanner_loop())
         # signal validation loop
         asyncio.create_task(_signal_validation_loop())
+        # maintenance audit loop — optional safe auto-repair controlled by config/app.json
+        asyncio.create_task(_maintenance_loop())
     yield
     # Shutdown
     try:
@@ -417,7 +420,104 @@ async def lifespan(app: FastAPI):
         mt5_client.disconnect()
     logger.info("API shutdown complete.")
 
+def _load_app_config() -> dict:
+    try:
+        path = Path("config/app.json")
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        logger.warning(f"App config read failed: {exc}")
+    return {}
 
+
+def _maintenance_config() -> dict:
+    cfg = _load_app_config()
+    maintenance = cfg.get("maintenance") if isinstance(cfg, dict) else None
+    return maintenance if isinstance(maintenance, dict) else {}
+
+
+async def _maintenance_loop() -> None:
+    await asyncio.sleep(240)
+
+    while True:
+        sleep_seconds = 30 * 60
+        try:
+            cfg = _maintenance_config()
+            enabled = bool(cfg.get("enabled", True))
+            interval_minutes = int(cfg.get("audit_interval_minutes", 30) or 30)
+            sleep_seconds = max(5 * 60, interval_minutes * 60)
+
+            if not enabled:
+                logger.debug("Maintenance loop: disabled by config")
+                await asyncio.sleep(sleep_seconds)
+                continue
+
+            from ai.maintenance_agent import maintenance_agent
+
+            audit = await asyncio.to_thread(
+                maintenance_agent.run_health_audit,
+                mt5_client,
+                notify=False,
+                dry_run=True,
+            )
+
+            severity = str(audit.get("severity") or "ok")
+            status = str(audit.get("status") or "unknown")
+            counts = audit.get("counts", {})
+
+            repair_result = None
+            if bool(cfg.get("auto_repair_enabled", False)):
+                repair_result = await asyncio.to_thread(
+                    maintenance_agent.run_safe_repairs,
+                    config=cfg,
+                )
+                logger.warning(
+                    f"Maintenance auto-repair completed | "
+                    f"severity={repair_result.get('severity')} | "
+                    f"actions={repair_result.get('actions_performed', 0)} | "
+                    f"errors={len(repair_result.get('errors', []) or [])}"
+                )
+
+            if bool(cfg.get("notify_summary", True)) and severity in {"warning", "error", "critical"}:
+                try:
+                    from engine.notification_manager import notification_manager
+
+                    repair_text = ""
+                    if repair_result:
+                        repair_text = (
+                            f" Auto-repair: actions={repair_result.get('actions_performed', 0)}, "
+                            f"errors={len(repair_result.get('errors', []) or [])}."
+                        )
+
+                    notification_manager.add(
+                        type="risk_alert",
+                        title="Maintenance Audit Summary",
+                        message=(
+                            f"Maintenance audit {status} | severity={severity} | counts={counts}."
+                            f"{repair_text}"
+                        ),
+                        severity="error" if severity in {"error", "critical"} else "warning",
+                        metadata={
+                            "source": "maintenance_loop",
+                            "severity": severity,
+                            "counts": counts,
+                            "auto_repair_enabled": bool(cfg.get("auto_repair_enabled", False)),
+                            "repair_result": repair_result,
+                            "timestamp": audit.get("timestamp"),
+                        },
+                    )
+                except Exception as notify_exc:
+                    logger.warning(f"Maintenance ntfy summary failed: {notify_exc}")
+
+            logger.info(
+                f"Maintenance audit complete | status={status} | severity={severity} | "
+                f"auto_repair={bool(cfg.get('auto_repair_enabled', False))}"
+            )
+
+        except Exception as exc:
+            logger.exception(f"Maintenance loop failed: {exc}")
+
+        await asyncio.sleep(sleep_seconds)
 # ---------------------------------------------------------------------------
 # Rate Limiting (Task #7)
 # ---------------------------------------------------------------------------
@@ -482,6 +582,26 @@ async def add_correlation_id(request: Request, call_next):
     response.headers["X-Correlation-ID"] = correlation_id
     return response
 
+async def _trade_recovery_loop() -> None:
+    """
+    Startup + periodic MT5 reconciliation.
+
+    Repairs trades that closed while API was offline and restarts polling for
+    trades that are still open.
+    """
+    from api.signal_bus import bus
+
+    # Give MT5/client startup a small window before first reconciliation.
+    await asyncio.sleep(5)
+
+    while True:
+        try:
+            if mt5_client and mt5_client.is_connected():
+                await bus.recover_unclosed_trades(mt5_client)
+        except Exception as exc:
+            logger.warning(f"Trade recovery loop error: {exc}")
+
+        await asyncio.sleep(120)
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
