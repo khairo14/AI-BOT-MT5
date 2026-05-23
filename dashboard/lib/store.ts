@@ -76,9 +76,21 @@ export const useBotStore = create<BotStore>()(
   signals: [],
   setSignals: (signals) => set({ signals }),
   addSignal: (s) =>
-    set((state) => ({
-      signals: [s, ...state.signals].slice(0, 100),
-    })),
+    set((state) => {
+      const existing = state.signals.find((x) => x.id === s.id);
+
+      if (existing) {
+        return {
+          signals: state.signals.map((x) =>
+            x.id === s.id ? { ...x, ...s } : x
+          ),
+        };
+      }
+
+      return {
+        signals: [s, ...state.signals].slice(0, 100),
+      };
+    }),
   updateSignalStatus: (id, status) =>
     set((state) => ({
       signals: state.signals.map((s) => (s.id === id ? { ...s, status } : s)),
@@ -95,17 +107,35 @@ export const useBotStore = create<BotStore>()(
   setActiveMode: (activeMode) => set({ activeMode }),
 
   notifications: [],
-  pushNotification: (n) =>
-    set((state) => ({
-      notifications: [
-        {
-          ...n,
-          id: Math.random().toString(36).slice(2),
-          timestamp: Date.now(),
-        },
-        ...state.notifications,
-      ].slice(0, 50),
-    })),
+   pushNotification: (n) =>
+    set((state) => {
+      const now = Date.now();
+
+      const isDuplicate = state.notifications.some((existing) => {
+        const sameContent =
+          existing.title === n.title &&
+          existing.message === n.message &&
+          existing.type === n.type;
+
+        return sameContent &&
+          now - existing.timestamp < 10_000;
+      });
+
+      if (isDuplicate) {
+        return state;
+      }
+
+      return {
+        notifications: [
+          {
+            ...n,
+            id: Math.random().toString(36).slice(2),
+            timestamp: now,
+          },
+          ...state.notifications,
+        ].slice(0, 50),
+      };
+    }),
   dismissNotification: (id) =>
     set((state) => ({
       notifications: state.notifications.filter((n) => n.id !== id),

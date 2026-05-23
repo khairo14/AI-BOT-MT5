@@ -65,7 +65,9 @@ export interface Signal {
   status: SignalStatus;
   reason?: string;
   rejection_reason?: string;
+  created_at?: string;
   expires_at?: string;
+  actioned_at?: string;  
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 {
-  "risk_per_trade_pct": 2.0,
-  "max_risk_per_trade_pct": 3.0,
+  "risk_per_trade_pct": 1.5,
+  "max_risk_per_trade_pct": 2.0,
   "risk_reward_min": 1.5,
   "risk_reward_min_by_mode": {
     "scalping": 1,
@@ -11,16 +11,16 @@
   "tp_required": false,
   "position_sizing_method": "fixed_fractional",
   "max_concurrent_trades": {
-    "scalping": 5,
-    "day_trading": 8,
-    "swing": 12,
-    "total": 18,
+    "scalping": 3,
+    "day_trading": 5,
+    "swing": 8,
+    "total": 12,
     "per_symbol": 1
   },
   "drawdown": {
-    "daily_limit_pct": 8.0,
-    "weekly_limit_pct": 15.0,
-    "max_consecutive_losses": 7,
+    "daily_limit_pct": 5.0,
+    "weekly_limit_pct": 10.0,
+    "max_consecutive_losses": 5,
     "consecutive_loss_pause_hours": 4,
     "action": "pause"
   },

@@ -335,8 +335,18 @@ def _sanitize_indicators(indicators: dict) -> dict:
 
 
 def _signal_to_dict(sig, mode: str) -> dict:
+    from engine.account_store import (
+        current_mode as _acm,
+        current_account_login,
+        current_account_type,
+    )
+
+    # Attach active account identity so signal_journal never falls back to account_login=0.
+    _account_mode = _acm()
+    _account_login = current_account_login()
+    _account_type = current_account_type()
+
     # Compute R:R if entry, sl, tp are available
-    from engine.account_store import current_mode as _acm
     rr = None
     try:
         if sig.entry_price and sig.sl_price and sig.tp_price:
@@ -346,27 +356,31 @@ def _signal_to_dict(sig, mode: str) -> dict:
                 rr = round(reward / risk, 2)
     except Exception:
         pass
+
     return {
-        "id":           str(uuid.uuid4()),
-        "status":       "pending",
-        "created_at":   datetime.now(tz=timezone.utc).isoformat(),
-        "symbol":       sig.symbol,
-        "direction":    sig.direction,
+        "id": str(uuid.uuid4()),
+        "status": "pending",
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "symbol": sig.symbol,
+        "direction": sig.direction,
         "trading_mode": mode,
-        "account_mode": _acm(),
-        "strategy":     sig.strategy,
-        "entry_price":  sig.entry_price,
-        "sl":           sig.sl_price,
-        "tp":           sig.tp_price,
-        "lot_size":     sig.lot_size,
-        "confidence":   float(sig.confidence or 0.0),
-        "score":        float(sig.confidence or 0.0),
-        "timeframe":    sig.timeframe,
-        "note":         sig.comment,
-        "rr":           rr,
-        "tp2":          sig.tp2_price if hasattr(sig, "tp2_price") else None,
-        "indicators":   _sanitize_indicators(sig.indicators) if hasattr(sig, "indicators") else {},
-        "regime":       sig.regime if hasattr(sig, "regime") else None,
+        "account_mode": _account_mode,
+        "account_login": _account_login,
+        "account_type": _account_type,
+        "user_id": "default",
+        "strategy": sig.strategy,
+        "entry_price": sig.entry_price,
+        "sl": sig.sl_price,
+        "tp": sig.tp_price,
+        "lot_size": sig.lot_size,
+        "confidence": float(sig.confidence or 0.0),
+        "score": float(sig.confidence or 0.0),
+        "timeframe": sig.timeframe,
+        "note": sig.comment,
+        "rr": rr,
+        "tp2": sig.tp2_price if hasattr(sig, "tp2_price") else None,
+        "indicators": _sanitize_indicators(sig.indicators) if hasattr(sig, "indicators") else {},
+        "regime": sig.regime if hasattr(sig, "regime") else None,
     }
 
 

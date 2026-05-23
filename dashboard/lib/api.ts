@@ -84,6 +84,10 @@ function normalizeSignal(raw: Record<string, unknown>): Signal {
     status:           (raw.status as Signal["status"]) ?? "pending",
     reason:           (raw.rejection_reason ?? raw.reason) as string | undefined,
     rejection_reason: raw.rejection_reason as string | undefined,
+    created_at: raw.created_at as string | undefined,
+    expires_at: raw.expires_at as string | undefined,
+    actioned_at: raw.actioned_at as string | undefined,
+    timeframe: raw.timeframe as string | undefined,
   };
 }
 

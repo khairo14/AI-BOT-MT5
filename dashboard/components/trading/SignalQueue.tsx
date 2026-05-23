@@ -248,11 +248,22 @@ export default function SignalQueue({ mode }: Props) {
               </div>
             </div>
 
-            {/* Expiry countdown — only for pending signals with an expiry */}
+            {/* Expiry status */}
             {s.status === "pending" && s.expires_at && (
               <div className="flex items-center gap-2">
                 <ExpiryCountdown expiresAt={s.expires_at} />
                 <span className="text-xs text-gray-500">before signal expires</span>
+              </div>
+            )}
+
+            {s.status === "expired" && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700">
+                  EXPIRED
+                </span>
+                <span className="text-xs text-red-400">
+                  Approval disabled — market conditions may have changed
+                </span>
               </div>
             )}
 

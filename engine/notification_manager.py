@@ -39,6 +39,7 @@ NotificationType = Literal[
     "optimizer_complete",
     "risk_alert",
     "regime_change",
+    "trade_lifecycle",
 ]
 
 
@@ -90,6 +91,13 @@ def _ntfy_header(value: object) -> str:
     """
     return str(value).encode("utf-8").decode("latin-1")
 
+NTFY_ALWAYS_SEND_TYPES = {
+    "signal_generated",
+    "position_opened",
+    "position_closed",
+    "trade_lifecycle",
+}
+
 def _send_ntfy(
     *,
     title: str,
@@ -129,7 +137,10 @@ def _send_ntfy(
             "error": 3,
         }
 
-        if severity_rank.get(severity, 0) < severity_rank.get(min_priority, 2):
+        if (
+            type not in NTFY_ALWAYS_SEND_TYPES
+            and severity_rank.get(severity, 0) < severity_rank.get(min_priority, 2)
+        ):
             return
 
         server = str(ntfy_cfg.get("server", "https://ntfy.sh")).rstrip("/")

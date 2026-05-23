@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Literal
 
 from ai.trade_memory import TradeOutcome, memory
-from engine.notification_manager import notification_manager
+from engine.notification_manager import notification_manager, NotificationType
 from engine.trade_identity import current_trade_identity
 from engine.trade_learning import apply_trade_learning
 from engine.trade_lifecycle import (
@@ -63,6 +63,7 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 def _notify_lifecycle_event(
     *,
+    event_type: NotificationType = "trade_lifecycle",
     title: str,
     message: str,
     severity: Literal["info", "success", "warning", "error"] = "info",
@@ -70,7 +71,7 @@ def _notify_lifecycle_event(
 ) -> None:
     try:
         notification_manager.add(
-            type="risk_alert",
+            type=event_type,
             title=title,
             message=message,
             severity=severity,
@@ -585,6 +586,7 @@ async def _move_to_be_if_improves(
                 entry_px,
             )
             _notify_lifecycle_event(
+                event_type="trade_lifecycle",
                 title=f"Break-Even Moved — {signal.get('symbol')}",
                 message=(
                     f"{str(signal.get('direction', '')).upper()} {signal.get('symbol')} "
@@ -617,7 +619,7 @@ def _notify_partial_tp1(
         pct_str = f"{int(partial_pct * 100)}%"
 
         notification_manager.add(
-            type="position_closed",
+            type="trade_lifecycle",
             title=f"Partial TP1 — {signal.get('symbol')}",
             message=(
                 f"{str(signal.get('direction', '')).upper()} {signal.get('symbol')} "

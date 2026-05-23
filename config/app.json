@@ -12,7 +12,7 @@
     }
   },
   "execution_mode": {
-    "scalping": "manual",
+    "scalping": "auto",
     "day_trading": "manual",
     "swing": "manual"
   },
@@ -33,8 +33,10 @@
       "topic": "evotrade-live-051002026",
       "priority_min": "warning",
       "send_types": [
+        "signal_generated",
         "position_opened",
         "position_closed",
+        "trade_lifecycle",
         "risk_alert",
         "circuit_breaker"
       ]
@@ -159,7 +161,7 @@
     "enabled": true,
     "audit_interval_minutes": 30,
     "auto_repair_enabled": false,
-    "notify_summary": true,
+    "notify_summary": false,
     "quarantine_corrupt_jsonl": true,
     "archive_oversized_jsonl": true,
     "delete_old_junk_logs": true,

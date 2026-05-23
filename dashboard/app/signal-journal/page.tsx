@@ -108,7 +108,20 @@ function fmtNum(value: unknown, digits = 2) {
 }
 
 function signalTime(row: SignalRow) {
-  return row.recorded_at || row.timestamp || row.signal_time || row.created_at || "";
+  const status = String(row.status || "").toLowerCase();
+
+  // For workflow/terminal rows, preserve original signal time.
+  if (
+    status.includes("expired") ||
+    status.includes("rejected") ||
+    status.includes("blocked") ||
+    status.includes("executed") ||
+    status.includes("failed")
+  ) {
+    return row.created_at || row.signal_time || row.timestamp || row.recorded_at || "";
+  }
+
+  return row.created_at || row.signal_time || row.timestamp || row.recorded_at || "";
 }
 
 function rowSymbol(row: SignalRow) {
@@ -183,6 +196,21 @@ function getExpiryInfo(row: SignalRow) {
   const expiresAt = new Date(started.getTime() + expirySeconds * 1000);
   const secondsRemaining = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
   const expired = secondsRemaining <= 0;
+  const terminal =
+    String(row.status || "").toLowerCase().includes("expired") ||
+    String(row.status || "").toLowerCase().includes("rejected") ||
+    String(row.status || "").toLowerCase().includes("blocked") ||
+    String(row.status || "").toLowerCase().includes("executed") ||
+    String(row.status || "").toLowerCase().includes("failed");
+
+  if (terminal) {
+    return {
+      label: "—",
+      expired: true,
+      secondsRemaining: 0,
+      expiresAt,
+    };
+  }
 
   if (expired) {
     return {
