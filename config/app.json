@@ -12,7 +12,7 @@
     }
   },
   "execution_mode": {
-    "scalping": "auto",
+    "scalping": "manual",
     "day_trading": "manual",
     "swing": "manual"
   },

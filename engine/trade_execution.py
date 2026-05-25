@@ -82,9 +82,20 @@ def _record_signal_journal_safe(
             "direction": signal.get("direction"),
             "confidence": float(signal.get("confidence") or 0.0),
             "score": float(signal.get("score") or 0.0),
-            "entry": signal.get("entry") or signal.get("entry_price"),
-            "sl": signal.get("sl"),
-            "tp": signal.get("tp"),
+            "entry": signal.get("fill_price") or signal.get("entry") or signal.get("entry_price"),
+            "sl": signal.get("executed_sl") or signal.get("sl"),
+            "tp": signal.get("executed_tp") or signal.get("tp"),
+            "ticket": signal.get("ticket"),
+            "original_entry": signal.get("original_entry") or signal.get("entry") or signal.get("entry_price"),
+            "original_sl": signal.get("original_sl") or signal.get("sl"),
+            "original_tp": signal.get("original_tp") or signal.get("tp"),
+            "original_tp2": signal.get("original_tp2") or signal.get("tp2"),
+            "executed_entry": signal.get("fill_price"),
+            "executed_sl": signal.get("executed_sl"),
+            "executed_tp": signal.get("executed_tp"),
+            "executed_tp2": signal.get("executed_tp2"),
+            "entry_slippage_pips": signal.get("entry_slippage_pips"),
+            "spread_pips": signal.get("spread_pips"),
             "timeframe": signal.get("timeframe") or signal.get("tf"),
             "regime": signal.get("regime"),
             "rl_state": signal.get("rl_state"),
@@ -433,9 +444,43 @@ class TradeExecutionService:
             )
             return ExecutionResult(False, signal, error=err)
 
+        original_entry = _safe_float(signal.get("entry_price") or signal.get("entry"), 0.0)
+        original_sl = _safe_float(signal.get("sl"), 0.0)
+        original_tp = _safe_float(signal.get("tp"), 0.0) or None
+        original_tp2 = _safe_float(signal.get("tp2"), 0.0) or None
+
+        executed_sl = _safe_float(result.sl, original_sl)
+        executed_broker_tp = _safe_float(result.tp, _safe_float(broker_tp, 0.0)) or None
+
+        # If TP2 was the broker TP, apply the broker reanchor delta back to the
+        # internal TP1 as well, so lifecycle/outcome checks use executed levels.
+        tp_delta = 0.0
+        if broker_tp and executed_broker_tp is not None:
+            tp_delta = executed_broker_tp - float(broker_tp)
+
+        executed_tp = (original_tp + tp_delta) if original_tp is not None else None
+        executed_tp2 = (original_tp2 + tp_delta) if original_tp2 is not None else None
+
         signal["ticket"] = result.ticket
         signal["fill_price"] = result.open_price
         signal["lot_size"] = req.volume
+        signal["original_entry"] = original_entry
+        signal["original_sl"] = original_sl
+        signal["original_tp"] = original_tp
+        signal["original_tp2"] = original_tp2
+        signal["executed_sl"] = executed_sl
+        signal["executed_tp"] = executed_tp
+        signal["executed_tp2"] = executed_tp2
+        signal["entry_slippage_pips"] = result.slippage
+        signal["spread_pips"] = result.spread_pips
+
+        # From this point on, signal SL/TP mean broker/executed levels. Original
+        # strategy levels remain available as original_sl/original_tp/original_tp2.
+        signal["sl"] = executed_sl
+        if executed_tp is not None:
+            signal["tp"] = executed_tp
+        if executed_tp2 is not None:
+            signal["tp2"] = executed_tp2
 
         logger.info(
             "Signal executed: %s %s lot=%s ticket=%s",
@@ -473,6 +518,22 @@ class TradeExecutionService:
             spread_pips=result.spread_pips,
         )
 
+        _record_signal_journal_safe(
+            signal,
+            status="executed",
+            decision="taken",
+            filters={
+                "filter": "executed",
+                "ticket": result.ticket,
+                "executed_entry": result.open_price,
+                "executed_sl": signal.get("executed_sl"),
+                "executed_tp": signal.get("executed_tp"),
+                "executed_tp2": signal.get("executed_tp2"),
+                "entry_slippage_pips": result.slippage,
+                "spread_pips": result.spread_pips,
+            },
+        )
+
         if result.ticket is not None and schedule_poll is not None:
             schedule_poll(int(result.ticket), signal)
 
@@ -502,10 +563,16 @@ class TradeExecutionService:
                 direction=signal["direction"],
                 volume=volume,
                 entry=fill_price or 0.0,
-                sl=float(signal.get("sl") or 0),
-                tp=float(signal["tp"]) if signal.get("tp") else None,
-                tp2=float(signal["tp2"]) if signal.get("tp2") else None,
+                sl=float(signal.get("executed_sl") or signal.get("sl") or 0),
+                tp=float(signal.get("executed_tp") or signal["tp"]) if signal.get("executed_tp") or signal.get("tp") else None,
+                tp2=float(signal.get("executed_tp2") or signal["tp2"]) if signal.get("executed_tp2") or signal.get("tp2") else None,
                 tp3=float(signal["tp3"]) if signal.get("tp3") else None,
+                original_sl=float(signal.get("original_sl") or 0) or None,
+                original_tp=float(signal.get("original_tp") or 0) or None,
+                original_tp2=float(signal.get("original_tp2") or 0) or None,
+                executed_sl=float(signal.get("executed_sl") or signal.get("sl") or 0) or None,
+                executed_tp=float(signal.get("executed_tp") or signal.get("tp") or 0) or None,
+                executed_tp2=float(signal.get("executed_tp2") or signal.get("tp2") or 0) or None,
                 profit=None,
                 trading_type=signal.get("trading_mode", "day_trading"),
                 account_mode=identity.account_mode,
@@ -535,9 +602,12 @@ class TradeExecutionService:
                     "strategy": signal.get("strategy", ""),
                     "direction": str(signal.get("direction", "")).upper(),
                     "entry": fill_price or 0.0,
-                    "sl": float(signal.get("sl") or 0),
-                    "tp1": float(signal["tp"]) if signal.get("tp") else None,
-                    "tp2": float(signal["tp2"]) if signal.get("tp2") else None,
+                    "sl": float(signal.get("executed_sl") or signal.get("sl") or 0),
+                    "tp1": float(signal.get("executed_tp") or signal["tp"]) if signal.get("executed_tp") or signal.get("tp") else None,
+                    "tp2": float(signal.get("executed_tp2") or signal["tp2"]) if signal.get("executed_tp2") or signal.get("tp2") else None,
+                    "original_sl": signal.get("original_sl"),
+                    "original_tp": signal.get("original_tp"),
+                    "original_tp2": signal.get("original_tp2"),
                     "volume": volume,
                     "last_event": "opened",
                 },

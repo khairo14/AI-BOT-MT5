@@ -128,6 +128,8 @@ class OrderResult:
     success: bool
     ticket: Optional[int] = None
     open_price: Optional[float] = None
+    sl: Optional[float] = None
+    tp: Optional[float] = None
     error: Optional[str] = None
     execution_time_ms: Optional[int] = None
     slippage: Optional[float] = None
@@ -559,10 +561,13 @@ class OrderManager:
 
         position_ticket = int(confirmed_pos.ticket)
         open_price = float(confirmed_pos.price_open or result.price)
+        executed_sl = float(getattr(confirmed_pos, "sl", 0.0) or sl or 0.0)
+        executed_tp_raw = float(getattr(confirmed_pos, "tp", 0.0) or 0.0)
+        executed_tp = executed_tp_raw if executed_tp_raw > 0 else tp
 
         logger.info(
             f"Order placed | #{position_ticket} | {req.symbol} {req.direction} "
-            f"{vol} lots | Entry: {open_price} | SL: {sl} | TP: {tp} | "
+            f"{vol} lots | Entry: {open_price} | SL: {executed_sl} | TP: {executed_tp} | "
             f"Execution: {execution_time_ms}ms"
             + (f" | Slippage: {slippage:.5f}" if slippage else "")
         )
@@ -571,6 +576,8 @@ class OrderManager:
             success=True,
             ticket=position_ticket,
             open_price=open_price,
+            sl=executed_sl,
+            tp=executed_tp,
             execution_time_ms=execution_time_ms,
             slippage=slippage,
             spread_pips=_captured_spread_pips,

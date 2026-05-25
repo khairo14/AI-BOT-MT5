@@ -211,9 +211,9 @@ async def _handle_open_position_lifecycle(
     """
     direction = str(signal.get("direction", "")).upper()
     entry_px = _safe_float(signal.get("fill_price") or signal.get("entry_price"), 0.0)
-    orig_sl = _safe_float(signal.get("sl"), 0.0)
-    tp2 = _safe_float(signal.get("tp2"), 0.0)
-    tp1 = _safe_float(signal.get("tp"), 0.0)
+    orig_sl = _safe_float(signal.get("executed_sl") or signal.get("sl"), 0.0)
+    tp2 = _safe_float(signal.get("executed_tp2") or signal.get("tp2"), 0.0)
+    tp1 = _safe_float(signal.get("executed_tp") or signal.get("tp"), 0.0)
     trading_mode = signal.get("trading_mode", signal.get("trading_type", ""))
 
     lifecycle = get_trade_state(ticket, source=signal).state
@@ -696,9 +696,9 @@ async def _process_closed_position(
         tz=timezone.utc,
     ).isoformat()
 
-    sl = _safe_float(signal.get("sl"), 0.0)
-    tp = _safe_float(signal.get("tp"), 0.0)
-    tp2 = _safe_float(signal.get("tp2"), 0.0)
+    sl = _safe_float(signal.get("executed_sl") or signal.get("sl"), 0.0)
+    tp = _safe_float(signal.get("executed_tp") or signal.get("tp"), 0.0)
+    tp2 = _safe_float(signal.get("executed_tp2") or signal.get("tp2"), 0.0)
     check_tp = tp2 if tp1_triggered and tp2 else tp
 
     outcome_type = _classify_outcome(
@@ -804,6 +804,13 @@ async def _process_closed_position(
         extra={
             "source": identity.account_mode,
             "slippage_pips": slippage_pips,
+            "entry_slippage_pips": slippage_pips,
+            "original_sl": signal.get("original_sl"),
+            "original_tp": signal.get("original_tp"),
+            "original_tp2": signal.get("original_tp2"),
+            "executed_sl": sl,
+            "executed_tp": tp,
+            "executed_tp2": tp2 or None,
             "lstm_raw_prob": signal.get("indicators", {}).get("lstm_raw_prob"),
         },
     )
@@ -991,6 +998,12 @@ def _write_close_journal(
             entry=entry_px,
             sl=sl,
             tp=tp if tp else None,
+            original_sl=float(signal.get("original_sl") or 0) or None,
+            original_tp=float(signal.get("original_tp") or 0) or None,
+            original_tp2=float(signal.get("original_tp2") or 0) or None,
+            executed_sl=sl if sl else None,
+            executed_tp=tp if tp else None,
+            executed_tp2=float(signal.get("executed_tp2") or signal.get("tp2") or 0) or None,
             profit=profit,
             trading_type=signal.get("trading_mode", "day_trading"),
             account_mode=identity.account_mode,

@@ -36,6 +36,17 @@ type SignalRow = {
   max_adverse_pips?: number;
   account_type?: string;
   account_login?: number | string;
+  ticket?: number | string;
+  original_entry?: number;
+  original_sl?: number;
+  original_tp?: number;
+  original_tp2?: number;
+  executed_entry?: number;
+  executed_sl?: number;
+  executed_tp?: number;
+  executed_tp2?: number;
+  entry_slippage_pips?: number;
+  spread_pips?: number;
   filters?: Record<string, unknown>;
 };
 
@@ -143,15 +154,22 @@ function rowTimeframe(row: SignalRow) {
 }
 
 function rowEntry(row: SignalRow) {
-  return row.entry ?? row.entry_price;
+  return row.executed_entry ?? row.entry ?? row.entry_price;
 }
 
 function rowSl(row: SignalRow) {
-  return row.sl ?? row.sl_price;
+  return row.executed_sl ?? row.sl ?? row.sl_price;
 }
 
 function rowTp(row: SignalRow) {
-  return row.tp ?? row.tp_price;
+  return row.executed_tp ?? row.tp ?? row.tp_price;
+}
+
+function changedFromOriginal(current: unknown, original: unknown) {
+  const currentNum = Number(current);
+  const originalNum = Number(original);
+  if (!Number.isFinite(currentNum) || !Number.isFinite(originalNum)) return false;
+  return Math.abs(currentNum - originalNum) > 1e-9;
 }
 
 function outcomeLabel(outcome?: string) {
@@ -173,7 +191,7 @@ function decisionClass(decision?: string) {
   const value = String(decision || "").toLowerCase();
   if (value.includes("risk")) return "text-red-300 bg-red-950/40 border-red-600/40";
   if (value.includes("filter")) return "text-yellow-300 bg-yellow-950/40 border-yellow-600/40";
-  if (value.includes("executed") || value.includes("approved")) return "text-emerald-300 bg-emerald-950/40 border-emerald-600/40";
+  if (value.includes("executed") || value.includes("approved") || value.includes("taken")) return "text-emerald-300 bg-emerald-950/40 border-emerald-600/40";
   if (value.includes("expired") || value.includes("ignored")) return "text-orange-300 bg-orange-950/40 border-orange-600/40";
   return "text-blue-300 bg-blue-950/40 border-blue-600/40";
 }
@@ -654,6 +672,7 @@ export default function SignalJournalPage() {
                   <th className="px-4 py-4">Entry</th>
                   <th className="px-4 py-4">SL</th>
                   <th className="px-4 py-4">TP</th>
+                  <th className="px-4 py-4">Ticket</th>
                   <th className="px-4 py-4">Validation</th>
                   <th className="px-4 py-4">Future Pips</th>
                 </tr>
@@ -661,7 +680,7 @@ export default function SignalJournalPage() {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td colSpan={15} className="px-4 py-12 text-center text-slate-500">
+                    <td colSpan={16} className="px-4 py-12 text-center text-slate-500">
                       No signal journal entries found yet.
                     </td>
                   </tr>
@@ -696,9 +715,16 @@ export default function SignalJournalPage() {
                           </span>
                         </td>
                         <td className="max-w-[240px] truncate px-4 py-4 text-slate-300">{row.reason || "—"}</td>
-                        <td className="whitespace-nowrap px-4 py-4 font-mono text-slate-300">{fmtNum(rowEntry(row), 5)}</td>
-                        <td className="whitespace-nowrap px-4 py-4 font-mono text-slate-300">{fmtNum(rowSl(row), 5)}</td>
-                        <td className="whitespace-nowrap px-4 py-4 font-mono text-slate-300">{fmtNum(rowTp(row), 5)}</td>
+                        <td className="whitespace-nowrap px-4 py-4 font-mono text-slate-300" title={changedFromOriginal(rowEntry(row), row.original_entry) ? `Original: ${fmtNum(row.original_entry, 5)}` : undefined}>
+                          {fmtNum(rowEntry(row), 5)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-4 font-mono text-slate-300" title={changedFromOriginal(rowSl(row), row.original_sl) ? `Original: ${fmtNum(row.original_sl, 5)}` : undefined}>
+                          {fmtNum(rowSl(row), 5)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-4 font-mono text-slate-300" title={changedFromOriginal(rowTp(row), row.original_tp) ? `Original: ${fmtNum(row.original_tp, 5)}` : undefined}>
+                          {fmtNum(rowTp(row), 5)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-4 font-mono text-slate-300">{row.ticket || "—"}</td>
                         <td className="whitespace-nowrap px-4 py-4">
                           <span className={classNames("rounded-full border px-3 py-1 text-xs font-bold", outcomeClass(row.validated_outcome))}>
                             {row.validated ? outcomeLabel(row.validated_outcome) : "Pending"}
