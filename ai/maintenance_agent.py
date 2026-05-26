@@ -13,7 +13,6 @@ from typing import Any, Optional
 AI_DIR = Path(__file__).resolve().parent
 ROOT_DIR = AI_DIR.parent
 AI_DATA_DIR = AI_DIR / "data"
-ENGINE_DATA_DIR = ROOT_DIR / "engine" / "data"
 ROOT_DATA_DIR = ROOT_DIR / "data"
 CONFIG_DIR = ROOT_DIR / "config"
 LOG_DIR = ROOT_DIR / "logs"

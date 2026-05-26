@@ -14,13 +14,13 @@ from typing import Any, Optional
 AI_DIR = Path(__file__).resolve().parent
 ROOT_DIR = AI_DIR.parent
 AI_DATA_DIR = AI_DIR / "data"
-ENGINE_DATA_DIR = ROOT_DIR / "engine" / "data"
+ROOT_DATA_DIR = ROOT_DIR / "data"
 
 AI_DATA_DIR.mkdir(parents=True, exist_ok=True)
-ENGINE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+ROOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Active signal journal written by engine.signal_journal / SignalBus / StrategyRunner.
-SIGNAL_JOURNAL_FILE = ENGINE_DATA_DIR / "signal_journal.jsonl"
+SIGNAL_JOURNAL_FILE = ROOT_DATA_DIR / "signal_journal.jsonl"
 
 # Separate append-only validated shadow/counterfactual result store.
 # We do NOT rewrite signal_journal.jsonl in this first safe implementation.
@@ -40,6 +40,7 @@ VALIDATABLE_DECISIONS = {
     "rejected",
     "expired",
     "shadow",
+    "shadow_only",
 }
 
 

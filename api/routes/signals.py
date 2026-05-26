@@ -72,6 +72,11 @@ def get_archive(request: Request, limit: int = 100):
 def list_signals(request: Request, trading_mode: Optional[str] = None, status: Optional[str] = None):
     """Return signals, optionally filtered by trading_mode and/or status."""
     signals = list(bus.queue.values())
+    try:
+        bus.purge_stale()
+    except Exception:
+        pass
+
     if trading_mode:
         signals = [s for s in signals if s.get("trading_mode") == trading_mode]
     if status:
