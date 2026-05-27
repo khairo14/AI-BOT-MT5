@@ -696,6 +696,7 @@ class TradeExecutionService:
                 return lot
 
             current_balance = float(account["balance"])
+            current_credit = float(account.get("credit") or 0.0)
             symbol_info = self.client.get_symbol_info(signal["symbol"])
             sl = _safe_float(signal.get("sl"), 0.0)
             entry = _safe_float(entry_raw, 0.0)
@@ -705,6 +706,7 @@ class TradeExecutionService:
 
             new_lot = risk_manager.calculate_lot_size(
                 balance=current_balance,
+                credit=current_credit,
                 entry=entry,
                 sl=sl,
                 symbol=signal["symbol"],

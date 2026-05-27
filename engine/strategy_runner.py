@@ -469,6 +469,7 @@ class StrategyRunner:
             return None
 
         balance = account.get("balance", 0.0)
+        credit = account.get("credit", 0.0)
         self.risk_manager.update_balance(balance)
 
         sl_ok, _err = self.risk_manager.validate_sl_tp(
@@ -541,12 +542,15 @@ class StrategyRunner:
 
         lot = self.risk_manager.calculate_lot_size(
             balance=balance,
+            credit=credit,
             entry=sig.entry_price,
             sl=sig.sl_price,
             symbol=symbol,
-            contract_size=sym_info.get("contract_size", 100_000),
             tick_value=sym_info.get("pip_value", 1.0),
             tick_size=sym_info.get("tick_size", 0.00001),
+            min_lot=sym_info.get("min_lot", 0.01),
+            max_lot=sym_info.get("max_lot", 100.0),
+            lot_step=sym_info.get("lot_step", 0.01),
         )
 
         if lot <= 0:

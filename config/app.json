@@ -12,9 +12,9 @@
     }
   },
   "execution_mode": {
-    "scalping": "manual",
-    "day_trading": "manual",
-    "swing": "manual"
+    "scalping": "auto",
+    "day_trading": "auto",
+    "swing": "auto"
   },
   "ea_enabled": true,
   "bot_magic": 20260318,

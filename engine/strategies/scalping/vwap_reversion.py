@@ -32,7 +32,7 @@ from engine.strategies.base_strategy import BaseStrategy, Signal, StrategyResult
 
 DEFAULT_PARAMS = {
     # ── VWAP bands ──────────────────────────────────────────────────────────
-    "sigma_entry": 1.2,           # entry when price is this many stds from VWAP
+    "sigma_entry": 1.6,           # entry when price is this many stds from VWAP
     "sigma_sl": 2.5,              # stop-loss at this many stds from VWAP
     "vwap_std_window": 20,        # rolling window for VWAP std deviation (M5 bars)
 
@@ -43,7 +43,7 @@ DEFAULT_PARAMS = {
 
     # ── Filters ─────────────────────────────────────────────────────────────
     "min_rr_to_vwap": 0.6,        # minimum R:R to VWAP to take the trade
-    "atr_vol_filter": 1.2,        # ATR% above which trades are blocked (adaptive vol filter)
+    "atr_vol_filter": 1.8,        # ATR% above which trades are blocked (adaptive vol filter)
     "atr_period": 14,             # period for ATR calculation
     "min_volume_ratio": 0.5,      # last bar volume / 20-bar avg — filter low-liquidity
     "max_spread_pips": 3.0,       # max allowed spread (enforced by strategy_runner)

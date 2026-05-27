@@ -16,6 +16,13 @@ from loguru import logger
 from engine.mt5_client import MT5Client
 from engine.notification_manager import notification_manager
 
+CREDIT_RISK_UTILIZATION = 0.75
+
+def effective_risk_capital(balance: float, credit: float = 0.0) -> float:
+    balance = max(float(balance or 0.0), 0.0)
+    credit = max(float(credit or 0.0), 0.0)
+    return balance + (credit * CREDIT_RISK_UTILIZATION)
+
 # IMPROVE-2: read from config/app.json at import time so the magic number is
 # configurable without any source-code changes. Fallback keeps backward compat.
 def _load_bot_magic() -> int:
@@ -184,8 +191,11 @@ class OrderManager:
                 return False, "No account info available for final risk audit"
 
             balance = float(acct.get("balance") or 0)
-            if balance <= 0:
-                return False, "Invalid account balance for final risk audit"
+            credit = float(acct.get("credit") or 0)
+            risk_capital = effective_risk_capital(balance, credit)
+
+            if risk_capital <= 0:
+                return False, "Invalid effective risk capital for final risk audit"
 
             order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
 
@@ -202,7 +212,7 @@ class OrderManager:
                 return False, f"MT5 order_calc_profit failed: {_mt5_last_error()}"
 
             money_risk = abs(float(pnl_at_sl))
-            actual_risk_pct = (money_risk / balance) * 100.0
+            actual_risk_pct = (money_risk / risk_capital) * 100.0
 
             try:
                 from api.runner_loop import _risk_manager
@@ -216,14 +226,16 @@ class OrderManager:
                 return False, (
                     f"Final risk audit failed | {symbol} {direction} | "
                     f"entry={entry_price} sl={sl_price} volume={volume} | "
-                    f"risk=${money_risk:.2f} / balance=${balance:.2f} "
+                    f"risk=${money_risk:.2f} / effective_capital=${risk_capital:.2f} "
+                    f"(balance=${balance:.2f}, credit=${credit:.2f}, credit_used=75%) "
                     f"({actual_risk_pct:.2f}% > max {max_risk_pct:.2f}%)"
                 )
 
             return True, (
                 f"Final risk audit OK | {symbol} {direction} | "
                 f"entry={entry_price} sl={sl_price} volume={volume} | "
-                f"risk=${money_risk:.2f} / balance=${balance:.2f} "
+                f"risk=${money_risk:.2f} / effective_capital=${risk_capital:.2f} "
+                f"(balance=${balance:.2f}, credit=${credit:.2f}, credit_used=75%) "
                 f"({actual_risk_pct:.2f}% <= max {max_risk_pct:.2f}%)"
             )
 

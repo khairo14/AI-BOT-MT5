@@ -26,6 +26,7 @@ from loguru import logger
 
 from engine.mt5_client import MT5Client
 from engine.order_manager import OrderManager
+from engine.trade_lifecycle import get_trade_state
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
@@ -243,14 +244,49 @@ class TrailingStopManager:
                 # Symbol-level overrides — escape hatch for truly exceptional setups
                 sym_override = mode_cfg.get("symbol_overrides", {}).get(symbol, {})
 
-                # Calculate SL distance in price units (not pips)
+                # Calculate original SL distance in price units.
+                # For R-based trailing, DO NOT use current broker SL after BE,
+                # because BE makes abs(entry - current_sl) == 0.
                 _sl_dist = abs(entry_price - current_sl) if current_sl > 0 else 0.0
-                
-                # If SL is 0 (no stop set), use a percentage-based fallback
-                if _sl_dist == 0:
-                    _sl_dist = entry_price * 0.01  # 1% fallback
-                    logger.debug(f"TrailingStop: SL=0 for #{ticket}, using 1% fallback")
 
+                if current_sl <= 0:
+                    _sl_dist = entry_price * 0.01
+                    logger.warning(
+                        f"TrailingStop: missing broker SL for #{ticket}, using 1% emergency fallback"
+                    )
+
+                elif _sl_dist == 0:
+                    # SL is at break-even. Restore original risk from persistent trade state.
+                    try:
+                        lifecycle = get_trade_state(ticket)
+                        ts = lifecycle.state or {}
+
+                        original_sl = float(
+                            ts.get("executed_sl")
+                            or ts.get("original_sl")
+                            or ts.get("sl")
+                            or 0.0
+                        )
+
+                        if original_sl > 0 and original_sl != entry_price:
+                            _sl_dist = abs(entry_price - original_sl)
+                            logger.debug(
+                                f"TrailingStop: #{ticket} SL at BE; using original SL distance "
+                                f"entry={entry_price:.5f} original_sl={original_sl:.5f} "
+                                f"risk_dist={_sl_dist:.5f}"
+                            )
+                        else:
+                            logger.warning(
+                                f"TrailingStop: #{ticket} SL at BE but original SL unavailable; "
+                                f"cannot calculate R-based trailing safely"
+                            )
+                            continue
+
+                    except Exception as exc:
+                        logger.warning(
+                            f"TrailingStop: #{ticket} failed to load original SL from trade_state: {exc}"
+                        )
+                        continue
                 # ── Activation distance (when to start trailing) ────────────────────
                 # Priority: 1. activation_price (fixed pips), 2. activation_r_factor (dynamic)
                 if "activation_price" in sym_override:

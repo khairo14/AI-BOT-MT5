@@ -2060,6 +2060,138 @@
           "session_close": 21
         }
       }
+    },
+    "NZDCHF": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.0,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.2,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0,
+      "session_open": 2,
+      "session_close": 0,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 50,
+          "atr_period": 20,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.8,
+          "tp_rr": 3.0,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0,
+          "session_open": 7,
+          "session_close": 22
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 2,
+          "session_close": 0
+        }
+      }
+    },
+    "US500Cash": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.8,
+      "tp_rr": 3.0,
+      "min_touches": 3,
+      "retest_mode": true,
+      "vol_confirm_mult": 0,
+      "rsi_confirm": 55,
+      "atr_vol_filter": 0,
+      "session_open": 0,
+      "session_close": 22,
+      "by_regime": {
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 52,
+          "atr_vol_filter": 0.6,
+          "session_open": 0,
+          "session_close": 0
+        },
+        "trending_bear": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.0,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.2,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0,
+          "session_open": 2,
+          "session_close": 0
+        }
+      }
+    },
+    "CADJPY": {
+      "lookback_bars": 70,
+      "atr_period": 14,
+      "sl_buffer_atr": 0.3,
+      "tp1_rr": 1.8,
+      "tp_rr": 2.0,
+      "min_touches": 2,
+      "retest_mode": true,
+      "vol_confirm_mult": 1.0,
+      "rsi_confirm": 48,
+      "atr_vol_filter": 0.8,
+      "session_open": 2,
+      "session_close": 21,
+      "by_regime": {
+        "trending_bear": {
+          "lookback_bars": 50,
+          "atr_period": 10,
+          "sl_buffer_atr": 0.5,
+          "tp1_rr": 1.8,
+          "tp_rr": 2.5,
+          "min_touches": 3,
+          "retest_mode": true,
+          "vol_confirm_mult": 0,
+          "rsi_confirm": 55,
+          "atr_vol_filter": 0.8,
+          "session_open": 2,
+          "session_close": 0
+        },
+        "trending_bull": {
+          "lookback_bars": 70,
+          "atr_period": 14,
+          "sl_buffer_atr": 0.3,
+          "tp1_rr": 1.8,
+          "tp_rr": 2.0,
+          "min_touches": 2,
+          "retest_mode": true,
+          "vol_confirm_mult": 1.0,
+          "rsi_confirm": 48,
+          "atr_vol_filter": 0.8,
+          "session_open": 2,
+          "session_close": 21
+        }
+      }
     }
   },
   "fibonacci_rsi": {
@@ -4147,6 +4279,45 @@
           "tp_rr": 3.0
         }
       }
+    },
+    "EURGBP": {
+      "ema_fast": 13,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.5,
+      "tp1_rr": 1.5,
+      "tp_rr": 3.0,
+      "by_regime": {
+        "trending_bull": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        },
+        "trending_bear": {
+          "ema_fast": 13,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.5,
+          "tp1_rr": 1.5,
+          "tp_rr": 3.0
+        }
+      }
+    },
+    "CADJPY": {
+      "ema_fast": 25,
+      "ema_slow": 75,
+      "sl_atr_mult": 1.0,
+      "tp1_rr": 1.5,
+      "tp_rr": 2.5,
+      "by_regime": {
+        "unknown": {
+          "ema_fast": 25,
+          "ema_slow": 75,
+          "sl_atr_mult": 1.0,
+          "tp1_rr": 1.5,
+          "tp_rr": 2.5
+        }
+      }
     }
   },
   "ema_scalp": {
@@ -4289,15 +4460,15 @@
       }
     },
     "AUDCAD": {
-      "ema_fast": 10,
+      "ema_fast": 13,
       "ema_slow": 26,
-      "rsi_min": 52,
+      "rsi_min": 50,
       "rsi_max": 60,
-      "atr_sl_mult": 1.5,
-      "adx_min": 20,
-      "ema_sep_mult": 0.1,
-      "max_spread_pips": 5.0,
-      "rr": 2.5,
+      "atr_sl_mult": 2.0,
+      "adx_min": 15,
+      "ema_sep_mult": 0.05,
+      "max_spread_pips": 3.0,
+      "rr": 1.5,
       "by_regime": {
         "quiet": {
           "ema_fast": 10,
@@ -4309,6 +4480,17 @@
           "ema_sep_mult": 0.05,
           "max_spread_pips": 5.0,
           "rr": 2.0
+        },
+        "unknown": {
+          "ema_fast": 10,
+          "ema_slow": 21,
+          "rsi_min": 45,
+          "rsi_max": 65,
+          "atr_sl_mult": 1.5,
+          "adx_min": 15,
+          "ema_sep_mult": 0.2,
+          "max_spread_pips": 3.0,
+          "rr": 1.5
         }
       }
     },

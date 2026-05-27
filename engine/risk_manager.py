@@ -22,6 +22,19 @@ CONFIG_PATH = Path(__file__).parent.parent / "config" / "risk.json"
 _STATE_PATH = Path(__file__).parent.parent / "data" / "risk_state.json"
 _PRESETS_PATH = Path(__file__).parent.parent / "config" / "risk_presets.json"
 
+CREDIT_RISK_UTILIZATION = 0.75
+
+def effective_risk_capital(balance: float, credit: float = 0.0) -> float:
+    """
+    Risk capital used for sizing/audit.
+
+    Uses full balance plus 75% of broker credit/bonus.
+    This lets EVOTRADE utilize allowed broker credit without treating it as
+    fully-owned capital.
+    """
+    balance = max(float(balance or 0.0), 0.0)
+    credit = max(float(credit or 0.0), 0.0)
+    return balance + (credit * CREDIT_RISK_UTILIZATION)
 
 def _load_config() -> dict:
     with open(CONFIG_PATH, "r") as f:
@@ -235,10 +248,10 @@ class RiskManager:
         self,
         # ── MT5 symbol_info style (preferred) ───────────────────────────
         balance: Optional[float] = None,
+        credit: float = 0.0,
         entry: Optional[float] = None,
         sl: Optional[float] = None,
         symbol: Optional[str] = None,
-        contract_size: float = 100_000,
         tick_value: float = 1.0,
         tick_size: float = 0.00001,
         # ── legacy pip-based style (kept for back-compat) ────────────────
@@ -279,7 +292,8 @@ class RiskManager:
         max_risk_pct = self._config["max_risk_per_trade_pct"]
         risk_pct = min(risk_pct, max_risk_pct)
 
-        risk_amount = _balance * (risk_pct / 100)
+        _effective_balance = effective_risk_capital(float(_balance), credit)
+        risk_amount = _effective_balance * (risk_pct / 100)
 
         # Determine value-per-tick
         if pip_value is not None and pip_size is not None:
@@ -336,7 +350,8 @@ class RiskManager:
         lot = min(lot, max_lot)
 
         logger.debug(
-            f"Lot size | Balance: {_balance} | Risk: {risk_pct}% "
+            f"Lot size | Balance: {_balance} | Credit: {credit} | "
+            f"Effective risk capital: {_effective_balance:.2f} | Risk: {risk_pct}% "
             f"({risk_amount:.2f}) | SL ticks: {sl_ticks:.1f} | Lots: {lot}"
         )
         return lot

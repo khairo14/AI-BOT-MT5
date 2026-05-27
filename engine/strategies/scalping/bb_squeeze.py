@@ -28,7 +28,7 @@ DEFAULT_PARAMS = {
     "tp1_atr_mult": 1.5,         # partial close at 1.5×ATR
     "tp_atr_mult": 2.5,          # tp2 (full close) at 2.5×ATR
     "max_spread_pips": 4.0,
-    "vol_confirm_mult": 1.2,     # volume must exceed 20-bar avg × this (0 = disabled)
+    "vol_confirm_mult": 1.10,     # volume must exceed 20-bar avg × this (0 = disabled)
     # ADX trend-strength filter — blocks breakouts without momentum
     "adx_period": 14,
     "adx_min": 18,               # require ADX > this before allowing entry

@@ -36,7 +36,7 @@ DEFAULT_PARAMS = {
     "tp1_rr": 1.5,           # partial close at 1.5R
     "rr": 2.5,               # full close at 2.5R
     "max_spread_pips": 2.0,
-    "vol_confirm_mult": 1.2,  # volume must exceed 20-bar avg × this (0 = disabled)
+    "vol_confirm_mult": 1.0,  # volume must exceed 20-bar avg × this (0 = disabled)
     "adx_period": 14,
     "adx_min": 18,
 }

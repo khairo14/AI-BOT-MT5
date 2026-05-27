@@ -29,16 +29,16 @@ DEFAULT_PARAMS = {
     "atr_sl_mult": 1.5,          # SL = ATR × this; optimizer searches [1.0, 1.5, 2.0, 2.5]
     "tp1_rr": 1.2,               # partial close at 1.2R
     "rr": 2.0,                   # tp2 (full close) at 2.0R
-    "vol_confirm_mult": 1.3,     # volume must exceed 50-bar avg × this (0 = disabled)
+    "vol_confirm_mult": 1.10,     # volume must exceed 50-bar avg × this (0 = disabled)
     "crossover_window": 3,       # look back N bars for a valid crossover
     # ADX trend-strength filter — blocks entries in choppy/ranging conditions
     "adx_period": 14,
-    "adx_min": 20,               # require ADX > this before allowing entry
+    "adx_min": 18,               # require ADX > this before allowing entry
     # EMA separation filter — crossover must have real momentum, not just noise
     # Minimum gap between fast and slow EMA expressed as ATR fraction
     "ema_sep_mult": 0.1,         # require |ema_fast - ema_slow| > ATR × this
     "sell_rsi_min": 35,
-    "sell_rsi_max": 60,
+    "sell_rsi_max": 65,
 }
 
 

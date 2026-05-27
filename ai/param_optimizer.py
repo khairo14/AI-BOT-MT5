@@ -455,6 +455,10 @@ def _classify_bar_regime(df_slice: pd.DataFrame, symbol: str, timeframe: str = "
             or getattr(rc, "_classify_raw", None)
         )
 
+        # RegimeClassifier singleton support
+        if fn is None and hasattr(rc, "regime_classifier"):
+            fn = getattr(rc.regime_classifier, "classify", None)
+
         if fn is None:
             logger.debug("Optimizer: no regime classifier function found")
             return "unknown"
