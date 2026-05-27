@@ -21,9 +21,9 @@ DEFAULT_PARAMS = {
     "macd_signal": 9,
     "atr_period": 14,
     "sl_atr_mult": 1.2,           # SL = max(ATR × this, |close − EMA20| × 1.5)
-    "max_entry_atr_dist": 1.0,    # skip if price is already >N×ATR from EMA20 (stale bounce)
+    "max_entry_atr_dist": 1.3,    # skip if price is already >N×ATR from EMA20 (stale bounce)
     "tp1_rr": 1.5,   # must be ≥ risk_reward_min 1.5 (day_trading)
-    "tp2_rr": 2.0,
+    "tp2_rr": 2.5,
     "vol_confirm_mult": 1.2,  # volume must exceed 20-bar avg × this (0 = disabled)
 }
 

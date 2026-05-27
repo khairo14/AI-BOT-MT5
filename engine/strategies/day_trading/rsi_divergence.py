@@ -21,6 +21,8 @@ DEFAULT_PARAMS = {
     "tp_rr": 1.5,               # tp1 (partial close)
     "tp2_rr": 2.5,              # tp2 (full close)
     "max_spread_pips": 2.0,     # gate for GOLD/GER40/GBPJPY wide-spread conditions
+    "pivot_window": 2,
+    "vol_confirm_mult": 1.1,
 }
 
 
@@ -48,25 +50,44 @@ class RSIDivergence(BaseStrategy):
         price_slice = close.iloc[-lb:]
         rsi_slice   = rsi.iloc[-lb:]
 
-        # -- Bullish divergence: price lower low, RSI higher low --
-        price_low_idx  = price_slice.idxmin()
-        price_low_val  = price_slice.min()
-        price_prev_low = price_slice[:price_slice.index.get_loc(price_low_idx)].min() \
-            if price_slice.index.get_loc(price_low_idx) > 0 else None
+        # -- Swing pivot scanner (2-bar window each side) --
+        def _swing_lows(s, w=2):
+            idxs = []
+            arr = s.to_numpy()
+            for i in range(w, len(arr) - w):
+                if all(arr[i] <= arr[i-j] for j in range(1, w+1)) and \
+                all(arr[i] <= arr[i+j] for j in range(1, w+1)):
+                    idxs.append(i)
+            return idxs
 
-        rsi_at_low     = rsi_slice.loc[price_low_idx] if price_low_idx in rsi_slice.index else None
-        rsi_prev_low   = rsi_slice[:rsi_slice.index.get_loc(price_low_idx)].min() \
-            if rsi_at_low is not None and rsi_slice.index.get_loc(price_low_idx) > 0 else None
+        def _swing_highs(s, w=2):
+            idxs = []
+            arr = s.to_numpy()
+            for i in range(w, len(arr) - w):
+                if all(arr[i] >= arr[i-j] for j in range(1, w+1)) and \
+                all(arr[i] >= arr[i+j] for j in range(1, w+1)):
+                    idxs.append(i)
+            return idxs
 
-        # -- Bearish divergence: price higher high, RSI lower high --
-        price_high_idx = price_slice.idxmax()
-        price_high_val = price_slice.max()
-        price_prev_high = price_slice[:price_slice.index.get_loc(price_high_idx)].max() \
-            if price_slice.index.get_loc(price_high_idx) > 0 else None
+        price_arr = price_slice.to_numpy()
+        rsi_arr   = rsi_slice.to_numpy()
 
-        rsi_at_high    = rsi_slice.loc[price_high_idx] if price_high_idx in rsi_slice.index else None
-        rsi_prev_high  = rsi_slice[:rsi_slice.index.get_loc(price_high_idx)].max() \
-            if rsi_at_high is not None and rsi_slice.index.get_loc(price_high_idx) > 0 else None
+        low_pivots  = _swing_lows(price_slice)
+        high_pivots = _swing_highs(price_slice)
+
+        # Bullish: need at least 2 swing lows — most recent low < prior low, RSI reversed
+        bullish_div = False
+        if len(low_pivots) >= 2:
+            i2, i1 = low_pivots[-1], low_pivots[-2]   # i2 is more recent
+            if price_arr[i2] < price_arr[i1] and rsi_arr[i2] > rsi_arr[i1]:
+                bullish_div = True
+
+        # Bearish: need at least 2 swing highs — most recent high > prior high, RSI reversed
+        bearish_div = False
+        if len(high_pivots) >= 2:
+            i2, i1 = high_pivots[-1], high_pivots[-2]
+            if price_arr[i2] > price_arr[i1] and rsi_arr[i2] < rsi_arr[i1]:
+                bearish_div = True
 
         curr_close = close.iloc[-1]
         curr_rsi   = rsi.iloc[-1]
@@ -109,7 +130,15 @@ class RSIDivergence(BaseStrategy):
             "atr": round(curr_atr, 5),
         }
 
-        if bullish_div and rsi_cross_up:
+        vol_ok = True
+        vol_mult = p.get("vol_confirm_mult", 1.1)
+        if vol_mult > 0 and "volume" in df.columns and len(df) >= 21:
+            curr_vol = df["volume"].iloc[-1]
+            avg_vol  = df["volume"].iloc[-21:-1].mean()
+            if avg_vol > 0:
+                vol_ok = curr_vol > avg_vol * vol_mult
+                
+        if bullish_div and rsi_cross_up and vol_ok:
             # SL is ATR-based from current entry price — anchoring to price_low_val
             # inflated sl_dist when price had already rallied far above the divergence
             # low by the time the RSI-50 cross fired, making TPs unrealistically far.
@@ -135,7 +164,7 @@ class RSIDivergence(BaseStrategy):
                 indicators=indicators,
             )
 
-        if bearish_div and rsi_cross_down:
+        if bearish_div and rsi_cross_down and vol_ok:
             sl_dist = curr_atr * p["sl_atr_mult"]
             sl_dist = max(sl_dist, self._min_sl_dist(curr_close))
             sl  = round(curr_close + sl_dist, 5)
